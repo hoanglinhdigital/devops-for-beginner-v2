@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 9: Push image lên ECR &amp; chạy container trên ECS Fargate – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 9: Push image lên ECR &amp; chạy container trên ECS Fargate</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo ECR repository, build image từ Dockerfile của Lab 3, đánh tag và push lên ECR.</li>
+    <li>Tạo ECS cluster (Fargate), task definition sử dụng image trên ECR.</li>
+    <li>Chạy một task Fargate có Public IP và truy cập website qua browser.</li>
+    <li>Ôn lại các khái niệm Docker, ECR, ECS – chuẩn bị cho các section CI/CD (deploy lên ECS bằng pipeline).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local / EC2</b><br/>docker build · tag · push"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:44px;height:44px;'/><br/><b>ECR</b><br/>my-httpd:1.0"]
+          subgraph VPC["Default VPC – public subnet"]
+              subgraph Cluster["ECS cluster: docker-lab-cluster"]
+                  Task["<img src='../../assets/aws-svg/Fargate.svg' style='width:44px;height:44px;'/><br/><b>Task (Fargate)</b><br/>httpd :80 · Public IP"]
+              end
+          end
+          CW["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:36px;height:36px;'/><br/>CloudWatch Logs"]
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/>Browser"]
+      PC -->|"docker push"| ECR
+      ECR -->|"pull image"| Task
+      Task -.->|"log"| CW
+      User -->|"http://&lt;task-public-ip&gt;"| Task
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3 (thư mục <code>lab3_dockerfile</code> với <code>Dockerfile</code> và <code>web/index.html</code>).</li>
+    <li>AWS CLI v2 đã cấu hình profile (Section 4/5), IAM user có quyền ECR (ví dụ policy <code>AmazonEC2ContainerRegistryPowerUser</code>) và ECS.
+      Nếu làm trên EC2 <code>docker-lab-server</code>: AL2023 có sẵn AWS CLI, hãy gắn IAM Role có policy <code>AmazonEC2ContainerRegistryPowerUser</code> cho instance thay vì lưu access key.</li>
+    <li>Biết <strong>AWS Account ID</strong> (12 chữ số) – xem ở góc phải trên của AWS Console hoặc lệnh <code>aws sts get-caller-identity</code>.</li>
+    <li>Region thực hành: <code>ap-southeast-1</code> (Singapore). Trên Windows, chạy các lệnh trong <strong>Git Bash</strong>.</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab9_ecr_ecs/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo ECR repository</strong>
+        <p>Vào <strong>Amazon ECR → Private registry → Repositories</strong>, tạo repository với các thông số:</p>
+        <ul class="feature-list">
+          <li>Repository name: <code>my-httpd</code></li>
+          <li>Image tag mutability: <strong>Mutable</strong></li>
+          <li>Encryption: <strong>AES-256</strong> (mặc định)</li>
+        </ul>
+        <p>Copy <strong>URI</strong> của repository, có dạng <code>&lt;AWS_ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/my-httpd</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Khai báo biến &amp; kiểm tra AWS CLI</strong>
+        <p>Thay <code>123456789012</code> bằng Account ID của bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">export AWS_REGION=ap-southeast-1
+export AWS_ACCOUNT_ID=123456789012
+export ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+aws sts get-caller-identity</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Build image</strong>
+        <p>Di chuyển vào thư mục Lab 3 và build. <code>--platform linux/amd64</code> đảm bảo image chạy được trên Fargate X86_64, kể cả khi bạn build trên Mac chip Apple Silicon (ARM):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd lab3_dockerfile
+docker build --platform linux/amd64 -t my-httpd-image:1.0 .</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Đăng nhập Docker vào ECR</strong>
+        <p>AWS CLI lấy token tạm thời (hiệu lực 12 giờ) và truyền cho <code>docker login</code>:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+Login Succeeded</code></pre>
+        <p class="code-note">💡 Nút <strong>View push commands</strong> trong trang repository của ECR Console hiển thị sẵn các lệnh login/build/tag/push cho đúng repository của bạn.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Đánh tag &amp; push image lên ECR</strong>
+        <p>Tên image phải chứa địa chỉ registry để Docker biết push tới đâu:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker tag my-httpd-image:1.0 ${ECR_REGISTRY}/my-httpd:1.0
+docker images
+docker push ${ECR_REGISTRY}/my-httpd:1.0</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr list-images --repository-name my-httpd --region ${AWS_REGION}</code></pre>
+        <p>Mở repository <code>my-httpd</code> trên ECR Console, bạn sẽ thấy image tag <code>1.0</code> cùng dung lượng và digest (<code>sha256:...</code>). Copy <strong>Image URI</strong> để dùng ở Bước 8.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Tạo Security Group cho task</strong>
+        <p>Tạo Security Group <code>ecs-task-sg</code> trong Default VPC với inbound rule:</p>
+        <ul class="feature-list">
+          <li>HTTP (TCP 80) – Source: <strong>My IP</strong></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Tạo ECS cluster</strong>
+        <p>Vào <strong>Amazon ECS → Clusters</strong>, tạo cluster với các thông số:</p>
+        <ul class="feature-list">
+          <li>Cluster name: <code>docker-lab-cluster</code></li>
+          <li>Infrastructure: chỉ chọn <strong>AWS Fargate (serverless)</strong></li>
+          <li>Monitoring: để mặc định</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Tạo Task Definition</strong>
+        <p>Vào <strong>Amazon ECS → Task definitions</strong>, tạo task definition mới với các thông số:</p>
+        <ul class="feature-list">
+          <li>Task definition family: <code>my-httpd-task</code></li>
+          <li>Launch type: <strong>AWS Fargate</strong></li>
+          <li>Operating system/Architecture: <strong>Linux/X86_64</strong></li>
+          <li>Task size: CPU <strong>.25 vCPU</strong>, Memory <strong>.5 GB</strong></li>
+          <li>Task execution role: <strong>Create new role</strong> (ECS tạo role <code>ecsTaskExecutionRole</code> có quyền pull image từ ECR và ghi log CloudWatch)</li>
+          <li>Container: Name <code>httpd</code>, Image URI <code>&lt;AWS_ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/my-httpd:1.0</code>, Essential: <strong>Yes</strong></li>
+          <li>Port mappings: Container port <code>80</code>, Protocol <strong>TCP</strong>, App protocol <strong>HTTP</strong></li>
+          <li>Log collection: <strong>Use log collection</strong> → Amazon CloudWatch (mặc định)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Chạy task</strong>
+        <p>Vào cluster <code>docker-lab-cluster</code> → tab <strong>Tasks</strong> → <strong>Run new task</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Compute options: <strong>Launch type</strong> = <strong>FARGATE</strong>, Platform version: LATEST</li>
+          <li>Application type: <strong>Task</strong></li>
+          <li>Task definition: Family <code>my-httpd-task</code>, Revision: mới nhất; Desired tasks: <code>1</code></li>
+          <li>Networking: Default VPC, chọn các <strong>public subnet</strong>; Security group: <code>ecs-task-sg</code> (bỏ Security Group default)</li>
+          <li>Public IP: <strong>Turned on</strong> (để task pull image từ ECR qua Internet và để bạn truy cập từ browser)</li>
+        </ul>
+        <p>Đợi trạng thái task chuyển từ <code>PROVISIONING</code> → <code>PENDING</code> → <code>RUNNING</code> (khoảng 1 phút).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 10: Truy cập website &amp; xem log</strong>
+        <p>Mở task vừa chạy, tab <strong>Configuration</strong> → copy <strong>Public IP</strong>. Truy cập <code>http://&lt;task-public-ip&gt;</code> trên browser: trang <strong>Welcome to DevOps on AWS – Docker Lab</strong> – cùng image với Lab 3 nhưng giờ chạy trên AWS.</p>
+        <p>Tab <strong>Logs</strong> của task hiển thị log của httpd (được đẩy lên CloudWatch Logs, log group <code>/ecs/my-httpd-task</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 11 (tuỳ chọn): Deploy version 2.0</strong>
+        <p>Sửa <code>web/index.html</code> (đổi <code>v1.0</code> → <code>v2.0</code>), build và push tag mới:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build --platform linux/amd64 -t my-httpd-image:2.0 .
+docker tag my-httpd-image:2.0 ${ECR_REGISTRY}/my-httpd:2.0
+docker push ${ECR_REGISTRY}/my-httpd:2.0</code></pre>
+        <p>Tạo <strong>revision mới</strong> của task definition <code>my-httpd-task</code> với Image URI tag <code>2.0</code>, chạy task mới từ revision này rồi <strong>Stop</strong> task cũ. Quy trình thủ công này sẽ được tự động hoá bằng ECS Service + pipeline CI/CD ở các section sau.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Repository <code>my-httpd</code> trên ECR có image tag <code>1.0</code> (và <code>2.0</code> nếu làm Bước 11).</li>
+      <li>Task trong cluster <code>docker-lab-cluster</code> ở trạng thái <strong>RUNNING</strong>.</li>
+      <li>Truy cập <code>http://&lt;task-public-ip&gt;</code> hiển thị trang web của Lab 3.</li>
+      <li>Thấy access log của httpd trong tab Logs / CloudWatch Logs.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>no basic auth credentials</code> / <code>denied: Your authorization token has expired</code> khi push</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa <code>docker login</code> vào ECR, đăng nhập sai region/registry, hoặc token đã quá 12 giờ.<br/><strong>Giải pháp:</strong> Chạy lại lệnh ở Bước 4, kiểm tra biến <code>ECR_REGISTRY</code> đúng Account ID và region.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>name unknown: The repository with name 'my-httpd' does not exist in the registry</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Repository chưa được tạo, hoặc tạo ở region khác <code>ap-southeast-1</code>.<br/><strong>Giải pháp:</strong> Kiểm tra region trên Console, tạo repository như Bước 1.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Task dừng với lỗi <code>CannotPullContainerError</code> / <code>ResourceInitializationError: unable to pull secrets or registry auth</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Task không có Public IP (hoặc chạy ở private subnet không có NAT Gateway) nên không kết nối được ECR; hoặc Image URI sai tag.<br/><strong>Giải pháp:</strong> Chạy lại task với <strong>Public IP: Turned on</strong> ở public subnet; kiểm tra Image URI trong task definition khớp với tag trên ECR.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Task dừng ngay, log có <code>exec format error</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Image build cho <code>arm64</code> (Mac Apple Silicon) nhưng task definition khai báo <code>X86_64</code>.<br/><strong>Giải pháp:</strong> Build lại với <code>--platform linux/amd64</code> và push lại; hoặc đổi task definition sang <code>Linux/ARM64</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Task RUNNING nhưng browser không truy cập được</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group <code>ecs-task-sg</code> chưa mở port 80 cho IP của bạn, hoặc truy cập bằng <code>https://</code>.<br/><strong>Giải pháp:</strong> Kiểm tra inbound rule; truy cập bằng <code>http://</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Task Fargate và Public IPv4 tính phí theo thời gian chạy</strong>, ECR tính phí theo dung lượng lưu trữ. Dọn dẹp ngay sau khi học xong.</div>
+  <ol class="step-list">
+    <li><div><p>Cluster <code>docker-lab-cluster</code> → tab <strong>Tasks</strong> → chọn tất cả task đang chạy → <strong>Stop</strong>.</p></div></li>
+    <li><div><p>Xoá cluster <code>docker-lab-cluster</code>.</p></div></li>
+    <li><div><p>Task definitions → <code>my-httpd-task</code> → <strong>Deregister</strong> tất cả revision, sau đó <strong>Delete</strong>.</p></div></li>
+    <li><div><p>Xoá ECR repository <code>my-httpd</code> (xoá kèm toàn bộ image bên trong).</p></div></li>
+    <li><div><p>Xoá Security Group <code>ecs-task-sg</code> và CloudWatch log group <code>/ecs/my-httpd-task</code>.</p></div></li>
+    <li><div><p>Xoá image local:</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">docker rmi my-httpd-image:1.0 my-httpd-image:2.0 ${ECR_REGISTRY}/my-httpd:1.0 ${ECR_REGISTRY}/my-httpd:2.0
+docker logout ${ECR_REGISTRY}</code></pre></div></li>
+  </ol>
+  <p class="body-text">IAM role <code>ecsTaskExecutionRole</code> không tính phí và sẽ được dùng lại ở các section ECS/CI-CD sau, có thể giữ lại.</p>
+
+</body>
+</html>

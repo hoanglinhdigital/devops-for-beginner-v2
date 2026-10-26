@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu GitOps – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CICD for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu GitOps</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>GitOps</strong> là phương pháp quản trị hệ thống và triển khai phần mềm mà trong đó <strong>Git đóng vai trò "nguồn sự thật duy nhất"</strong> (Single Source of Truth).
+    Nói cách khác, mọi trạng thái mong muốn của hệ thống (hạ tầng, cấu hình, ứng dụng) đều được khai báo trong Git; một công cụ tự động sẽ làm cho hệ thống thực tế "khớp" với Git.
+  </p>
+
+  <h2 class="section-heading">Cách thức hoạt động</h2>
+  <p class="body-text">
+    GitOps dựa trên mô hình <strong>khai báo (Declarative)</strong>: bạn không ra lệnh <em>"hãy tạo cho tôi 3 máy chủ"</em>, mà viết file cấu hình định nghĩa <em>"hệ thống này có 3 máy chủ"</em>.
+    Quy trình diễn ra như sau:
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      Declare["📝 <b>1. Khai báo cấu hình</b><br/>IaC + manifest trong Git"]
+      Compare["🔍 <b>2. So sánh trạng thái</b><br/>Agent (ArgoCD/Flux) so sánh Git vs thực tế"]
+      Sync["🔄 <b>3. Tự động đồng bộ</b><br/>điều chỉnh hệ thống khớp với Git"]
+      Declare --> Compare --> Sync
+  </div>
+  <p class="arch-caption">3 bước của GitOps: khai báo trạng thái mong muốn trong Git → agent liên tục so sánh → tự điều chỉnh hệ thống thực tế cho khớp.</p>
+  <ul class="feature-list">
+    <li><strong>Khai báo cấu hình:</strong> mọi thiết lập hạ tầng (Infrastructure as Code) và ứng dụng đều được lưu trong Git.</li>
+    <li><strong>So sánh trạng thái:</strong> một <em>Agent</em> (thường là <strong>ArgoCD</strong> hoặc <strong>Flux</strong>) liên tục so sánh trạng thái trên Git với trạng thái thực tế đang chạy.</li>
+    <li><strong>Tự động đồng bộ (Reconciliation):</strong> nếu có sự khác biệt (vd bạn sửa số máy chủ từ 3 lên 5 trên Git), agent sẽ tự điều chỉnh hệ thống thực tế cho khớp với Git.</li>
+  </ul>
+
+  <h2 class="section-heading">Tại sao GitOps mang lại lợi thế?</h2>
+  <ul class="feature-list">
+    <li><strong>Tính minh bạch &amp; lịch sử:</strong> ai sửa gì, sửa khi nào, tại sao sửa — tất cả nằm trong lịch sử commit của Git.</li>
+    <li><strong>Khôi phục thảm hoạ siêu tốc:</strong> nếu hệ thống bị lỗi, chỉ cần <em>rollback</em> trên Git về phiên bản ổn định trước đó; hệ thống tự đưa mình về trạng thái cũ trong tích tắc.</li>
+    <li><strong>Tính nhất quán:</strong> loại bỏ tình trạng <em>"trên máy tôi chạy được mà trên server thì không"</em> hoặc cấu hình thủ công gây sai sót giữa Dev/Staging/Prod.</li>
+    <li><strong>Bảo mật:</strong> kỹ sư không cần quyền truy cập trực tiếp vào cluster; họ chỉ cần quyền đẩy code lên Git.</li>
+  </ul>
+
+  <h2 class="section-heading">Các thành phần chính trong hệ sinh thái GitOps</h2>
+  <ul class="feature-list">
+    <li><strong>Version Control:</strong> GitHub, GitLab...</li>
+    <li><strong>Nền tảng điều phối:</strong> Kubernetes, EKS, ECS...</li>
+    <li><strong>Công cụ CICD (GitOps agent):</strong> ArgoCD, FluxCD...</li>
+    <li><strong>Quản lý cấu hình:</strong> Helm, Kustomize, Terraform...</li>
+  </ul>
+
+  <h2 class="section-heading">GitOps khác gì với CI/CD truyền thống?</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Push["CI/CD truyền thống (Push-based)"]
+          direction TB
+          J["Jenkins/GitHub Actions"]
+          S["Server / Cluster"]
+          J -->|"chủ động push thay đổi"| S
+      end
+      subgraph Pull["GitOps (Pull-based)"]
+          direction TB
+          G["Git (source of truth)"]
+          A["Agent<br/>(ArgoCD/Flux)"]
+          C["Server / Cluster"]
+          G -.-> A
+          A -->|"tự pull về &amp; đồng bộ"| C
+      end
+  </div>
+  <p class="arch-caption">CI/CD truyền thống đẩy (push) thay đổi vào server; GitOps thì agent chủ động kéo (pull) trạng thái từ Git về để đồng bộ.</p>
+  <ul class="feature-list">
+    <li><strong>Push-based:</strong> công cụ CI (như Jenkins) "push" thay đổi vào server. Nếu server bị lỗi kết nối lúc đó, việc triển khai có thể thất bại nửa chừng.</li>
+    <li><strong>Pull-based:</strong> server tự "pull" cấu hình về. Nếu có thay đổi ngoài ý muốn trên server (ai đó lỡ xoá một cấu hình), agent phát hiện sai lệch và tự sửa lại cho đúng với Git (tự phục hồi - self-healing).</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Audit &amp; rollback dễ dàng nhờ Git (revert commit là xong).</li>
+        <li>Tự phát hiện và sửa drift (sai lệch) trên cluster.</li>
+        <li>Bảo mật tốt: không cần cấp quyền cluster trực tiếp cho developer.</li>
+        <li>Nhất quán, tái lập được môi trường dễ dàng.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Phải cài và vận hành thêm agent (ArgoCD/Flux) trên cluster.</li>
+        <li>Khái niệm mới, cần thời gian làm quen với team.</li>
+        <li>Phải tách rõ "code ứng dụng" và "manifest" (thường là 2 repo khác nhau).</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Hệ thống cần rollback nhanh</h4>
+      <p>Khi phát hành lỗi, chỉ cần revert commit trong manifest repo để ArgoCD tự đưa cluster về bản ổn định.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Nhiều môi trường (dev/staging/prod)</h4>
+      <p>Dùng manifest riêng theo môi trường trong Git, agent tự đồng bộ từng môi trường, đảm bảo nhất quán.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Quản trị tập trung, phân quyền chặt</h4>
+      <p>Developer chỉ push code; chỉ một nhóm nhỏ có quyền duyệt thay đổi manifest, không ai cần truy cập cluster trực tiếp.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Liên hệ với bài lab:</strong> ở Lab 4, chúng ta sẽ thực hành GitOps với <strong>GitHub Actions (build image) + ArgoCD (deploy)</strong> — tách biệt giữa "code application repo" và "manifest repo".
+  </div>
+  <p class="body-text">
+    Tham khảo thêm: <a href="https://www.gitops.tech/" target="_blank" rel="noopener">gitops.tech</a> và <a href="https://argo-cd.readthedocs.io/" target="_blank" rel="noopener">ArgoCD Documentation</a>.
+  </p>
+
+</body>
+</html>

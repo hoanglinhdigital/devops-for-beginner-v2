@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LoadBalancer trong EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">LoadBalancer trong EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Ở Section 13 bạn đã biết Service kiểu <code>LoadBalancer</code> và Ingress. Trên EKS, khi bạn tạo Service LoadBalancer hoặc Ingress,
+    một thành phần tên <strong>AWS Load Balancer Controller</strong> sẽ tự động tạo ra <strong>Application Load Balancer (ALB)</strong> hoặc <strong>Network Load Balancer (NLB)</strong> thật trên AWS để đưa traffic từ ngoài vào cluster.
+  </p>
+
+  <h2 class="section-heading">Các loại Load Balancer được hỗ trợ</h2>
+  <p class="body-text">EKS hỗ trợ 2 loại load balancer chính:</p>
+  <ul class="feature-list">
+    <li><strong>Network Load Balancer (NLB)</strong> – hoạt động ở tầng 4 (transport, TCP/UDP). Hiệu năng cao, IP cố định, phù hợp traffic TCP/TLS lớn.</li>
+    <li><strong>Application Load Balancer (ALB)</strong> – hoạt động ở tầng 7 (application, HTTP/HTTPS). Hỗ trợ định tuyến theo host/path, header, host-based và path-based routing.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section14/eks-nlb.png" alt="Network Load Balancer (NLB)" />
+    <div class="figure-title">Network Load Balancer (NLB) – Layer 4</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section14/eks-alb.png" alt="Application Load Balancer (ALB)" />
+    <div class="figure-title">Application Load Balancer (ALB) – Layer 7</div>
+  </div>
+
+  <h2 class="section-heading">AWS Load Balancer Controller</h2>
+  <p class="body-text">
+    Để EKS có thể tự tạo ALB/NLB, bạn cần cài <strong>AWS Load Balancer Controller</strong> (kế thừa từ ALB Ingress Controller cũ).
+    Controller chạy như một Deployment trong cluster, quan sát các resource Ingress/Service và tự tạo, cấu hình load balancer tương ứng trên AWS thông qua IAM Role (IRSA – IAM Roles for Service Accounts).
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Cluster["EKS Cluster"]
+          IC["<img src='../../assets/aws-svg/Elastic-Kubernetes-Service.svg' style='width:36px;height:36px;'/><br/>AWS Load Balancer<br/>Controller"]
+          ING["Ingress<br/>(annotations)"]
+          SVC["Service<br/>type: LoadBalancer"]
+      end
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>ALB / NLB"]
+      User["<img src='../../assets/svg-icon/user.svg' style='width:30px;height:30px;'/><br/>User"]
+      ING --> IC
+      SVC --> IC
+      IC -->|"tạo & cấu hình"| ALB
+      User -->|"HTTP/HTTPS"| ALB
+  </div>
+  <p class="arch-caption">Ingress/Service khai báo mong muốn; AWS Load Balancer Controller đọc các annotation rồi tạo ALB/NLB tương ứng trên AWS.</p>
+
+  <h2 class="section-heading">So sánh ALB và NLB</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>ALB (L7)</th><th>NLB (L4)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Tầng hoạt động</td><td>Application (HTTP/HTTPS)</td><td>Transport (TCP/UDP/TLS)</td></tr>
+      <tr><td>Định tuyến</td><td>Theo host, path, header, query</td><td>Chuyển tiếp theo IP/port</td></tr>
+      <tr><td>Hiệu năng</td><td>Vừa phải, thêm độ trễ nhỏ</td><td>Rất cao, độ trễ thấp</td></tr>
+      <tr><td>IP cố định</td><td>Không (dùng DNS)</td><td>Có (Elastic IP mỗi AZ)</td></tr>
+      <tr><td>Use case</td><td>Web app, API, microservice</td><td>TCP lớn, game, IoT, gRPC</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm của LB Controller</h4>
+      <ul class="feature-list-sm">
+        <li>Khai báo bằng Ingress YAML (declarative), không cần tạo LB thủ công trên Console.</li>
+        <li>Tự cập nhật target group khi Pod scale/restart.</li>
+        <li>Hỗ trợ cả ALB và NLB, có thể kết hợp WAF, ACM (HTTPS), external DNS.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm / lưu ý</h4>
+      <ul class="feature-list-sm">
+        <li>Cần cấu hình IAM (IRSA) đúng, nếu không controller không tạo được LB.</li>
+        <li>Mỗi Ingress/Service có thể tạo một LB riêng → tốn phí nếu lạm dụng.</li>
+        <li>Không dùng được với kiến trúc Ingress Nginx Controller truyền thống (cùng cluster có thể chạy cả hai nhưng cần phân biệt ingressClassName).</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Web/API với path-based routing</h4>
+      <p>Một ALB duy nhất định tuyến <code>/api</code> → backend, <code>/</code> → frontend (sẽ làm ở Lab 2 Part 2).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Dịch vụ TCP hiệu năng cao</h4>
+      <p>Dùng NLB cho game server, gRPC, MQTT... cần IP tĩnh và độ trễ thấp.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>HTTPS + WAF cho public service</h4>
+      <p>Gắn ACM certificate và AWS WAF vào ALB để bảo vệ ứng dụng web.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>annotation thường dùng:</strong> <code>alb.ingress.kubernetes.io/scheme: internet-facing</code> (hoặc <code>internal</code>), <code>alb.ingress.kubernetes.io/target-type: ip</code> (đăng ký IP của Pod trực tiếp, thay vì instance).</li>
+    <li><strong>Service LoadBalancer:</strong> khai báo <code>spec.type: LoadBalancer</code> với annotation để tạo NLB thay vì ALB mặc định.</li>
+    <li><strong>IRSA:</strong> controller dùng IAM Role gắn vào Service Account (kube-system) để có quyền gọi API tạo LB.</li>
+    <li><strong>Tài liệu:</strong> <a href="https://docs.aws.amazon.com/eks/latest/userguide/aws-load-balancer-controller.html" target="_blank" rel="noopener">aws-load-balancer-controller</a>.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: CodeBuild – Build Node.js (Webpack), upload file tĩnh lên S3 – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: CodeBuild – Build Node.js (Webpack), upload file tĩnh lên S3</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Build project Vue + Webpack bằng CodeBuild: <code>npm install</code> → <code>npm run build</code>.</li>
+    <li>Truyền tên bucket qua <strong>Environment variables</strong> của CodeBuild project thay vì hard-code trong buildspec.</li>
+    <li>Upload file tĩnh trong thư mục <code>dist/</code> lên S3 bằng lệnh <code>aws s3 cp</code> và cấp quyền tối thiểu (least privilege) cho service role.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>simple-vue-webpack"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          CB["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:44px;height:44px;'/><br/><b>CodeBuild</b><br/>nodejs-webpack-build<br/>npm install · npm run build"]
+          IAM["<img src='../../assets/aws-svg/IAM.svg' style='width:34px;height:34px;'/><br/>Service role<br/>+ inline policy S3"]
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:40px;height:40px;'/><br/><b>S3</b><br/>nodejs_artifacts/"]
+      end
+      GH -->|"checkout"| CB
+      IAM -.- CB
+      CB -->|"aws s3 cp --recursive ./dist"| S3
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1 (repository <code>simple-vue-webpack</code>, connection, S3 bucket) và Lab 2 (đã quen màn hình tạo CodeBuild project).</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/lab3_codebuild_nodejs/</code> (<code>buildspec.yml</code>, <code>s3-upload-policy.json</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Thêm buildspec.yml vào repository</strong>
+        <p>Tạo file <code>buildspec.yml</code> tại thư mục gốc repository <code>simple-vue-webpack</code>, copy nội dung từ <code>lab3_codebuild_nodejs/buildspec.yml</code>:</p>
+        <pre class="code-block"><code class="language-yaml">version: 0.2
+
+# Biến S3_BUCKET được khai báo trong phần Environment variables của CodeBuild project
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo Installing NPM dependencies...
+      - npm install
+  build:
+    commands:
+      - echo Build started on `date`
+      - npm run build
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Uploading static files to s3://$S3_BUCKET/nodejs_artifacts/
+      - aws s3 cp --recursive ./dist s3://$S3_BUCKET/nodejs_artifacts/
+
+cache:
+  paths:
+    - 'node_modules/**/*'</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/simple-vue-webpack
+git add buildspec.yml
+git commit -m "ci: add buildspec for CodeBuild"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo CodeBuild project</strong>
+        <p>Tạo build project với các thông số (những mục không nêu để giống Lab 2):</p>
+        <ul class="feature-list">
+          <li>Project name: <code>nodejs-webpack-build</code></li>
+          <li>Source: <strong>GitHub</strong> (connection <code>github-connection</code>), Repository <code>&lt;your-github-username&gt;/simple-vue-webpack</code>, Source version <code>master</code></li>
+          <li>Environment: Managed image, Amazon Linux, Standard, <code>aws/codebuild/amazonlinux-x86_64-standard:5.0</code>, 3 GB / 2 vCPUs</li>
+          <li>Service role: <strong>New service role</strong>, tên <code>codebuild-nodejs-webpack-build-service-role</code></li>
+          <li>Environment variables: Name <code>S3_BUCKET</code>, Value <code>codebuild-artifact-&lt;your-suffix&gt;</code>, Type <strong>Plaintext</strong></li>
+          <li>Buildspec: <strong>Use a buildspec file</strong></li>
+          <li>Artifacts: <strong>No artifacts</strong> (file được upload bằng lệnh <code>aws s3 cp</code> trong buildspec)</li>
+          <li>Logs: CloudWatch logs, Group name <code>/codebuild/nodejs-webpack-build</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấp quyền upload S3 cho service role</strong>
+        <p>Vì chọn <em>No artifacts</em>, service role do CodeBuild tạo <strong>không có quyền ghi</strong> vào bucket. Vào IAM → Roles → <code>codebuild-nodejs-webpack-build-service-role</code>, tạo <strong>inline policy</strong> tên <code>s3-upload-static-files</code> với nội dung JSON từ file <code>s3-upload-policy.json</code> (thay <code>&lt;your-suffix&gt;</code>):</p>
+        <pre class="code-block"><code class="language-json">{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowUploadStaticFiles",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::codebuild-artifact-&lt;your-suffix&gt;",
+                "arn:aws:s3:::codebuild-artifact-&lt;your-suffix&gt;/*"
+            ]
+        }
+    ]
+}</code></pre>
+        <p class="code-note">💡 Đây là cách cấp quyền theo nguyên tắc <strong>least privilege</strong>: chỉ đúng action, đúng bucket cần dùng, thay vì gắn <code>AmazonS3FullAccess</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Chạy build</strong>
+        <p><strong>Start build</strong> project <code>nodejs-webpack-build</code>. Trong Build logs, quan sát output của webpack (danh sách file được sinh ra) và các dòng <code>upload: dist/... to s3://...</code> ở phase <code>POST_BUILD</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra file tĩnh trên S3</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 ls s3://codebuild-artifact-&lt;your-suffix&gt;/nodejs_artifacts/ --recursive</code></pre>
+        <p>(Tuỳ chọn) Tải về và mở <code>index.html</code> bằng browser để xem ứng dụng Vue:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 sync s3://codebuild-artifact-&lt;your-suffix&gt;/nodejs_artifacts/ ./vue-dist
+ls ./vue-dist</code></pre>
+        <p class="code-note">💡 Trong thực tế, thư mục này thường là một S3 bucket bật <strong>static website</strong> hoặc làm origin cho <strong>CloudFront</strong> (Section 4 – Chapter 6).</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Build của <code>nodejs-webpack-build</code> ở trạng thái <strong>Succeeded</strong>.</li>
+      <li>S3 có các file <code>index.html</code>, file JS/CSS trong prefix <code>nodejs_artifacts/</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>upload failed: ... An error occurred (AccessDenied) when calling the PutObject operation</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service role chưa có quyền ghi vào bucket, hoặc ARN trong inline policy sai tên bucket.<br/><strong>Giải pháp:</strong> Kiểm tra lại Bước 3, tên bucket trong policy phải trùng với biến <code>S3_BUCKET</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Parameter validation failed: Invalid bucket name ""</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa khai báo biến môi trường <code>S3_BUCKET</code> trong CodeBuild project.<br/><strong>Giải pháp:</strong> Edit project → Environment → Additional configuration → Environment variables, thêm <code>S3_BUCKET</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>npm ERR! code ERESOLVE</code> hoặc lỗi build webpack</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Phiên bản Node.js không tương thích với dependency.<br/><strong>Giải pháp:</strong> Kiểm tra <code>nodejs: 20</code> trong <code>runtime-versions</code>; chạy thử <code>npm install &amp;&amp; npm run build</code> trên máy local để tái hiện lỗi.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Có thể xoá prefix <code>nodejs_artifacts/</code> trên S3 nếu không cần. Giữ lại CodeBuild project để tham khảo – không phát sinh chi phí khi không build.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 rm s3://codebuild-artifact-&lt;your-suffix&gt;/nodejs_artifacts/ --recursive</code></pre>
+
+</body>
+</html>

@@ -1,0 +1,54 @@
+# Lab 3: Workflow switch traffic trên ALB: hoán đổi Target Group của 2 listener
+# :80 (production) và :81 (test). Chạy lại lần nữa = rollback.
+# Copy file này thành .github/workflows/switch-traffic.yml
+name: Switch ALB Traffic
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+env:
+  AWS_REGION: ap-southeast-1
+  ALB_NAME: udemy-devops-alb
+
+jobs:
+  switch-traffic:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Switch traffic between blue and green environments
+      run: |
+        # Lấy ARN của ALB theo tên (không hard-code ARN)
+        ALB_ARN=$(aws elbv2 describe-load-balancers \
+          --names ${{ env.ALB_NAME }} \
+          --query 'LoadBalancers[0].LoadBalancerArn' \
+          --output text)
+
+        LISTENERS=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN")
+
+        # Lấy ARN và Target Group hiện tại của từng listener theo PORT
+        L80_ARN=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 80) | .ListenerArn')
+        L80_TG=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 80) | .DefaultActions[0].TargetGroupArn')
+        L81_ARN=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 81) | .ListenerArn')
+        L81_TG=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 81) | .DefaultActions[0].TargetGroupArn')
+
+        echo "Before switch: :80 -> $L80_TG | :81 -> $L81_TG"
+
+        # Hoán đổi Target Group giữa 2 listener
+        aws elbv2 modify-listener \
+          --listener-arn "$L80_ARN" \
+          --default-actions Type=forward,TargetGroupArn="$L81_TG"
+
+        aws elbv2 modify-listener \
+          --listener-arn "$L81_ARN" \
+          --default-actions Type=forward,TargetGroupArn="$L80_TG"
+
+        echo "After switch:  :80 -> $L81_TG | :81 -> $L80_TG"
+        echo "Traffic switch completed successfully!"

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Infra as Code (IaC) là gì? Tại sao cần IaC – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Infra as Code (IaC) là gì? Tại sao cần IaC</span>
+  </div>
+
+  <div class="alert alert-tip">
+    <strong>"Không có việc gì khó, chỉ sợ không biết làm!"</strong> Section này giúp bạn chuyển từ việc "click chuột trên AWS Console" sang việc <strong>mô tả hạ tầng bằng code</strong> và để công cụ tự động triển khai.
+  </div>
+
+  <h2 class="section-heading">Mục tiêu của section</h2>
+  <ul class="feature-list">
+    <li>Hiểu khái niệm Infra as Code (IaC) là gì và tại sao cần sử dụng IaC.</li>
+    <li>Biết các công cụ IaC thường được sử dụng và cách lựa chọn.</li>
+    <li>Nắm được các thành phần và cơ chế hoạt động của Terraform.</li>
+    <li>Cài đặt các công cụ cần thiết để làm việc với Terraform.</li>
+    <li>Biết cách quản lý resource, state và version của hạ tầng.</li>
+    <li>Làm quen với Terraform thông qua 10 bài lab từ dễ đến khó: từ 1 EC2 đơn giản tới hệ thống ALB + Auto Scaling + Database và triển khai multi-environment, multi-region.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Infrastructure as Code (IaC)</strong> là phương pháp quản lý và cấu hình hạ tầng IT (server, network, database, load balancer...) <strong>thông qua mã nguồn</strong> (script, template) thay vì thao tác thủ công trên giao diện.
+    Hạ tầng được mô tả trong file text, lưu trên Git, review như code ứng dụng và được công cụ IaC tự động tạo/sửa/xoá trên Cloud.
+  </p>
+  <p class="body-text">IaC ra đời để giải quyết các vấn đề của phương pháp triển khai hạ tầng truyền thống (thủ công):</p>
+  <ul class="feature-list">
+    <li><strong>Tốc độ triển khai chậm</strong>, đặc biệt khi hệ thống có nhiều môi trường (dev, test, staging, prod) hoặc nhiều region.</li>
+    <li><strong>Không nhất quán</strong>, dễ có sai sót do phụ thuộc vào trình độ và sự cẩn thận của người thực hiện.</li>
+    <li><strong>Không thể tái sử dụng</strong>: mỗi lần dựng môi trường mới lại phải làm lại từ đầu.</li>
+  </ul>
+
+  <h2 class="section-heading">Ưu điểm khi triển khai IaC</h2>
+  <ul class="feature-list">
+    <li><strong>Tự động hoá:</strong> giảm thiểu rủi ro do thao tác tay và tăng tốc độ triển khai — dựng cả một VPC hoàn chỉnh chỉ trong vài phút.</li>
+    <li><strong>Nhất quán &amp; dễ kiểm soát:</strong> các môi trường được cấu hình giống nhau; quản lý phiên bản (version control) giúp theo dõi ai sửa gì, khi nào và phục hồi cấu hình cũ khi cần.</li>
+    <li><strong>Tích hợp &amp; phối hợp:</strong> tích hợp tự nhiên với DevOps, CI/CD pipeline, công cụ monitor và log.</li>
+    <li><strong>Tối ưu tài nguyên &amp; chi phí:</strong> tái sử dụng template, giảm công sức của đội ngũ; dễ dàng xoá toàn bộ môi trường lab/test khi không dùng.</li>
+    <li><strong>An toàn &amp; bảo mật:</strong> quản lý quyền truy cập tập trung, có thể đưa chuẩn/quy tắc bảo mật vào ngay trong template.</li>
+    <li><strong>Tài liệu sống:</strong> bản thân code chính là tài liệu mô tả chính xác hạ tầng đang chạy.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình: các bước triển khai Infra as Code</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/svg-icon/developer.svg' style='width:44px;height:44px;'/><br/><b>DevOps Engineer</b>"]
+      Code["📝 <b>1. Viết template/code</b><br/>mô tả infrastructure"]
+      Test["🧪 <b>2. Kiểm thử</b><br/>trên môi trường develop"]
+      Git["<img src='../../assets/svg-icon/github.svg' style='width:40px;height:40px;'/><br/><b>3. Version control</b><br/>Git để tracking"]
+      subgraph AWS["☁️ AWS Cloud"]
+          direction TB
+          Env1["🟢 Dev"]
+          Env2["🟡 Test / Staging"]
+          Env3["🔴 Production"]
+      end
+      Maint["🔧 <b>5. Update / Maintenance</b><br/>sửa code → apply lại"]
+      Dev --> Code --> Test --> Git
+      Git -->|"4. Triển khai hàng loạt"| AWS
+      AWS --> Maint
+      Maint -.->|"vòng lặp"| Code
+  </div>
+  <p class="arch-caption">Vòng đời của IaC: viết code → kiểm thử → đưa lên Git → triển khai hàng loạt ra nhiều môi trường → cập nhật/bảo trì bằng cách sửa code.</p>
+
+  <h2 class="section-heading">Trade-off: Thủ công vs Infra as Code</h2>
+  <table class="compare-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>Thao tác thủ công (Console)</th><th>Infra as Code</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Lần đầu triển khai</strong></td><td>Nhanh, trực quan, phù hợp khi đang học/khám phá dịch vụ</td><td>Chậm hơn vì phải viết code và học cú pháp</td></tr>
+      <tr><td><strong>Lần thứ 2, 3... (môi trường mới, region mới)</strong></td><td>Làm lại từ đầu, dễ sót bước</td><td>Chạy lại template, vài phút là xong</td></tr>
+      <tr><td><strong>Tính nhất quán</strong></td><td>Phụ thuộc người làm</td><td>Giống nhau 100% giữa các môi trường</td></tr>
+      <tr><td><strong>Truy vết thay đổi</strong></td><td>Khó, phải xem CloudTrail</td><td>Rõ ràng qua Git history, Pull Request</td></tr>
+      <tr><td><strong>Rủi ro</strong></td><td>Click nhầm, quên cấu hình</td><td>Một lệnh <code>destroy</code> nhầm có thể xoá cả môi trường → cần quy trình review</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Câu hỏi thường gặp</h3>
+  <div class="decision-box">
+    <div class="decision-q">❓ Tôi (hoặc khách hàng của tôi) chỉ cần triển khai 1 môi trường, vậy có cần dùng IaC không?</div>
+    <div class="decision-a">
+      Trừ khi thời gian quá gấp rút, tác vụ quá đơn giản và bạn không muốn tốn thời gian viết template, <strong>bạn vẫn nên sử dụng IaC</strong>.
+      Template có thể chưa được tái sử dụng ngay trong project hiện tại, nhưng về lâu dài rất có lợi cho bạn và công ty: dựng lại môi trường khi có sự cố, làm mẫu cho dự án sau, làm tài liệu bàn giao...
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>🌏 Nhân bản môi trường</h4>
+      <p>Dự án cần 3 môi trường dev/test/prod giống hệt nhau, hoặc mở rộng hệ thống sang region mới (Singapore → Tokyo). Chỉ cần đổi file biến và chạy lại template.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>🔥 Disaster Recovery</h4>
+      <p>Khi region chính gặp sự cố hoặc ai đó xoá nhầm resource, đội vận hành dựng lại toàn bộ hạ tầng từ code trong thời gian ngắn thay vì nhớ lại từng bước cấu hình.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>🧪 Môi trường tạm thời</h4>
+      <p>Dựng môi trường để load test, demo khách hàng hoặc làm lab, dùng xong <code>destroy</code> toàn bộ để không phát sinh chi phí.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>IaC là một trong những nguyên tắc <strong>Automation</strong> của DevOps đã học ở Section 3; thay đổi hạ tầng nên đi qua Git và Pull Request giống như code ứng dụng.</li>
+    <li>Khi đã dùng IaC, hạn chế sửa tay trên Console các resource do IaC quản lý — sẽ gây ra <strong>drift</strong> (cấu hình thực tế lệch so với code).</li>
+    <li>Không lưu credential/secret (access key, password) trong template; dùng biến môi trường, AWS profile hoặc dịch vụ quản lý secret.</li>
+  </ul>
+
+</body>
+</html>

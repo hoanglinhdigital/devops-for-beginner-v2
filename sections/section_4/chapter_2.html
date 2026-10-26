@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hệ thống chứng chỉ AWS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">4. Giới thiệu &amp; ôn lại kiến thức AWS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Hệ thống chứng chỉ AWS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    AWS có một hệ thống chứng chỉ (AWS Certification) để chứng nhận kiến thức và kỹ năng của người làm Cloud ở nhiều cấp độ và nhiều vai trò khác nhau.
+    Chứng chỉ là cách phổ biến để nhà tuyển dụng và khách hàng đánh giá năng lực AWS của bạn. Với định hướng DevOps, lộ trình thường gặp là
+    <strong>Solutions Architect Associate (SAA)</strong> → <strong>Developer Associate (DVA)</strong> → <strong>DevOps Engineer Professional (DOP)</strong>.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>4 cấp độ:</strong> Foundational → Associate → Professional, cùng nhóm Specialty chuyên sâu theo domain.</li>
+    <li><strong>Theo vai trò (role-based):</strong> Architect, Developer, CloudOps, DevOps, Data, Machine Learning...</li>
+    <li><strong>Thời hạn 3 năm:</strong> sau 3 năm cần thi lại (recertify) để giữ chứng chỉ.</li>
+    <li><strong>Thi trực tuyến hoặc tại trung tâm khảo thí:</strong> dạng trắc nghiệm, chủ yếu là các câu hỏi tình huống (scenario-based).</li>
+    <li><strong>Ưu đãi khi đã có chứng chỉ:</strong> nhận voucher giảm 50% cho lần thi tiếp theo.</li>
+    <li><strong>Không bắt buộc thi theo thứ tự:</strong> có thể thi thẳng Professional nếu đủ tự tin.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình: các cấp độ chứng chỉ</h2>
+  <div class="mermaid">
+  flowchart LR
+      F["🌱 <b>Foundational</b><br/>Không yêu cầu kinh nghiệm"]
+      A["📘 <b>Associate</b><br/>Có kiến thức IT &amp; Cloud cơ bản"]
+      P["🏆 <b>Professional</b><br/>Nên có 2+ năm kinh nghiệm thực chiến"]
+      S["🎯 <b>Specialty</b><br/>Chuyên sâu một domain"]
+      F --> A --> P
+      A -.-> S
+      subgraph DevOpsPath["🚀 Lộ trình gợi ý cho DevOps Engineer"]
+          direction LR
+          SAA["<img src='../../assets/images/aws-certs/solutions-architect-associate.png' style='width:48px;height:48px;'/><br/><b>SAA</b>"]
+          DVA["<img src='../../assets/images/aws-certs/developer-associate.png' style='width:48px;height:48px;'/><br/><b>DVA</b>"]
+          DOP["<img src='../../assets/images/aws-certs/devops-engineer-professional.png' style='width:48px;height:48px;'/><br/><b>DOP</b>"]
+          SAA --> DVA --> DOP
+      end
+  </div>
+
+  <div class="cert-level">
+    <div class="cert-level-header">
+      <h3>Foundational</h3>
+      <span>Không yêu cầu kinh nghiệm trước đó</span>
+    </div>
+    <div class="cert-grid">
+      <div class="cert-card"><img src="../../assets/images/aws-certs/cloud-practitioner.png" alt="Cloud Practitioner" /><strong>Cloud Practitioner</strong><span>CLF</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/ai-practitioner.png" alt="AI Practitioner" /><strong>AI Practitioner</strong><span>AIF</span></div>
+    </div>
+  </div>
+
+  <div class="cert-level">
+    <div class="cert-level-header">
+      <h3>Associate</h3>
+      <span>Yêu cầu có kiến thức cơ bản về IT và Cloud</span>
+    </div>
+    <div class="cert-grid">
+      <div class="cert-card"><img src="../../assets/images/aws-certs/solutions-architect-associate.png" alt="Solutions Architect Associate" /><strong>Solutions Architect</strong><span>SAA</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/developer-associate.png" alt="Developer Associate" /><strong>Developer</strong><span>DVA</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/cloudops-engineer-associate.png" alt="CloudOps Engineer Associate" /><strong>CloudOps Engineer</strong><span>SOA</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/data-engineer-associate.png" alt="Data Engineer Associate" /><strong>Data Engineer</strong><span>DEA</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/machine-learning-engineer-associate.png" alt="Machine Learning Engineer Associate" /><strong>Machine Learning Engineer</strong><span>MLA</span></div>
+    </div>
+  </div>
+
+  <div class="cert-level">
+    <div class="cert-level-header">
+      <h3>Professional</h3>
+      <span>Nên có ít nhất 2 năm kinh nghiệm thực chiến</span>
+    </div>
+    <div class="cert-grid">
+      <div class="cert-card"><img src="../../assets/images/aws-certs/solutions-architect-professional.png" alt="Solutions Architect Professional" /><strong>Solutions Architect</strong><span>SAP</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/devops-engineer-professional.png" alt="DevOps Engineer Professional" /><strong>DevOps Engineer</strong><span>DOP</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/generative-ai-developer-professional.png" alt="Generative AI Developer Professional" /><strong>Generative AI Developer</strong><span>Professional</span></div>
+    </div>
+  </div>
+
+  <div class="cert-level">
+    <div class="cert-level-header">
+      <h3>Specialty</h3>
+      <span>Dành cho những ai muốn tìm hiểu chuyên sâu về một domain</span>
+    </div>
+    <div class="cert-grid">
+      <div class="cert-card"><img src="../../assets/images/aws-certs/advanced-networking-specialty.png" alt="Advanced Networking Specialty" /><strong>Advanced Networking</strong><span>ANS</span></div>
+      <div class="cert-card"><img src="../../assets/images/aws-certs/security-specialty.png" alt="Security Specialty" /><strong>Security</strong><span>SCS</span></div>
+    </div>
+  </div>
+  <p class="note-text">*Danh sách chứng chỉ thay đổi theo thời gian, xem bản mới nhất tại <a href="https://aws.amazon.com/certification/" target="_blank" rel="noopener noreferrer">aws.amazon.com/certification</a>.</p>
+
+  <h2 class="section-heading">Trade-off: một số câu hỏi thường gặp về thi chứng chỉ</h2>
+  <div class="concept-grid">
+    <div class="concept-card">
+      <div class="label">Chứng chỉ có quan trọng không?</div>
+      <p><strong>Có.</strong> Chứng chỉ giúp chứng nhận kiến thức của bản thân, có giá trị khi <strong>deal lương</strong>, khi apply vào công ty là partner của AWS và khi đàm phán dự án với khách hàng.</p>
+    </div>
+    <div class="concept-card">
+      <div class="label">Có nên học dump để thi đậu rồi apply?</div>
+      <p><strong>Tuyệt đối không nên.</strong> Không có kinh nghiệm thực chiến sẽ khiến bạn gặp khó khăn khi vào dự án; ngoài ra vào phỏng vấn cũng sẽ dễ dàng bị phát hiện.</p>
+    </div>
+    <div class="concept-card">
+      <div class="label">Có thể bỏ qua Associate, thi thẳng Professional?</div>
+      <p><strong>Có thể</strong>, nếu bạn đủ tự tin hoặc đã làm việc đủ lâu trong lĩnh vực Cloud. Tuy nhiên với người mới, Associate là bước đệm giúp hệ thống hoá kiến thức tốt hơn.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Sinh viên / Junior muốn vào nghề Cloud</h4>
+      <p>Bắt đầu với Cloud Practitioner hoặc thi thẳng SAA, kết hợp làm các lab thực tế để có “câu chuyện” khi phỏng vấn.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Developer chuyển sang DevOps</h4>
+      <p>SAA + DVA để nắm vững kiến trúc và các dịch vụ dành cho developer (Lambda, API Gateway, CodePipeline...), sau đó hướng tới DOP.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Kỹ sư làm tại công ty AWS Partner</h4>
+      <p>Công ty partner cần số lượng chứng chỉ nhất định để duy trì cấp độ partnership — chứng chỉ thường được công ty tài trợ chi phí thi.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-tip">
+    <strong>Mẹo:</strong> Kiến thức trong khoá học này (VPC, EC2, RDS, Lambda, ECS/EKS, CodePipeline, CloudWatch...) bám sát nội dung của SAA, DVA và một phần DOP.
+    Hãy tận dụng các bài lab làm “vốn” thực chiến khi ôn thi.
+  </div>
+  <div class="alert alert-warning">
+    Chứng chỉ chỉ là <strong>điều kiện cần</strong>. Điều nhà tuyển dụng quan tâm nhất vẫn là bạn đã <strong>thật sự làm được gì</strong> trên AWS.
+  </div>
+
+</body>
+</html>

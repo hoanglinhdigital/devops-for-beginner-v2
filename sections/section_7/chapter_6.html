@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các mô hình Git Workflow &amp; chiến lược quản lý branch – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các mô hình Git Workflow &amp; chiến lược quản lý branch</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Git Workflow</strong> (branching strategy) là bộ quy ước của team về cách tạo, đặt tên, merge branch và branch nào được deploy lên môi trường nào.
+    Git không bắt buộc workflow nào cả, nhưng nếu không có quy ước chung, team sẽ gặp conflict liên tục, không biết code nào đang chạy trên production và CI/CD rất khó thiết kế.
+    Chương này giới thiệu 3 mô hình phổ biến: <strong>Centralized</strong>, <strong>Feature Branch</strong> và <strong>Gitflow</strong>.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Centralized workflow:</strong> chỉ có 1 branch <code>main</code>, mọi người commit thẳng vào đó. Đơn giản nhưng dễ conflict.</li>
+    <li><strong>Feature Branch workflow:</strong> mỗi tính năng/bug một branch riêng tạo từ branch chính, merge lại qua <strong>Pull Request</strong>.</li>
+    <li><strong>Gitflow workflow:</strong> chia branch theo vai trò (<code>main</code>, <code>develop</code>, <code>feature/*</code>, <code>bugfix/*</code>, <code>release/*</code>, <code>hotfix/*</code>), phù hợp dự án lớn có lịch release rõ ràng.</li>
+    <li><strong>Pull Request là “cổng kiểm soát”:</strong> code chỉ vào branch chính sau khi được review và CI chạy pass.</li>
+    <li><strong>Branch được bảo vệ (protected branch):</strong> chặn push trực tiếp, chặn xoá, chặn force push vào <code>main</code>/<code>develop</code>.</li>
+    <li><strong>Mapping branch ↔ môi trường:</strong> mỗi branch quan trọng tương ứng với một môi trường deploy (Dev, Test, Staging, Production) – nền tảng để thiết kế CI/CD.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+
+  <h3 class="section-subheading">1. Centralized workflow</h3>
+  <div class="mermaid">
+  flowchart LR
+      DA["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>Dev A"]
+      DB["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>Dev B"]
+      DC["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>Dev C"]
+      MAIN["<img src='../../assets/svg-icon/github.svg' style='width:36px;height:36px;'/><br/><b>Central repository</b><br/>chỉ có branch main"]
+      DA <-->|"pull / push"| MAIN
+      DB <-->|"pull / push"| MAIN
+      DC <-->|"pull / push"| MAIN
+  </div>
+  <p class="arch-caption">Developer clone repository, sửa code và push ngược lại thẳng vào <code>main</code>. Phù hợp dự án nhỏ, 1–2 người, codebase đơn giản. <strong>Nhược điểm:</strong> dễ conflict khi nhiều người sửa chung module/file, code chưa review vẫn vào thẳng nhánh chính.</p>
+
+  <h3 class="section-subheading">2. Feature Branch workflow</h3>
+  <div class="mermaid">
+  gitGraph
+      commit id: "C1"
+      branch feature/login
+      checkout feature/login
+      commit id: "login form"
+      commit id: "login API"
+      checkout main
+      branch feature/cart
+      checkout feature/cart
+      commit id: "cart UI"
+      checkout main
+      merge feature/login id: "PR #1"
+      checkout feature/cart
+      commit id: "cart API"
+      checkout main
+      merge feature/cart id: "PR #2"
+  </div>
+  <p class="arch-caption">Mỗi khi phát triển chức năng mới, developer tạo một branch riêng từ <code>main</code>. Làm xong thì tạo Pull Request để review và merge ngược trở lại. Đây cũng là nền tảng của <strong>GitHub Flow</strong>.</p>
+
+  <h3 class="section-subheading">3. Gitflow workflow</h3>
+  <div class="mermaid">
+  gitGraph
+      commit id: "init"
+      branch develop
+      checkout develop
+      commit id: "setup"
+      branch feature/F001
+      checkout feature/F001
+      commit id: "F001-1"
+      commit id: "F001-2"
+      checkout develop
+      merge feature/F001 id: "PR F001"
+      branch release/v0.1
+      checkout release/v0.1
+      commit id: "bump version"
+      checkout main
+      merge release/v0.1 id: "release" tag: "v0.1"
+      checkout develop
+      merge release/v0.1 id: "back-merge"
+      checkout main
+      branch hotfix/v0.1.1
+      checkout hotfix/v0.1.1
+      commit id: "fix critical bug"
+      checkout main
+      merge hotfix/v0.1.1 id: "hotfix" tag: "v0.1.1"
+      checkout develop
+      merge hotfix/v0.1.1 id: "sync hotfix"
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Branch</th><th>Tạo từ</th><th>Merge vào</th><th>Vai trò</th></tr></thead>
+    <tbody>
+      <tr><td><code>main</code></td><td>–</td><td>–</td><td>Nhánh chính, tồn tại suốt vòng đời dự án. Chỉ nhận code khi có <strong>release</strong> hoặc <strong>hotfix</strong>. Được đánh <strong>tag</strong> theo version (<code>v0.1</code>, <code>v1.0</code>...).</td></tr>
+      <tr><td><code>develop</code></td><td><code>main</code></td><td>–</td><td>Nhánh tích hợp để các developer phát triển feature/fix bug. Code được checkout từ đây và merge trở lại khi hoàn thành task.</td></tr>
+      <tr><td><code>feature/*</code></td><td><code>develop</code></td><td><code>develop</code></td><td>Phát triển chức năng mới. Đặt tên theo quy ước dự án, ví dụ <code>feature/&lt;ticket-id&gt;</code> → <code>feature/F001</code>.</td></tr>
+      <tr><td><code>bugfix/*</code></td><td><code>develop</code></td><td><code>develop</code></td><td>Tương tự feature, dùng để sửa bug phát hiện trong quá trình phát triển/test.</td></tr>
+      <tr><td><code>release/*</code></td><td><code>develop</code></td><td><code>main</code> và <code>develop</code></td><td>Tạo ra trước mỗi đợt release version mới, deploy lên Test/Staging. Chỉ cho phép sửa nhỏ (version, fix bug test phát hiện).</td></tr>
+      <tr><td><code>hotfix/*</code></td><td><code>main</code></td><td><code>main</code> và <code>develop</code></td><td>Sửa lỗi khẩn cấp trên production mà không phải chờ release tiếp theo.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Gitflow – Mapping giữa branch và môi trường deploy</h3>
+  <div class="mermaid">
+  flowchart LR
+      subgraph BR["🌿 Branch"]
+          direction TB
+          FB["feature/* · bugfix/*"]
+          DEV["develop"]
+          REL["release/*"]
+          HF["hotfix/*"]
+          MAIN["main + tag"]
+      end
+      subgraph ENV["☁️ Môi trường"]
+          direction TB
+          EDEV["🧪 <b>Dev</b><br/>auto deploy khi merge PR"]
+          ETEST["🔍 <b>Test</b><br/>Integration Testing"]
+          ESTG["🎭 <b>Staging</b><br/>System Test · UAT<br/>giống Production"]
+          EPROD["🚀 <b>Production</b><br/>end-user"]
+      end
+      FB -->|"Pull Request"| DEV
+      DEV -->|"CI/CD tự động"| EDEV
+      REL -->|"deploy theo version"| ETEST
+      REL -->|"deploy theo version"| ESTG
+      HF -->|"test trước"| ESTG
+      MAIN -->|"deploy theo tag"| EPROD
+  </div>
+  <ul class="feature-list">
+    <li><strong>Môi trường Dev:</strong> thường được deploy tự động ngay khi có Pull Request được merge vào <code>develop</code> (CI/CD).</li>
+    <li><strong>Môi trường Test:</strong> dùng cho Integration Testing, release theo phiên bản từ nhánh <code>release/*</code>.</li>
+    <li><strong>Môi trường Staging:</strong> dùng cho System Testing &amp; UAT trước khi release cho end-user. Về cơ bản Staging phải giống Production.</li>
+    <li><strong>Hotfix:</strong> nên test trên Staging trước khi merge vào <code>main</code> và deploy lên Production.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Lưu ý:</strong> các quy tắc mapping trên mang tính tham khảo, hoàn toàn có thể tuỳ biến theo quy mô dự án và yêu cầu khách hàng. Tuy nhiên, phá vỡ flow deployment chuẩn, apply hotfix quá nhiều, release không kèm testing sẽ khiến chất lượng dự án đi xuống và tốn nhiều effort để sửa chữa.</div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Centralized</th><th>Feature Branch</th><th>Gitflow</th></tr></thead>
+    <tbody>
+      <tr><td>Độ phức tạp</td><td>Thấp nhất</td><td>Trung bình</td><td>Cao (nhiều loại branch)</td></tr>
+      <tr><td>Quy mô team phù hợp</td><td>1–2 người</td><td>Nhỏ → vừa</td><td>Vừa → lớn, nhiều team</td></tr>
+      <tr><td>Code review</td><td>Không có</td><td>Qua Pull Request</td><td>Qua Pull Request</td></tr>
+      <tr><td>Tần suất release</td><td>Bất kỳ</td><td>Liên tục (nhiều lần/ngày)</td><td>Theo đợt (sprint, version)</td></tr>
+      <tr><td>Hỗ trợ nhiều version song song</td><td>Không</td><td>Hạn chế</td><td>Tốt (release, hotfix, tag)</td></tr>
+      <tr><td>Nhược điểm chính</td><td>Conflict, code lỗi vào thẳng main</td><td>Branch sống lâu dễ conflict lớn</td><td>Nhiều thao tác merge, chậm với team muốn deploy liên tục</td></tr>
+    </tbody>
+  </table>
+  <p class="body-text"><strong>Nên dùng Gitflow</strong> khi dự án lớn, codebase phức tạp, có thời gian phát triển dài, có các đợt release rõ ràng và nhiều môi trường kiểm thử. <strong>Không nên dùng Gitflow</strong> cho team nhỏ deploy liên tục nhiều lần mỗi ngày – khi đó Feature Branch/GitHub Flow hoặc <strong>Trunk-based development</strong> (branch ngắn ngày, merge vào <code>main</code> hằng ngày, kết hợp feature flag) gọn hơn.</p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Dự án outsource cho khách hàng doanh nghiệp</h4>
+      <p>Release theo sprint 2–4 tuần, khách hàng cần UAT trên Staging trước khi lên Production → Gitflow với <code>release/*</code> và tag version để dễ đối chiếu, rollback.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Startup SaaS deploy nhiều lần mỗi ngày</h4>
+      <p>Team nhỏ, CI/CD tự động hoàn toàn → Feature Branch (GitHub Flow): mỗi PR merge vào <code>main</code> là deploy, giảm chi phí quản lý branch.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Repository Terraform/hạ tầng</h4>
+      <p>Mỗi thay đổi hạ tầng là một feature branch, PR hiển thị kết quả <code>terraform plan</code> để review, merge thì CI/CD chạy <code>terraform apply</code>.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Các lab tiếp theo áp dụng <strong>Gitflow</strong>: Lab 4 (protect branch + feature + PR), Lab 5 (release + tag), Lab 7 (conflict giữa 2 feature branch).</li>
+    <li>Quy ước đặt tên branch nên thống nhất từ đầu dự án: chữ thường, dùng <code>/</code> phân loại và gắn mã ticket, ví dụ <code>feature/JIRA-123-login</code>, <code>bugfix/JIRA-456</code>.</li>
+    <li>Xoá feature branch sau khi merge để danh sách branch gọn gàng (GitHub có tuỳ chọn tự động xoá head branch sau khi merge PR).</li>
+    <li>Tham khảo: <a href="https://nvie.com/posts/a-successful-git-branching-model/" target="_blank" rel="noopener">A successful Git branching model (Gitflow gốc)</a>, <a href="https://docs.github.com/en/get-started/using-github/github-flow" target="_blank" rel="noopener">GitHub Flow</a>.</li>
+  </ul>
+
+</body>
+</html>

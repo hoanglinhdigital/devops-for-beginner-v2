@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Implement CICD using GithubAction – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CICD for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Implement CICD using GithubAction</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Dùng <strong>GitHub Actions</strong> để dựng pipeline CI/CD cho ứng dụng monorepo, thay thế CodePipeline ở Lab 2.</li>
+    <li>Workflow tự động <strong>build Docker image</strong> cho frontend &amp; backend, push lên <strong>ECR</strong>, rồi <strong>deploy lên EKS</strong> bằng <code>kubectl</code>.</li>
+    <li>Làm quen với <strong>GitHub Secrets</strong> để lưu credential AWS một cách an toàn.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>repo monorepo"]
+      GA["⚙️ <b>GitHub Actions</b><br/>.github/workflows/deploy.yml"]
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:40px;height:40px;'/><br/><b>ECR</b><br/>frontend / backend"]
+      EKS["<img src='../../assets/aws-svg/EKS.svg' style='width:44px;height:44px;'/><br/><b>EKS</b><br/>devops-test-cluster"]
+      GH -->|"push → trigger"| GA
+      GA -->|"build + push image"| ECR
+      GA -->|"kubectl apply"| EKS
+      ECR -.->|"pull image"| EKS
+  </div>
+  <p class="arch-caption">GitHub Actions chạy khi push code: cấu hình AWS credentials qua Secrets → build image → push ECR → cập nhật kubeconfig và kubectl apply lên EKS.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã có <strong>EKS cluster</strong> <code>devops-test-cluster</code> (Lab 1) — hoặc tái sử dụng cluster của Lab 2.</li>
+    <li>Code ứng dụng được đẩy lên <strong>GitHub</strong> (repo monorepo frontend/backend).</li>
+    <li>Source code bài lab nằm tại <code>sourcecode/section_16_cicd_for_eks/lab3_cicd_github_action/</code>.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section16/lab3-github-action-repo.png" alt="Repository ứng dụng mẫu react-express-mongodb dùng cho bài Lab 3" />
+    <div class="figure-title">Repository ứng dụng mẫu (monorepo) dùng cho bài Lab 3</div>
+  </div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Đưa code lên GitHub</strong>
+        <p>Tạo repository trên GitHub (vd <code>todo-app-monorepo</code>), rồi push code lên:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Initial commit for EKS deployment via GitHub Actions"
+git push -u origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo ECR repository (skip nếu đã có từ Lab 2)</strong>
+        <p>Tạo 2 private repository trên ECR: <code>todo-app-frontend</code> và <code>todo-app-backend</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình GitHub Secrets</strong>
+        <p>Vào GitHub repo → <strong>Settings → Secrets and variables → Actions → New repository secret</strong>, thêm các secret sau:</p>
+        <ul class="feature-list">
+          <li><code>AWS_ACCESS_KEY_ID</code> — Access key của IAM user.</li>
+          <li><code>AWS_SECRET_ACCESS_KEY</code> — Secret key của IAM user.</li>
+          <li><code>AWS_REGION</code> — <code>ap-southeast-1</code>.</li>
+          <li><code>EKS_CLUSTER_NAME</code> — <code>devops-test-cluster</code>.</li>
+        </ul>
+        <div class="alert alert-info"><strong>Bảo mật tốt hơn:</strong> thay vì dùng access key dài hạn, nên dùng <em>IAM Role + OIDC</em> để GitHub Actions nhận credential tạm thời.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo GitHub Actions Workflow</strong>
+        <p>Tạo file <code>.github/workflows/deploy.yml</code> với nội dung như file <code>deploy.yml</code> trong thư mục source. Workflow gồm các bước chính:</p>
+        <ul class="feature-list">
+          <li><code>Detect Changes</code> — dùng <code>dorny/paths-filter</code> phát hiện thư mục <code>backend/</code> hay <code>frontend/</code> thay đổi.</li>
+          <li><code>Configure AWS credentials</code> — dùng action <code>aws-actions/configure-aws-credentials</code>.</li>
+          <li><code>Login to Amazon ECR</code> — dùng <code>aws-actions/amazon-ecr-login</code>.</li>
+          <li><code>Build, tag, push</code> — build và push image backend/frontend (chỉ chạy khi có thay đổi tương ứng), đồng thời <code>sed</code> cập nhật tag trong <code>aws-eks.yaml</code>.</li>
+          <li><code>Update kubeconfig</code> + <code>Deploy to EKS</code> — <code>kubectl apply -f aws-eks.yaml</code>.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kích hoạt pipeline</strong>
+        <p>Sửa code rồi push lên <code>master</code> để workflow chạy:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Update application and workflow"
+git push origin master</code></pre>
+        <p>Vào tab <strong>Actions</strong> trên GitHub repo để xem workflow <code>Deploy to EKS</code> chạy và theo dõi log.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Workflow <code>Deploy to EKS</code> chạy xong với trạng thái <strong>xanh (success)</strong>.</li>
+      <li>2 image mới trên ECR (tag theo commit sha).</li>
+      <li><code>kubectl get deployments/pods/svc</code> thấy ứng dụng chạy trên EKS.</li>
+      <li>Truy cập ứng dụng qua ALB (từ <code>kubectl get ingress</code>) thấy bản mới.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Workflow lỗi ở bước Configure AWS credentials</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> GitHub Secrets nhập sai tên hoặc giá trị, hoặc IAM user thiếu quyền.<br/><strong>Giải pháp:</strong> kiểm tra lại tên secret khớp với <code>${{ secrets.* }}</code> trong workflow và quyền của IAM user.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Lỗi quyền khi <code>kubectl apply</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> IAM user dùng trong secret chưa có quyền truy cập EKS cluster (access entry).<br/><strong>Giải pháp:</strong> thêm access entry cho IAM user/role bằng <code>aws eks create-access-entry</code> và <code>associate-access-policy</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pod lỗi <code>ImagePullBackOff</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> tag image trong manifest chưa khớp, hoặc node không có quyền pull ECR.<br/><strong>Giải pháp:</strong> kiểm tra tag trong <code>aws-eks.yaml</code>; thêm policy ECR read-only cho node role nếu cần.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Nếu chuyển sang Lab 4, giữ EKS cluster + ECR, chỉ cần xoá GitHub Secrets và access key. Nếu kết thúc cả chương, xoá toàn bộ theo <code>clear-resources.sh</code>.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

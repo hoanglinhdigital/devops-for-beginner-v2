@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu Git &amp; hệ thống quản lý phiên bản (VCS) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu Git &amp; hệ thống quản lý phiên bản (VCS)</span>
+  </div>
+
+  <div class="alert alert-tip"><strong>“Không có việc gì khó, chỉ sợ không biết làm!”</strong> — Mọi pipeline CI/CD đều bắt đầu từ một thao tác <code>git push</code>. Git là công cụ mà Developer và DevOps Engineer dùng hàng ngày để quản lý source code, Terraform template, script, cấu hình...</div>
+
+  <h2 class="section-heading">Mục tiêu của section</h2>
+  <ul class="feature-list">
+    <li>Hiểu <strong>Git là gì</strong>, cách Git hoạt động (repository, commit, branch, remote...).</li>
+    <li>Cài đặt và sử dụng Git ở máy local, kết nối GitHub bằng <strong>SSH key</strong>.</li>
+    <li>Thành thạo các thao tác cơ bản trong dự án: <strong>branch, commit, push, pull, Pull Request, merge, tag</strong>.</li>
+    <li>Biết cách <strong>revert</strong> thay đổi và <strong>xử lý conflict</strong> khi làm việc nhóm.</li>
+    <li>Nắm các <strong>chiến lược quản lý branch</strong> (Feature Branch, Gitflow) và mapping branch với môi trường deploy.</li>
+    <li>Phân biệt <strong>Merge / Rebase / Squash</strong>, sử dụng <code>stash</code>, <code>reset</code>, và làm quen với <strong>AWS CodeCommit</strong>.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Git</strong> là một hệ thống quản lý phiên bản (<strong>Version Control System – VCS</strong>) mã nguồn mở, dùng để theo dõi mọi thay đổi trong source code trong quá trình phát triển phần mềm.
+    Git được <strong>Linus Torvalds</strong> (cha đẻ của Linux) phát triển vào năm <strong>2005</strong> để quản lý mã nguồn Linux kernel, và nhanh chóng trở thành tiêu chuẩn của ngành phần mềm.
+  </p>
+  <p class="body-text">
+    Git giúp nhiều developer làm việc cùng nhau trên một dự án mà không ghi đè code của nhau: theo dõi lịch sử thay đổi (ai sửa gì, khi nào, vì sao), tách <strong>nhánh (branch)</strong> để phát triển song song nhiều tính năng hoặc sửa lỗi, và dễ dàng <strong>khôi phục</strong> lại phiên bản trước đó khi có sự cố.
+  </p>
+
+  <h3 class="section-subheading">Không có VCS thì sao?</h3>
+  <table class="compare-table">
+    <thead><tr><th>Không dùng VCS</th><th>Dùng Git</th></tr></thead>
+    <tbody>
+      <tr><td>Copy thư mục <code>project_final</code>, <code>project_final_v2</code>, <code>project_final_that_su</code>...</td><td>Mỗi lần lưu là một <strong>commit</strong> có message, tác giả, thời gian rõ ràng</td></tr>
+      <tr><td>Gửi code qua email/USB/zip, dễ ghi đè code của nhau</td><td>Đồng bộ qua <strong>remote repository</strong> (GitHub, GitLab...), tự động phát hiện xung đột</td></tr>
+      <tr><td>Lỗi production → không biết bản nào chạy ổn để quay lại</td><td>Đánh <strong>tag</strong> theo version, <code>git revert</code> trong vài giây</td></tr>
+      <tr><td>Không review được thay đổi trước khi đưa vào sản phẩm</td><td><strong>Pull Request</strong> để review, thảo luận, chạy CI trước khi merge</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Đặc trưng của Git</h2>
+  <ul class="feature-list">
+    <li><strong>Open-source &amp; miễn phí:</strong> chạy trên Windows, Mac, Linux; được tích hợp trong hầu hết IDE và công cụ CI/CD.</li>
+    <li><strong>Kiến trúc phân tán (Distributed):</strong> mỗi developer có một bản copy đầy đủ của repository (kể cả lịch sử), có thể commit, xem log, tạo branch khi không có Internet và đồng bộ sau.</li>
+    <li><strong>Nhanh &amp; hiệu quả:</strong> hầu hết thao tác thực hiện ở local nên rất nhanh, kể cả với codebase lớn như Linux kernel.</li>
+    <li><strong>Content-addressable file system:</strong> mỗi phiên bản file/commit được định danh bằng mã hash (SHA-1/SHA-256), giúp truy xuất nhanh, toàn vẹn dữ liệu và lấy lại phiên bản cũ dễ dàng.</li>
+    <li><strong>Branch “nhẹ”:</strong> tạo/chuyển branch gần như tức thì, khuyến khích mỗi tính năng/bug một branch riêng.</li>
+    <li><strong>Lịch sử chỉ thêm, không mất:</strong> thay đổi thường là thêm commit mới. Ngay cả khi <code>revert</code>, Git tạo thêm một commit “đảo ngược” chứ không xoá commit cũ.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc: Centralized vs Distributed VCS</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph CVCS["Centralized VCS (SVN, TFVC)"]
+          direction TB
+          CS["🗄️ <b>Central Server</b><br/>toàn bộ lịch sử"]
+          CA["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>Dev A<br/>chỉ có bản làm việc"]
+          CB["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>Dev B<br/>chỉ có bản làm việc"]
+          CA <-->|"commit / update<br/>bắt buộc có mạng"| CS
+          CB <-->|"commit / update"| CS
+      end
+      subgraph DVCS["Distributed VCS (Git)"]
+          direction TB
+          GH["<img src='../../assets/svg-icon/github.svg' style='width:36px;height:36px;'/><br/><b>Remote repository</b><br/>GitHub / GitLab / CodeCommit"]
+          DA["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>Dev A<br/>📦 local repo đầy đủ lịch sử"]
+          DB["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>Dev B<br/>📦 local repo đầy đủ lịch sử"]
+          DA <-->|"push / pull"| GH
+          DB <-->|"push / pull"| GH
+      end
+  </div>
+  <p class="arch-caption">Với Git, remote repository chỉ là “điểm hẹn” để đồng bộ. Mỗi máy developer đều giữ một bản sao đầy đủ — nếu server mất dữ liệu, có thể khôi phục từ bất kỳ máy nào.</p>
+
+  <h2 class="section-heading">Các nhà cung cấp dịch vụ Git</h2>
+  <p class="body-text">Git là công cụ; còn <strong>GitHub, GitLab, Bitbucket, CodeCommit...</strong> là dịch vụ lưu trữ remote repository, bổ sung giao diện web, Pull Request, phân quyền, CI/CD, issue tracking...</p>
+  <table class="compare-table">
+    <thead><tr><th>Dịch vụ</th><th>Đặc điểm</th><th>CI/CD tích hợp</th></tr></thead>
+    <tbody>
+      <tr><td><strong>GitHub</strong></td><td>Phổ biến nhất, cộng đồng open-source lớn nhất, thuộc Microsoft. Gói Free có private repo không giới hạn.</td><td>GitHub Actions</td></tr>
+      <tr><td><strong>GitLab</strong></td><td>Có bản SaaS (gitlab.com) và bản self-hosted cài trên server công ty, mạnh về DevSecOps.</td><td>GitLab CI/CD</td></tr>
+      <tr><td><strong>Bitbucket</strong></td><td>Thuộc Atlassian, tích hợp chặt với Jira, Confluence.</td><td>Bitbucket Pipelines</td></tr>
+      <tr><td><strong>AWS CodeCommit</strong></td><td>Dịch vụ managed trên AWS, phân quyền bằng IAM, dữ liệu nằm trong tài khoản AWS.</td><td>CodePipeline, CodeBuild</td></tr>
+      <tr><td><strong>Azure Repos</strong></td><td>Một phần của Azure DevOps, phổ biến ở doanh nghiệp dùng hệ sinh thái Microsoft.</td><td>Azure Pipelines</td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-info">Khoá học sử dụng <strong>GitHub</strong> cho hầu hết bài lab (miễn phí, phổ biến nhất, dùng lại ở section GitHub Actions) và có 1 lab làm quen với <strong>AWS CodeCommit</strong> (dùng lại ở section CodePipeline).</div>
+
+  <h2 class="section-heading">Trade-off khi sử dụng Git</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Ưu điểm</th><th>Nhược điểm / Lưu ý</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Làm việc offline, thao tác local rất nhanh</td><td>Nhiều khái niệm (staging, HEAD, rebase, reset...) – người mới cần thời gian làm quen</td></tr>
+      <tr><td>Branch nhẹ, hỗ trợ tốt làm việc song song</td><td>Không phù hợp lưu file nhị phân lớn (video, dataset) → cần Git LFS</td></tr>
+      <tr><td>Lịch sử đầy đủ, dễ truy vết và khôi phục</td><td>Lỡ commit secret (password, access key) thì secret nằm trong lịch sử, xoá file không đủ – phải rotate secret</td></tr>
+      <tr><td>Hệ sinh thái khổng lồ: GitHub, GitLab, CI/CD, IDE đều hỗ trợ</td><td>Lệnh nguy hiểm (<code>reset --hard</code>, <code>push --force</code>) có thể làm mất code nếu dùng sai</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Quản lý source code ứng dụng</h4>
+      <p>Team nhiều developer cùng phát triển, mỗi người một branch, review qua Pull Request, merge vào nhánh chính khi đạt chất lượng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Infrastructure as Code &amp; GitOps</h4>
+      <p>Terraform template, Kubernetes manifest, Ansible playbook được lưu trên Git. Mọi thay đổi hạ tầng đều qua Pull Request và có lịch sử (GitOps với Argo CD ở các section sau).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Kích hoạt CI/CD pipeline</h4>
+      <p>Mỗi lần push/merge vào branch, Jenkins, GitHub Actions, CodePipeline tự động build, test và deploy lên môi trường tương ứng.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Git là phần mềm chạy ở máy bạn; GitHub là website dịch vụ. Có thể dùng Git mà không cần GitHub (repo local), nhưng làm việc nhóm thì cần một remote repository.</li>
+    <li>Từ năm 2020, GitHub đổi tên branch mặc định từ <code>master</code> sang <code>main</code>. Các repository cũ vẫn có thể dùng <code>master</code>, cách thao tác hoàn toàn giống nhau.</li>
+    <li>GitHub không còn cho phép dùng password tài khoản khi push qua HTTPS – cần dùng <strong>SSH key</strong> (Lab 2) hoặc Personal Access Token.</li>
+    <li>Tài liệu chính thức: <a href="https://git-scm.com/book/en/v2" target="_blank" rel="noopener">Pro Git book</a>, <a href="https://docs.github.com/" target="_blank" rel="noopener">GitHub Docs</a>.</li>
+  </ul>
+
+</body>
+</html>

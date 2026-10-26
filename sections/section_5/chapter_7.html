@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Terraform Output – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Terraform Output</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu Terraform Output là gì và dùng để làm gì.</li>
+    <li>Gắn Elastic IP cho EC2 và xuất ra các giá trị: public IP, private IP, Security Group ID, lệnh SSH.</li>
+    <li>Sử dụng lệnh <code>terraform output</code> để đọc giá trị output, kết hợp output với lệnh shell.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến thức cần nắm</h2>
+  <p class="body-text">
+    <strong>Output</strong> là "giá trị trả về" của một Terraform project/module. Sau khi <code>apply</code>, Terraform in ra các output trên màn hình và lưu chúng trong state.
+    Output được dùng để: (1) hiển thị thông tin cần thiết cho người dùng (IP, DNS của Load Balancer...), (2) <strong>truyền dữ liệu giữa các module</strong> (sẽ học ở Lab 5), (3) cung cấp dữ liệu cho script hoặc CI/CD pipeline.
+  </p>
+  <pre class="code-block"><code class="language-hcl">output "instance_public_ip" {
+  description = "Elastic IP gắn vào EC2"   # mô tả (không bắt buộc)
+  value       = aws_eip.demo_eip.public_ip  # biểu thức bất kỳ: thuộc tính resource, chuỗi, list...
+  sensitive   = false                       # true: ẩn giá trị khi in ra màn hình
+}</code></pre>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["💻 <b>PC Local</b><br/>terraform output"]
+      subgraph AWS["☁️ AWS – Default VPC"]
+          SG["🛡️ <b>Security Group</b>"]
+          EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:44px;height:44px;'/><br/><b>EC2</b><br/>private_ip"]
+          EIP["📌 <b>Elastic IP</b><br/>public_ip"]
+          SG --- EC2
+          EIP --- EC2
+      end
+      AWS -->|"instance_public_ip<br/>instance_private_ip<br/>security_group_id<br/>ssh_command"| PC
+      PC -->|"SSH :22"| EIP
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3 (đã destroy resource). Lab này phát triển tiếp từ code của Lab 3.</li>
+    <li>Keypair tại <code>~/terraform-labs/keypair/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Copy code từ Lab 3</strong>
+        <p>Copy các file <code>.tf</code> và <code>terraform.tfvars</code> (không copy thư mục <code>.terraform</code> và file state):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab4_outputs
+cd ~/terraform-labs/lab4_outputs
+cp ../lab3_variables/main.tf ../lab3_variables/variable.tf ../lab3_variables/terraform.tfvars .
+code .</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Thêm Elastic IP vào main.tf</strong>
+        <p>Thêm đoạn sau vào <strong>cuối</strong> file <code>main.tf</code>. Elastic IP là IP public cố định, không thay đổi khi stop/start EC2:</p>
+        <pre class="code-block"><code class="language-hcl"># Elastic IP: IP public cố định, không đổi khi stop/start EC2
+resource "aws_eip" "demo_eip" {
+  instance = aws_instance.demo_instance.id
+  domain   = "vpc"
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo file output.tf</strong>
+        <p>Theo quy ước, output được đặt trong file riêng <code>output.tf</code>. Output <code>ssh_command</code> dùng string interpolation để tạo sẵn lệnh SSH:</p>
+        <p class="code-note">📄 <code>lab4_outputs/output.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "instance_id" {
+  description = "ID của EC2 instance"
+  value       = aws_instance.demo_instance.id
+}
+
+output "instance_public_ip" {
+  description = "Elastic IP gắn vào EC2"
+  value       = aws_eip.demo_eip.public_ip
+}
+
+output "instance_private_ip" {
+  description = "Private IP của EC2"
+  value       = aws_instance.demo_instance.private_ip
+}
+
+output "security_group_id" {
+  description = "ID của Security Group"
+  value       = aws_security_group.demo_sg.id
+}
+
+output "ssh_command" {
+  description = "Lệnh SSH vào EC2"
+  value       = "ssh -i ../keypair/udemy-key ec2-user@${aws_eip.demo_eip.public_ip}"
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Deploy và xem output</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform init
+terraform apply -auto-approve</code></pre>
+        <p>Cuối quá trình apply, Terraform in ra các output:</p>
+        <pre class="command-line" data-prompt="$" data-output="1,2,3,4,5,6"><code class="language-bash">Outputs:
+
+instance_id = "i-0abc123def4567890"
+instance_private_ip = "172.31.20.15"
+instance_public_ip = "13.250.xx.xx"
+security_group_id = "sg-0abc123def4567890"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Đọc output bằng lệnh terraform output</strong>
+        <p>Xem lại toàn bộ output bất kỳ lúc nào (đọc từ state, không gọi lên AWS):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform output</code></pre>
+        <p>Lấy một giá trị cụ thể dạng text thuần (không có dấu ngoặc kép) với <code>-raw</code>, hoặc toàn bộ dạng JSON với <code>-json</code> (thường dùng trong script/CI):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform output -raw instance_public_ip
+terraform output -json</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: SSH vào EC2 bằng output</strong>
+        <p>Kết hợp output với shell để SSH mà không cần copy IP thủ công (Mac/Linux nhớ <code>chmod 400 ../keypair/udemy-key</code> nếu chưa làm):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh -i ../keypair/udemy-key ec2-user@$(terraform output -raw instance_public_ip)</code></pre>
+        <p>Gõ <code>exit</code> để thoát.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kiểm chứng Elastic IP không đổi khi stop/start</strong>
+        <p>Trên Console vào <strong>EC2 → Instances</strong>, chọn instance <code>udemy-demo-dev</code>, thực hiện <strong>Stop</strong> rồi <strong>Start</strong>. Sau khi instance Running trở lại, public IP vẫn bằng giá trị <code>terraform output -raw instance_public_ip</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>terraform apply</code> tạo 4 resource (key pair, SG, EC2, EIP) và in ra 5 output.</li>
+      <li><code>terraform output -raw instance_public_ip</code> trả về đúng Elastic IP hiển thị trên Console.</li>
+      <li>SSH thành công bằng lệnh kết hợp với output.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Warning: No outputs found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa apply sau khi thêm <code>output.tf</code>, hoặc đang đứng sai thư mục.<br/><strong>Giải pháp:</strong> Chạy <code>terraform apply</code> (Terraform chỉ cập nhật output vào state, không tạo thêm resource) và kiểm tra <code>pwd</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Reference to undeclared resource</code> trong output.tf</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tên resource trong output không khớp với main.tf (ví dụ <code>aws_eip.demo_eip</code> chưa được thêm).<br/><strong>Giải pháp:</strong> Kiểm tra Bước 2 đã thêm resource <code>aws_eip</code> chưa.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>AddressLimitExceeded</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Mỗi region mặc định giới hạn 5 Elastic IP.<br/><strong>Giải pháp:</strong> Giải phóng (Release) các Elastic IP không dùng tại <strong>EC2 → Elastic IPs</strong>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Elastic IP tính phí</strong> (khoảng 0.005 USD/giờ cho mỗi IPv4 public) kể cả khi gắn vào instance đang chạy, và vẫn tính phí khi instance đã stop. Hãy destroy ngay sau khi học xong.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+
+</body>
+</html>

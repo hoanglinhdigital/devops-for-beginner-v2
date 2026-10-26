@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 6: Quản lý Service với systemctl – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 6: Quản lý Service với systemctl</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt web server <strong>httpd</strong> (Apache) và tạo một trang web đơn giản.</li>
+    <li>Thao tác <code>start</code>, <code>status</code>, <code>stop</code>, <code>restart</code>, <code>reload</code> service.</li>
+    <li><code>enable</code> service để tự khởi động cùng OS và kiểm chứng bằng cách reboot server.</li>
+    <li>Xem log của service bằng <code>journalctl</code>.</li>
+    <li>Tự tạo một service mới bằng file systemd unit và quan sát cơ chế tự restart khi process bị kill.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Browser["<img src='../../assets/svg-icon/browser.svg' style='width:40px;height:40px;'/><br/><b>Browser</b>"]
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:40px;height:40px;'/><br/><b>PC Local</b><br/>SSH"]
+      subgraph EC2["🖥️ EC2 · linux-lab-server · SG: 22, 80"]
+          direction TB
+          SD["⚙️ <b>systemd</b>"]
+          HTTPD["🌐 <b>httpd.service</b><br/>/var/www/html/index.html"]
+          HELLO["👋 <b>hello.service</b><br/>/usr/local/bin/hello.sh"]
+          J["📜 journald"]
+          SD --> HTTPD
+          SD --> HELLO
+          HTTPD -.-> J
+          HELLO -.-> J
+      end
+      Browser -->|"HTTP :80"| HTTPD
+      PC -->|"SSH :22 · systemctl"| SD
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Instance <code>linux-lab-server</code> đang Running, Security Group <code>linux-lab-sg</code> mở inbound <strong>HTTP 80</strong> (đã tạo ở Lab 1).</li>
+    <li>Đã đọc chương <strong>Process &amp; Service trong Linux</strong>.</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab6_service/</code> gồm <code>index.html</code>, <code>hello.sh</code>, <code>hello.service</code>, <code>commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt httpd</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo dnf update -y
+sudo dnf install -y httpd
+systemctl status httpd</code></pre>
+        <p>Sau khi cài, service ở trạng thái <code>inactive (dead)</code> và <code>disabled</code> — package chỉ cài phần mềm, không tự chạy service. Nhấn <code>q</code> để thoát màn hình status.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo trang web</strong>
+        <p>Thư mục chứa web mặc định của httpd là <code>/var/www/html</code> (thuộc quyền root nên cần <code>sudo</code>). Tạo file và copy nội dung file <code>index.html</code> trong source code vào:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo vim /var/www/html/index.html</code></pre>
+        <p class="code-note">📄 <code>lab6_service/index.html</code></p>
+        <pre class="code-block"><code class="language-html">&lt;!DOCTYPE html&gt;
+&lt;html lang="vi"&gt;
+&lt;head&gt;
+  &lt;meta charset="UTF-8" /&gt;
+  &lt;title&gt;Hello from Linux&lt;/title&gt;
+  &lt;style&gt;
+    body { font-family: 'Segoe UI', sans-serif; background: #f8fafc; color: #1e293b; text-align: center; padding-top: 80px; }
+    h1 { color: #8f0c9e; }
+    .box { display: inline-block; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px 40px; }
+  &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;div class="box"&gt;
+    &lt;h1&gt;Hello from Amazon Linux 2023!&lt;/h1&gt;
+    &lt;p&gt;Trang web này được phục vụ bởi service &lt;strong&gt;httpd&lt;/strong&gt; trên EC2.&lt;/p&gt;
+    &lt;p&gt;DevOps on AWS for Beginner – Section 6 – Lab 6&lt;/p&gt;
+  &lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Start service và kiểm tra</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo systemctl start httpd
+systemctl status httpd
+curl http://localhost</code></pre>
+        <p>Status hiển thị <code>Active: active (running)</code>, PID chính và vài dòng log gần nhất. Mở trình duyệt truy cập <code>http://&lt;PUBLIC_IP&gt;</code> (lưu ý dùng <strong>http</strong>, không phải https) sẽ thấy trang <em>Hello from Amazon Linux 2023!</em>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Stop, start, restart, reload</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="4"><code class="language-bash">sudo systemctl stop httpd
+systemctl status httpd
+curl http://localhost
+curl: (7) Failed to connect to localhost port 80 after 0 ms: Couldn't connect to server
+sudo systemctl start httpd
+sudo systemctl restart httpd
+sudo systemctl reload httpd</code></pre>
+        <ul class="feature-list">
+          <li><code>restart</code>: dừng hẳn rồi chạy lại (PID thay đổi, các kết nối đang mở bị ngắt).</li>
+          <li><code>reload</code>: yêu cầu service đọc lại file cấu hình mà không dừng (PID chính giữ nguyên). Không phải service nào cũng hỗ trợ reload.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Enable service khởi động cùng OS</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2,4"><code class="language-bash">systemctl is-enabled httpd
+disabled
+sudo systemctl enable httpd
+Created symlink /etc/systemd/system/multi-user.target.wants/httpd.service → /usr/lib/systemd/system/httpd.service.
+systemctl is-enabled httpd
+sudo reboot</code></pre>
+        <p>Phiên SSH sẽ bị ngắt. Đợi 1–2 phút rồi SSH lại (Public IP không đổi khi reboot), kiểm tra httpd đã tự chạy:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2"><code class="language-bash">systemctl is-active httpd
+active
+curl http://localhost</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Xem log của service</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo journalctl -u httpd --no-pager | tail -20
+sudo tail -f /var/log/httpd/access_log</code></pre>
+        <p><code>journalctl -u</code> hiển thị log khởi động/dừng của service do systemd ghi lại. Lệnh <code>tail -f</code> theo dõi file access log liên tục: refresh trình duyệt vài lần để thấy request mới xuất hiện, nhấn <strong>Ctrl + C</strong> để thoát.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Liệt kê các service</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">systemctl list-units --type=service --state=running
+systemctl list-unit-files --type=service | grep enabled</code></pre>
+        <p>Bạn sẽ thấy các service quen thuộc: <code>sshd</code>, <code>httpd</code>, <code>chronyd</code> (đồng bộ thời gian), <code>amazon-ssm-agent</code> (dùng cho AWS Systems Manager)...</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Tự tạo một service</strong>
+        <p>Tạo script chạy liên tục — copy nội dung file <code>hello.sh</code> trong source code:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo vim /usr/local/bin/hello.sh
+sudo chmod 755 /usr/local/bin/hello.sh</code></pre>
+        <p class="code-note">📄 <code>lab6_service/hello.sh</code></p>
+        <pre class="code-block"><code class="language-bash">#!/bin/bash
+# Script chạy liên tục, mỗi 5 giây ghi 1 dòng log ra stdout (systemd sẽ đưa vào journal)
+while true; do
+  echo "Hello from hello.service - $(date '+%Y-%m-%d %H:%M:%S')"
+  sleep 5
+done</code></pre>
+        <p>Tạo file systemd unit — copy nội dung file <code>hello.service</code> trong source code:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo vim /etc/systemd/system/hello.service</code></pre>
+        <p class="code-note">📄 <code>lab6_service/hello.service</code></p>
+        <pre class="code-block"><code class="language-ini">[Unit]
+Description=Hello demo service - DevOps on AWS for Beginner
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+ExecStart=/usr/local/bin/hello.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Thuộc tính</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>After=network.target</code></td><td>Khởi động sau khi network sẵn sàng</td></tr>
+            <tr><td><code>User=ec2-user</code></td><td>Chạy process bằng user thường, không dùng root</td></tr>
+            <tr><td><code>ExecStart</code></td><td>Lệnh khởi chạy service</td></tr>
+            <tr><td><code>Restart=always</code>, <code>RestartSec=3</code></td><td>Tự khởi động lại sau 3 giây nếu process dừng</td></tr>
+            <tr><td><code>WantedBy=multi-user.target</code></td><td>Được chạy khi OS boot ở chế độ bình thường (khi <code>enable</code>)</td></tr>
+          </tbody>
+        </table>
+        <p>Nạp lại cấu hình systemd, enable và start service, xem log real-time (nhấn <strong>Ctrl + C</strong> để thoát):</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo systemctl daemon-reload
+sudo systemctl enable --now hello
+systemctl status hello
+sudo journalctl -u hello -f</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Kiểm chứng cơ chế tự restart</strong>
+        <p>Buộc kill process chính của service, đợi vài giây và xem systemd tự chạy lại với PID mới:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">systemctl show -p MainPID hello
+sudo kill -9 $(systemctl show -p MainPID --value hello)
+sleep 6
+systemctl show -p MainPID hello
+systemctl status hello</code></pre>
+        <p>Đây chính là lý do nên chạy ứng dụng production dưới dạng service thay vì chạy tay trong terminal.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Truy cập <code>http://&lt;PUBLIC_IP&gt;</code> hiển thị trang Hello from Amazon Linux 2023.</li>
+      <li>Sau khi reboot, <code>systemctl is-active httpd</code> trả về <code>active</code>.</li>
+      <li><code>journalctl -u hello</code> có log mới mỗi 5 giây và PID của <code>hello.service</code> thay đổi sau khi bị kill.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Trình duyệt báo timeout khi truy cập <code>http://&lt;PUBLIC_IP&gt;</code> nhưng <code>curl localhost</code> chạy được</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group chưa mở cổng 80, hoặc trình duyệt tự chuyển sang <code>https://</code>.<br/><strong>Giải pháp:</strong> Thêm inbound rule HTTP 80 vào <code>linux-lab-sg</code>; gõ rõ <code>http://</code> trên thanh địa chỉ.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Hiển thị trang test mặc định của Apache thay vì trang của bạn</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File <code>/var/www/html/index.html</code> chưa được lưu hoặc sai tên/đường dẫn.<br/><strong>Giải pháp:</strong> Kiểm tra bằng <code>ls -l /var/www/html/</code> và <code>cat /var/www/html/index.html</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Job for httpd.service failed because the control process exited with error code</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Lỗi cấu hình hoặc cổng 80 đang bị process khác chiếm.<br/><strong>Giải pháp:</strong> Xem chi tiết bằng <code>sudo journalctl -xeu httpd</code>; kiểm tra cấu hình <code>sudo apachectl configtest</code>; kiểm tra cổng <code>sudo ss -tlnp | grep :80</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>hello.service: Failed at step EXEC ... Permission denied</code> / <code>status=203/EXEC</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Script chưa có quyền execute hoặc thiếu dòng <code>#!/bin/bash</code> ở đầu file.<br/><strong>Giải pháp:</strong> <code>sudo chmod 755 /usr/local/bin/hello.sh</code>, kiểm tra dòng đầu file rồi <code>sudo systemctl restart hello</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Warning: The unit file ... changed on disk. Run 'systemctl daemon-reload'</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sửa file <code>.service</code> nhưng systemd vẫn dùng bản cũ trong bộ nhớ.<br/><strong>Giải pháp:</strong> Chạy <code>sudo systemctl daemon-reload</code> rồi restart service.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Xoá service <code>hello</code> vừa tạo. httpd có thể giữ lại hoặc gỡ bỏ theo lệnh bên dưới (lưu ý: <code>systemctl</code> không có lệnh <code>remove</code>, muốn gỡ phần mềm phải dùng <code>dnf remove</code>). Giữ lại instance cho Lab 7.</div>
+  <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo systemctl disable --now hello
+sudo rm /etc/systemd/system/hello.service /usr/local/bin/hello.sh
+sudo systemctl daemon-reload
+sudo systemctl disable --now httpd
+sudo dnf remove -y httpd</code></pre>
+
+</body>
+</html>

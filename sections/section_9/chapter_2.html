@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWS CodeBuild &amp; file buildspec.yml – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">AWS CodeBuild &amp; file buildspec.yml</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>AWS CodeBuild</strong> là dịch vụ build &amp; test được AWS quản lý: nó lấy source code, biên dịch, chạy test và tạo ra các software package sẵn sàng để deploy.
+    Mỗi lần build, CodeBuild khởi tạo một <strong>container sạch</strong> từ build image (Amazon Linux, Ubuntu, Windows...), thực thi các lệnh khai báo trong file
+    <code>buildspec.yml</code>, rồi đẩy kết quả (artifact) lên S3 và log lên CloudWatch Logs. Bạn không cần duy trì build server – chỉ trả tiền cho số phút build thực tế.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Tự động hoá:</strong> build được kích hoạt thủ công, theo webhook (push, pull request) hoặc như một stage trong CodePipeline.</li>
+    <li><strong>Có thể mở rộng:</strong> chạy nhiều build song song, không phải xếp hàng chờ build agent như Jenkins tự host.</li>
+    <li><strong>Môi trường build linh hoạt:</strong> dùng managed image có sẵn runtime (Java, Node.js, Python, Go, .NET, Docker...) hoặc custom image của bạn trên ECR.</li>
+    <li><strong>Bảo mật:</strong> mỗi build chạy trong container cô lập, quyền truy cập AWS qua <strong>service role</strong>; có thể chạy trong VPC để truy cập resource private (RDS, ElastiCache).</li>
+    <li><strong>Tích hợp:</strong> CodePipeline, S3, ECR, Secrets Manager, Parameter Store, CloudWatch Logs; đọc source từ GitHub, Bitbucket, GitLab, CodeCommit, S3.</li>
+    <li><strong>Hiệu quả chi phí:</strong> trả tiền theo phút build, không tốn chi phí khi không build.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình hoạt động</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>Source</b><br/>GitHub / CodeCommit / S3"]
+      subgraph CB["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:26px;height:26px;'/> CodeBuild project"]
+          direction TB
+          ENV["🐳 Build container<br/>image · compute · service role"]
+          subgraph PH["buildspec.yml"]
+              direction LR
+              P1["install"] --> P2["pre_build"] --> P3["build"] --> P4["post_build"]
+          end
+          ENV --> PH
+      end
+      S3["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>Artifact (S3)"]
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>Docker image (ECR)"]
+      CW["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:36px;height:36px;'/><br/>CloudWatch Logs"]
+      SM["<img src='../../assets/aws-svg/Secrets-Manager.svg' style='width:36px;height:36px;'/><br/>Secrets Manager<br/>Parameter Store"]
+      GH -->|"① checkout"| CB
+      SM -.->|"biến môi trường bí mật"| CB
+      CB -->|"② artifacts"| S3
+      CB -->|"② docker push"| ECR
+      CB -.->|"log"| CW
+  </div>
+
+  <h3 class="section-subheading">Các thành phần của một Build project</h3>
+  <table class="compare-table">
+    <thead><tr><th>Thành phần</th><th>Ý nghĩa</th><th>Ví dụ trong lab</th></tr></thead>
+    <tbody>
+      <tr><td>Source</td><td>Nơi lấy source code và branch/commit cần build</td><td>GitHub repository đã fork, branch <code>main</code>/<code>master</code></td></tr>
+      <tr><td>Environment</td><td>Build image, compute type (CPU/RAM), privileged mode (để build Docker)</td><td><code>aws/codebuild/amazonlinux-x86_64-standard:5.0</code>, 3 GB / 2 vCPU</td></tr>
+      <tr><td>Service role</td><td>IAM role CodeBuild dùng để gọi dịch vụ AWS khác</td><td>Quyền ghi S3, push ECR, ghi CloudWatch Logs</td></tr>
+      <tr><td>Buildspec</td><td>Các lệnh build, khai báo trong file <code>buildspec.yml</code> ở thư mục gốc repo (hoặc nhập trực tiếp trên Console)</td><td><code>mvn clean package</code>, <code>npm run build</code>, <code>docker build</code></td></tr>
+      <tr><td>Artifacts</td><td>Kết quả build được upload lên đâu</td><td>S3 bucket, hoặc <em>No artifacts</em> khi tự push bằng lệnh</td></tr>
+      <tr><td>Logs</td><td>Nơi lưu log build</td><td>CloudWatch Logs (mặc định), S3</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Cấu trúc file buildspec.yml</h2>
+  <pre class="code-block"><code class="language-yaml">version: 0.2                  # bắt buộc, phiên bản cú pháp buildspec
+
+env:                          # (tuỳ chọn) biến môi trường
+  variables:
+    IMAGE_REPO_NAME: my-app   # biến thường
+  parameter-store:
+    DB_HOST: /myapp/db-host   # lấy từ SSM Parameter Store
+  secrets-manager:
+    DOCKERHUB_TOKEN: dockerhub-credentials:token   # secret-id:json-key
+
+phases:
+  install:                    # cài runtime, công cụ cần thiết
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - npm install
+  pre_build:                  # chuẩn bị: login registry, chạy lint, unit test...
+    commands:
+      - echo Logging in...
+  build:                      # lệnh build chính
+    commands:
+      - npm run build
+  post_build:                 # sau build: push image, upload file, ghi file output
+    commands:
+      - echo Build completed on `date`
+
+artifacts:                    # file nào được đóng gói thành output artifact
+  files:
+    - dist/**/*
+  discard-paths: no
+
+cache:                        # cache thư mục giữa các lần build để build nhanh hơn
+  paths:
+    - 'node_modules/**/*'</code></pre>
+
+  <ul class="feature-list">
+    <li><strong>Các phase chạy tuần tự:</strong> <code>install → pre_build → build → post_build</code>. Nếu một lệnh trả về exit code khác 0, phase đó thất bại và build dừng (riêng <code>post_build</code> vẫn chạy sau khi <code>build</code> lỗi).</li>
+    <li><strong>Mỗi lệnh chạy trong cùng một shell</strong> của phase, nên biến gán ở lệnh trước dùng được ở lệnh sau (với buildspec version 0.2).</li>
+    <li><strong>Biến môi trường có sẵn:</strong> <code>AWS_DEFAULT_REGION</code>, <code>CODEBUILD_BUILD_NUMBER</code>, <code>CODEBUILD_RESOLVED_SOURCE_VERSION</code> (commit SHA), <code>CODEBUILD_SRC_DIR</code>...</li>
+    <li><strong>Không ghi password vào buildspec:</strong> dùng <code>parameter-store</code> hoặc <code>secrets-manager</code>, service role cần quyền đọc tương ứng.</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="compare-table">
+    <thead><tr><th>Lựa chọn</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+    <tbody>
+      <tr><td>Buildspec trong repository</td><td>Version cùng source code, review qua Pull Request, dễ tái sử dụng</td><td>Phải commit mỗi lần thay đổi</td></tr>
+      <tr><td>Buildspec nhập trên Console</td><td>Sửa nhanh, phù hợp thử nghiệm</td><td>Không được version, dễ mất đồng bộ giữa các môi trường</td></tr>
+      <tr><td>Managed image</td><td>AWS cập nhật bảo mật, có sẵn nhiều runtime</td><td>Kích thước lớn, khởi động chậm hơn; không có công cụ đặc thù</td></tr>
+      <tr><td>Custom image (ECR)</td><td>Cài sẵn đúng công cụ cần dùng, build nhanh</td><td>Tự bảo trì, vá lỗi image</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Build &amp; đóng gói ứng dụng</h4>
+      <p>Build file <code>.jar</code> từ project Maven, file tĩnh từ project Webpack/React, đẩy artifact lên S3 để deploy (Lab 2, Lab 3).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Build Docker image</h4>
+      <p>Build image từ <code>Dockerfile</code>, đánh tag theo commit SHA và push lên ECR – đầu vào cho deploy ECS/EKS (Lab 4).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Chạy test &amp; kiểm tra chất lượng</h4>
+      <p>Chạy unit test, integration test, lint, quét bảo mật cho mỗi Pull Request; xuất test report để xem trực tiếp trên Console.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Privileged mode:</strong> bắt buộc bật khi build Docker image (cần quyền chạy Docker daemon trong container build).</li>
+    <li><strong>Timeout:</strong> mặc định 60 phút, có thể cấu hình từ 5 phút đến 36 giờ. Build quá lâu thường do không dùng cache.</li>
+    <li><strong>Cache:</strong> <em>Local cache</em> (nhanh, nằm trên build host, có thể mất) hoặc <em>S3 cache</em> (bền hơn). Cache <code>~/.m2</code>, <code>node_modules</code> giúp giảm đáng kể thời gian build.</li>
+    <li><strong>Compute type:</strong> chọn loại nhỏ nhất đủ dùng (ví dụ 3 GB / 2 vCPU) để tiết kiệm; có thêm lựa chọn <em>Lambda compute</em> cho build ngắn, khởi động gần như tức thì.</li>
+    <li><strong>Docker Hub rate limit:</strong> CodeBuild pull image ẩn danh từ Docker Hub dễ bị lỗi <code>toomanyrequests</code>. Dùng base image từ <strong>Amazon ECR Public Gallery</strong> (<code>public.ecr.aws/docker/library/...</code>) hoặc đăng nhập Docker Hub bằng token lưu trong Secrets Manager.</li>
+    <li><strong>Danh sách runtime hỗ trợ:</strong> tra cứu tại tài liệu “<em>Available runtimes</em>” của CodeBuild – mỗi build image hỗ trợ một tập phiên bản Java/Node.js/Python khác nhau.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Build &amp; Run container đơn giản với Dockerfile – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Build &amp; Run container đơn giản với Dockerfile</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Viết Dockerfile sử dụng base image <code>httpd</code> (Apache HTTP Server), dùng <code>COPY</code> để đưa code HTML từ workspace vào image và expose port 80.</li>
+    <li>Build image, chạy container từ image và mapping với port <code>8080</code> của host.</li>
+    <li>Kiểm tra truy cập qua browser, build version mới của image với tag khác.</li>
+    <li>Stop, xoá container và image đã tạo.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph WS["📁 lab3_dockerfile/"]
+          DF["📄 Dockerfile"]
+          HTML["📄 web/index.html"]
+      end
+      Base["<img src='../../assets/svg-icon/docker.svg' style='width:36px;height:36px;'/><br/>httpd:2.4<br/>(Docker Hub)"]
+      IMG["🗂️ <b>my-httpd-image:1.0</b>"]
+      C["📦 <b>my-httpd-container</b><br/>httpd :80"]
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/>Browser"]
+      WS -->|"docker build"| IMG
+      Base -->|"FROM"| IMG
+      IMG -->|"docker run -p 8080:80"| C
+      User -->|"http://localhost:8080"| C
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1, Lab 2. Đã đọc chương <strong>Dockerfile &amp; các chỉ thị cơ bản</strong>.</li>
+    <li>Port <code>8080</code> trên host đang trống (đã xoá container <code>my-nginx</code> ở Lab 2).</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab3_dockerfile/</code> (<code>Dockerfile</code>, <code>web/index.html</code>, <code>commands.sh</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị thư mục làm việc</strong>
+        <p>Tạo thư mục <code>lab3_dockerfile</code> với cấu trúc như sau (hoặc dùng thư mục có sẵn trong source code):</p>
+        <pre class="file-tree"><span class="dir">lab3_dockerfile/</span>
+├── <span class="file">Dockerfile</span>       <span class="desc"># mô tả cách build image</span>
+├── <span class="file">commands.sh</span>      <span class="desc"># các lệnh tham khảo</span>
+└── <span class="dir">web/</span>
+    └── <span class="file">index.html</span>   <span class="desc"># trang web mẫu</span></pre>
+        <p>Tạo file <code>web/index.html</code>, copy nội dung từ file <code>sourcecode/section_8_docker_basic_operation/lab3_dockerfile/web/index.html</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Viết Dockerfile</strong>
+        <p>Tạo file tên <code>Dockerfile</code> (không có phần mở rộng) với nội dung:</p>
+        <pre class="code-block"><code class="language-docker"># Base image: Apache HTTP Server
+FROM httpd:2.4
+
+# Biến môi trường (có thể đọc trong container bằng lệnh env)
+ENV APP_VERSION=1.0
+
+# Copy code HTML từ workspace vào thư mục web root của httpd
+COPY ./web/ /usr/local/apache2/htdocs/
+
+# Ghi version vào file để kiểm tra (chạy lúc build image)
+RUN echo "version=${APP_VERSION}" &gt; /usr/local/apache2/htdocs/version.txt
+
+# Khai báo port ứng dụng lắng nghe
+EXPOSE 80
+
+# Lệnh chạy khi container start (chạy httpd ở foreground)
+CMD ["httpd-foreground"]</code></pre>
+        <p class="code-note">💡 Thư mục web root <code>/usr/local/apache2/htdocs/</code> và lệnh <code>httpd-foreground</code> được mô tả trong trang hướng dẫn của image <code>httpd</code> trên Docker Hub. Khi dùng một image mới, hãy luôn đọc trang này trước.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Build image</strong>
+        <p>Di chuyển vào thư mục <code>lab3_dockerfile</code> rồi build. <code>-t</code> đặt tên và tag cho image, dấu <code>.</code> cuối lệnh là <strong>build context</strong> (thư mục hiện tại):</p>
+        <pre class="command-line" data-prompt="$" data-output="3-9"><code class="language-bash">cd lab3_dockerfile
+docker build -t my-httpd-image:1.0 .
+[+] Building 5.2s (8/8) FINISHED
+ => [internal] load build definition from Dockerfile
+ => [1/3] FROM docker.io/library/httpd:2.4
+ => [2/3] COPY ./web/ /usr/local/apache2/htdocs/
+ => [3/3] RUN echo "version=1.0" &gt; /usr/local/apache2/htdocs/version.txt
+ => exporting to image
+ => => naming to docker.io/library/my-httpd-image:1.0</code></pre>
+        <p>Kiểm tra image vừa build và các layer của nó:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker images my-httpd-image
+docker image history my-httpd-image:1.0</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Run container, mapping port 8080</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker run -d -p 8080:80 --name my-httpd-container my-httpd-image:1.0
+docker ps</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra qua browser</strong>
+        <p>Truy cập <code>http://localhost:8080</code> (hoặc <code>http://&lt;EC2_PUBLIC_IP&gt;:8080</code>), bạn sẽ thấy trang <strong>Welcome to DevOps on AWS – Docker Lab v1.0</strong> với form đăng nhập. Kiểm tra thêm file được tạo bởi <code>RUN</code> và biến môi trường từ <code>ENV</code>:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">curl http://localhost:8080/version.txt
+version=1.0
+docker exec my-httpd-container env
+docker logs my-httpd-container</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Build version mới</strong>
+        <p>Sửa <code>web/index.html</code>, đổi <code>v1.0</code> thành <code>v2.0</code>. Build image với tag <code>2.0</code>, xoá container cũ và chạy container từ image mới:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build -t my-httpd-image:2.0 .
+docker rm -f my-httpd-container
+docker run -d -p 8080:80 --name my-httpd-container my-httpd-image:2.0</code></pre>
+        <p>Refresh browser để thấy <strong>v2.0</strong>. Quan sát log build: bước <code>FROM</code> dùng lại cache, chỉ bước <code>COPY</code> và các bước sau được chạy lại.</p>
+        <p class="code-note">💡 Đây chính là cách deploy version mới với container: <strong>không sửa container đang chạy</strong>, mà build image mới rồi thay container. Image <code>1.0</code> vẫn còn – muốn rollback chỉ cần chạy lại image cũ.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>docker images my-httpd-image</code> hiển thị 2 tag <code>1.0</code> và <code>2.0</code>.</li>
+      <li>Truy cập <code>http://localhost:8080</code> hiển thị trang web của bạn, <code>/version.txt</code> trả về <code>version=1.0</code>.</li>
+      <li>Sau Bước 6, trang web hiển thị <strong>v2.0</strong>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>failed to read dockerfile: open Dockerfile: no such file or directory</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Không đứng đúng thư mục chứa Dockerfile, hoặc file bị lưu thành <code>Dockerfile.txt</code> (Windows ẩn phần mở rộng).<br/><strong>Giải pháp:</strong> <code>ls</code> kiểm tra tên file; dùng <code>-f &lt;đường dẫn&gt;</code> để chỉ định Dockerfile khác tên mặc định.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>COPY failed: file not found in build context</code> / <code>"/web": not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Đường dẫn trong <code>COPY</code> là tương đối với <strong>build context</strong> (dấu <code>.</code>), không phải với vị trí Dockerfile; hoặc quên dấu <code>.</code> cuối lệnh build.<br/><strong>Giải pháp:</strong> Chạy <code>docker build</code> tại thư mục <code>lab3_dockerfile</code>, kiểm tra thư mục <code>web/</code> tồn tại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Browser vẫn hiển thị nội dung cũ sau khi build version mới</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Container cũ vẫn chạy image <code>1.0</code>, hoặc browser cache.<br/><strong>Giải pháp:</strong> <code>docker ps</code> kiểm tra cột IMAGE của container; nhấn <code>Ctrl + F5</code> để tải lại trang không dùng cache.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker stop my-httpd-container
+docker rm my-httpd-container
+docker rmi my-httpd-image:1.0 my-httpd-image:2.0</code></pre>
+  <div class="alert alert-info">Dockerfile của lab này sẽ được dùng lại ở <strong>Lab 9</strong> để push image lên Amazon ECR. Hãy giữ lại thư mục <code>lab3_dockerfile</code>.</div>
+
+</body>
+</html>

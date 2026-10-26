@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Storage trong EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Storage trong EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Ở Section 13 bạn đã học PersistentVolume (PV), PersistentVolumeClaim (PVC) và StorageClass. Trên EKS, StorageClass sẽ dùng <strong>CSI Driver</strong> để tự động cấp phát volume thật trên AWS khi Pod yêu cầu.
+    Ví dụ khi bạn tạo PVC với StorageClass EBS, một <strong>EBS Volume</strong> sẽ được tạo và gắn vào node chạy Pod đó.
+  </p>
+
+  <h2 class="section-heading">Các loại storage được hỗ trợ</h2>
+  <ul class="feature-list">
+    <li><strong>EBS</strong> – block storage gắn cho một node (ReadWriteOnce).</li>
+    <li><strong>EFS</strong> – file storage dùng chung cho nhiều node/Pod (ReadWriteMany).</li>
+    <li><strong>FSx</strong> – file system hiệu năng cao (FSx for NetApp ONTAP, FSx for OpenZFS, FSx for Lustre...).</li>
+    <li><strong>Amazon File Cache</strong> – cache tăng tốc truy cập file.</li>
+    <li><strong>Mount point for S3</strong> – mount S3 bucket như một file system.</li>
+    <li><strong>CSI Snapshot</strong> – chụp snapshot volume để backup/phục hồi.</li>
+  </ul>
+  <div class="alert alert-info">
+    Đọc thêm tại: <a href="https://docs.aws.amazon.com/eks/latest/userguide/storage.html" target="_blank" rel="noopener">docs.aws.amazon.com/eks/latest/userguide/storage.html</a>.
+  </div>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      PVC["📄 PVC<br/>(mongo-pvc)"]
+      SC["🗂️ StorageClass<br/>ebs-sc"]
+      CSI["<img src='../../assets/aws-svg/Elastic-Kubernetes-Service.svg' style='width:32px;height:32px;'/><br/>EBS CSI Driver"]
+      PV["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:32px;height:32px;'/><br/>PersistentVolume"]
+      EBS["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:32px;height:32px;'/><br/>EBS Volume"]
+      P["<img src='../../assets/svg-icon/eks-pod.svg' style='width:30px;height:30px;'/><br/>MongoDB Pod"]
+      PVC --> SC
+      SC --> CSI
+      CSI -->|"dynamic provision"| PV
+      PV --> EBS
+      P -->|"mount /data/db"| PVC
+  </div>
+  <p class="arch-caption">PVC yêu cầu StorageClass <code>ebs-sc</code>; EBS CSI Driver tạo EBS Volume (PV) tương ứng; Pod mount volume vào <code>/data/db</code>.</p>
+
+  <h2 class="section-heading">EBS vs EFS</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>EBS</th><th>EFS</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Loại storage</td><td>Block</td><td>File (NFS)</td></tr>
+      <tr><td>Access mode</td><td>ReadWriteOnce (1 node)</td><td>ReadWriteMany (nhiều node)</td></tr>
+      <tr><td>Hiệu năng</td><td>IOPS cao, độ trễ thấp</td><td>Co giãn theo dung lượng</td></tr>
+      <tr><td>AZ</td><td>Gắn theo 1 AZ</td><td>Dùng được nhiều AZ</td></tr>
+      <tr><td>Use case</td><td>Database, stateful app 1 Pod</td><td>Dữ liệu dùng chung nhiều Pod</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm của CSI Driver</h4>
+      <ul class="feature-list-sm">
+        <li>Dynamic provisioning: tạo volume tự động khi PVC được tạo, không cần tạo EBS thủ công.</li>
+        <li>Hỗ trợ snapshot, resize, encryption, gắn type volume (gp3, io2...).</li>
+        <li>Quản lý vòng đời volume theo Pod (retain/delete khi xoá PVC).</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm / lưu ý</h4>
+      <ul class="feature-list-sm">
+        <li>EBS chỉ gắn được 1 node → Pod phải chạy cùng AZ với volume.</li>
+        <li>Stateful database production nên cân nhắc dùng managed service (RDS, DynamoDB) thay vì tự quản lý trong K8s.</li>
+        <li>Cần cài đúng CSI Driver và cấp IAM Role (IRSA) cho nó.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Lưu trữ bền vững cho MongoDB</h4>
+      <p>Gắn EBS vào Pod MongoDB để dữ liệu không mất khi Pod restart (sẽ làm ở Lab 3).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Dữ liệu dùng chung nhiều Pod</h4>
+      <p>EFS cho các Pod cần đọc/ghi chung một file system (upload, config, model ML).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Backup bằng snapshot</h4>
+      <p>Dùng CSI Snapshot để chụp EBS theo lịch, phục hồi nhanh khi có sự cố.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>provisioner:</strong> mỗi loại storage có một provisioner khác nhau, ví dụ EBS là <code>ebs.csi.aws.com</code>, EFS là <code>efs.csi.aws.com</code>.</li>
+    <li><strong>volumeBindingMode:</strong> <code>WaitForFirstConsumer</code> giúp volume được tạo ở đúng AZ của node sắp chạy Pod (tránh lỗi cross-AZ với EBS).</li>
+    <li><strong>reclaimPolicy:</strong> <code>Delete</code> (mặc định) xoá volume khi xoá PVC; <code>Retain</code> giữ lại volume.</li>
+    <li><strong>EBS CSI Driver:</strong> cài qua add-on <code>aws-ebs-csi-driver</code> với IAM Role <code>AmazonEBSCSIDriverPolicy</code>.</li>
+  </ul>
+
+</body>
+</html>

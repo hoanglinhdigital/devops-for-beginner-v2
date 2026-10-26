@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Implement GitOps với GithubAction + ArgoCD – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CICD for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Implement GitOps với GithubAction + ArgoCD</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu và thực hành mô hình <strong>GitOps</strong>: tách <em>build image</em> (GitHub Actions) khỏi <em>deploy</em> (ArgoCD).</li>
+    <li>Cài đặt <strong>ArgoCD</strong> lên EKS cluster và tạo một <strong>ArgoCD Application</strong>.</li>
+    <li>Dùng <strong>GitHub Actions</strong> build &amp; push Docker image lên ECR (theo version), còn <strong>ArgoCD</strong> tự deploy từ Git repository (manifest repo).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="figure-centered">
+    <img src="../../images/section16/lab4-gitops-architecture.png" alt="Kiến trúc GitOps kết hợp GitHub Actions build image và ArgoCD deploy lên EKS" />
+    <div class="figure-title">Kiến trúc GitOps: GitHub Actions build &amp; push image, ArgoCD tự đồng bộ manifest từ Git</div>
+  </div>
+  <div class="mermaid">
+  flowchart LR
+      subgraph AppRepo["Code Application Repository"]
+          GH["<img src='../../assets/aws-svg/github.svg' style='width:36px;height:36px;'/><br/><b>App repo</b><br/>frontend + backend"]
+          GA["⚙️ GitHub Actions<br/>(build + push ECR)"]
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:38px;height:38px;'/><br/><b>ECR</b>"]
+      subgraph ManifestRepo["Manifest Repository"]
+          MG["<img src='../../assets/aws-svg/github.svg' style='width:36px;height:36px;'/><br/><b>Manifest repo</b><br/>aws-eks.yaml"]
+      end
+      ACD["🧭 <b>ArgoCD</b><br/>(GitOps agent)"]
+      EKS["<img src='../../assets/aws-svg/EKS.svg' style='width:44px;height:44px;'/><br/><b>EKS</b>"]
+      GH --> GA
+      GA -->|"push image"| ECR
+      MG -->|"đọc manifest"| ACD
+      ACD -->|"sync (kubectl apply)"| EKS
+      ECR -.->|"pull image"| EKS
+  </div>
+  <p class="arch-caption">Git là nguồn sự thật duy nhất: GitHub Actions chỉ build &amp; push image; ArgoCD liên tục so sánh manifest repo với EKS và tự đồng bộ.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Tái sử dụng resource của <strong>Lab 3</strong>: EKS cluster, ECR repositories, và GitHub repo chứa code application.</li>
+    <li>Chuẩn bị 2 GitHub repository:
+      <ul class="feature-list">
+        <li><strong>Code application repo</strong>: chứa code FE/BE + <code>.github/workflows/deploy.yml</code> (tái sử dụng Lab 3, có chỉnh sửa).</li>
+        <li><strong>Manifest repo</strong> (tạo mới): chứa file <code>aws-eks.yaml</code>, ví dụ tên <code>todo-app-demo-gitops-manifests</code>.</li>
+      </ul>
+    </li>
+    <li>Source code bài lab nằm tại <code>sourcecode/section_16_cicd_for_eks/lab4_gitops_argocd/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt ArgoCD</strong>
+        <p>Tạo namespace và cài ArgoCD:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml</code></pre>
+        <p>Truy cập ArgoCD UI bằng port-forward:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl port-forward svc/argocd-server -n argocd 8080:443</code></pre>
+        <p>Lấy mật khẩu admin ban đầu (username: <code>admin</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo ArgoCD Application</strong>
+        <p>Sửa <code>repoURL</code> trong file <code>argocd-app.yaml</code> thành URL của manifest repo của bạn, sau đó apply:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f argocd-app.yaml</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình credential cho ArgoCD truy cập GitHub (dùng GUI)</strong>
+        <p>Vào ArgoCD UI → <strong>Settings</strong> (biểu tượng bánh răng) → <strong>Repositories</strong> → <strong>+ Connect Repo</strong>, chọn phương thức <strong>Via HTTPS</strong> và điền:</p>
+        <ul class="feature-list">
+          <li>Type: <code>git</code></li>
+          <li>Repository URL: <code>https://github.com/&lt;username&gt;/todo-app-demo-gitops-manifests.git</code> (nên có đuôi <code>.git</code>).</li>
+          <li>Username: tên đăng nhập GitHub.</li>
+          <li>Password: <strong>Personal Access Token (PAT)</strong> (không phải mật khẩu đăng nhập GitHub).</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Chuẩn bị file deploy.yml mới cho code application repo</strong>
+        <p>Tham khảo file <code>deploy.yml</code> trong thư mục source. Những thay đổi so với Lab 3:</p>
+        <ul class="feature-list">
+          <li>Chuyển trigger từ <em>auto (push)</em> sang <em>manual</em> (<code>workflow_dispatch</code>) — không còn push code là tự deploy nữa.</li>
+          <li>Thêm input <code>version</code> để deploy version cụ thể.</li>
+          <li>Dùng <strong>tag của Docker image</strong> (thay vì sha của commit).</li>
+          <li>Bỏ bước <code>kubectl apply -f aws-eks.yaml</code> (ArgoCD lo việc này).</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Test luồng CI/CD — Build &amp; Push image</strong>
+        <p>Sửa code Backend &amp; Frontend, rồi commit, tag và push code lên Git:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Update version v1.0.4 to adapt with ArgoCD"
+git tag v1.0.4
+git push origin v1.0.4</code></pre>
+        <p>Chạy GitHub Actions workflow: GitHub repo → <strong>Actions</strong> → chọn workflow <code>deploy.yml</code> → <strong>Run workflow</strong> → nhập version <code>v1.0.4</code> → <strong>Run workflow</strong>. Chờ workflow hoàn thành và kiểm tra Docker image đã push lên ECR (backend &amp; frontend).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Cập nhật manifest và sync với ArgoCD</strong>
+        <p>Trong <strong>manifest repo</strong>, thực hiện:</p>
+        <ul class="feature-list">
+          <li>Tạo thư mục <code>k8s-manifests</code> làm nơi chứa file deploy mà ArgoCD sẽ đọc.</li>
+          <li>Copy file <code>aws-eks.yaml</code> vào thư mục <code>k8s-manifests</code>.</li>
+          <li>Sửa version muốn deploy cho backend và frontend trong <code>aws-eks.yaml</code> (vd <code>v1.0.4</code>).</li>
+          <li>Commit và push manifest repo.</li>
+        </ul>
+        <p>Vào ArgoCD UI, chọn application và bấm <strong>Sync</strong> để ArgoCD deploy ứng dụng:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl port-forward svc/argocd-server -n argocd 8080:443</code></pre>
+        <p>Mở <code>https://localhost:8080</code>, chọn application <code>todo-app</code>, nhấn <strong>Sync</strong>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>ArgoCD chạy trong namespace <code>argocd</code> và truy cập được UI.</li>
+      <li>Application <code>todo-app</code> trên ArgoCD ở trạng thái <strong>Synced &amp; Healthy</strong>.</li>
+      <li>Docker image tag tương ứng (vd <code>v1.0.4</code>) đã được push lên ECR.</li>
+      <li><code>kubectl get pods -n default</code> thấy ứng dụng chạy; truy cập TODO app thấy code mới.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">ArgoCD Application báo <code>Unknown / OutOfSync</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>repoURL</code> hoặc <code>path</code> trong <code>argocd-app.yaml</code> sai, hoặc ArgoCD chưa có credential để đọc repo.<br/><strong>Giải pháp:</strong> kiểm tra lại repoURL/path và kết nối repo đúng PAT ở Bước 3.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pod lỗi <code>ImagePullBackOff</code> sau khi sync</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> version trong manifest chưa khớp với tag đã push lên ECR, hoặc node thiếu quyền pull ECR.<br/><strong>Giải pháp:</strong> kiểm tra tag image trong manifest khớp với tag đã push; thêm policy ECR read-only cho node role.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Workflow GitHub Actions chạy xong nhưng app chưa deploy</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> GitOps không deploy từ action — bạn cần commit manifest và bấm Sync trên ArgoCD (hoặc bật <code>automated</code>).<br/><strong>Giải pháp:</strong> thực hiện đúng Bước 6, hoặc bật <code>syncPolicy.automated</code> trong <code>argocd-app.yaml</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">ArgoCD là một thành phần chạy trên cluster nên không tính thêm phí riêng, nhưng EKS cluster và ALB vẫn tính phí. Xoá cluster khi hoàn thành toàn bộ chương.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

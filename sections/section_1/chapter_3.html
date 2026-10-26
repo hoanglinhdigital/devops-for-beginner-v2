@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nội dung, cấu trúc &amp; mục tiêu khoá học – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">1. Giới thiệu về giảng viên &amp; khoá học</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Nội dung, cấu trúc &amp; mục tiêu khoá học</span>
+  </div>
+
+  <h2 class="section-heading">Nội dung khoá học này gồm những gì?</h2>
+  <p class="body-text">
+    Khoá học đưa bạn đi từ những khái niệm đầu tiên về DevOps &amp; CICD đến việc tự thiết kế và xây dựng pipeline CICD
+    cho một hệ thống hoàn chỉnh trên AWS, với <strong>hơn 23 giờ video</strong> gồm cả lý thuyết lẫn bài lab thực hành.
+  </p>
+  <ul class="feature-list">
+    <li>Giới thiệu về <strong>DevOps</strong> và <strong>CICD</strong>.</li>
+    <li>Ôn lại kiến thức về <strong>AWS</strong> cần nắm vững.</li>
+    <li>Hướng dẫn cài đặt các công cụ cần thiết.</li>
+    <li>Thao tác cơ bản với <strong>Linux, Git, Docker</strong>.</li>
+    <li>Infra as Code (IaC) sử dụng <strong>Terraform</strong>.</li>
+    <li>CICD sử dụng <strong>AWS CodePipeline, Jenkins, Github Actions, </strong>.</li>
+    <li>AWS Serverless Application Model (<strong>SAM</strong>).</li>
+    <li><strong>Kubernetes &amp; EKS</strong>, GitOps.</li>
+    <li>Bài thực hành cuối khoá (<strong>Final Assignment</strong>).</li>
+  </ul>
+
+  <h2 class="section-heading">Lộ trình khoá học</h2>
+  <div class="mermaid">
+  flowchart LR
+      A["♾️<br/><b>DevOps &amp; CICD</b><br/>Khái niệm · Văn hoá · Quy trình"]
+      B["<img src='../../assets/aws-svg/aws-logo.svg' style='width:32px;height:32px;'/><br/><b>Ôn lại AWS</b><br/>Networking · Compute · Security"]
+      subgraph Tools["🧰 Công cụ nền tảng"]
+          direction TB
+          T1["🐧 Linux"]
+          T2["<img src='../../assets/svg-icon/github.svg' style='width:24px;height:24px;'/> Git"]
+          T3["<img src='../../assets/svg-icon/docker.svg' style='width:24px;height:24px;'/> Docker"]
+      end
+      C["<img src='../../assets/svg-icon/terraform.svg' style='width:32px;height:32px;'/><br/><b>Infra as Code</b><br/>Terraform"]
+      subgraph CICD["🔁 CICD"]
+          direction TB
+          D1["⚙️ Jenkins"]
+          D2["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:24px;height:24px;'/> CodePipeline"]
+          D3["<img src='../../assets/svg-icon/github.svg' style='width:24px;height:24px;'/> Github Actions"]
+      end
+      E["<img src='../../assets/aws-svg/Lambda.svg' style='width:32px;height:32px;'/><br/><b>Serverless</b><br/>AWS SAM"]
+      F["<img src='../../assets/svg-icon/kubernetes.svg' style='width:32px;height:32px;'/><br/><b>Kubernetes &amp; EKS</b><br/>Monitoring · GitOps"]
+      G["🏁<br/><b>Final Assignment</b><br/>Container Architect"]
+      A --> B --> Tools --> C --> CICD --> E --> F --> G
+  </div>
+  <p class="arch-caption">Lộ trình học: nắm khái niệm DevOps → ôn lại AWS → làm quen công cụ nền tảng → IaC → CICD → Serverless → Kubernetes/EKS → bài tập lớn.</p>
+
+  <h2 class="section-heading">Cấu trúc khoá học</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Phân loại</th><th>Nội dung</th><th>Thời lượng</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Lý thuyết</strong></td>
+        <td>
+          <ul class="feature-list-sm">
+            <li>Giới thiệu về DevOps, văn hoá DevOps, vai trò và nội dung công việc của một DevOps Engineer.</li>
+            <li>Giới thiệu quy trình DevOps &amp; CICD.</li>
+            <li>Các mô hình triển khai CICD trong dự án thực tế.</li>
+          </ul>
+        </td>
+        <td><span class="badge badge-blue">25%</span></td>
+      </tr>
+      <tr>
+        <td><strong>Thực hành</strong></td>
+        <td>
+          <ul class="feature-list-sm">
+            <li>Cài đặt và sử dụng các tool CICD thông dụng.</li>
+            <li>Làm quen với các công cụ cơ bản như Github, AWS, Docker, Docker Compose, Jenkins, Terraform...</li>
+            <li>Thực hành xây dựng hệ thống một cách tự động (IaC).</li>
+            <li>Thực hành thiết kế và xây dựng CICD cho một hệ thống demo hoàn chỉnh trên AWS sử dụng Jenkins, Github Actions, CodePipeline.</li>
+          </ul>
+        </td>
+        <td><span class="badge badge-orange">70%</span></td>
+      </tr>
+      <tr>
+        <td><strong>Other</strong></td>
+        <td>
+          <ul class="feature-list-sm">
+            <li>Chia sẻ kinh nghiệm dự án thực tế của tác giả.</li>
+          </ul>
+        </td>
+        <td><span class="badge badge-purple">5%</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Mục tiêu khi hoàn thành khoá học</h2>
+  <ul class="feature-list">
+    <li>Nắm vững những concept liên quan đến <strong>DevOps</strong> và <strong>CICD</strong>.</li>
+    <li>Có khả năng sử dụng các công cụ IaC (<strong>Terraform</strong>) để provision nhiều môi trường một cách tự động.</li>
+    <li>Thành thạo việc cài đặt, cấu hình và sử dụng <strong>Jenkins</strong> để implement CICD, deploy lên các hệ thống sử dụng AWS. Biết cách sử dụng các giải pháp thay thế như <strong>Github Actions, CodePipeline</strong>.</li>
+    <li>Vận dụng linh hoạt các công cụ CICD để hỗ trợ đội Develop trong quá trình phát triển và triển khai sản phẩm lên AWS.</li>
+    <li>Có kiến thức cần thiết để tư vấn cho khách hàng cũng như đội Develop.</li>
+  </ul>
+
+  <div class="alert alert-info">
+    <strong>Lưu ý:</strong> Khoá học giúp bạn nắm kiến thức nền tảng và kỹ năng thực hành của một DevOps Engineer, nhưng không phải là khoá luyện dump "bao đậu" chứng chỉ.
+  </div>
+
+</body>
+</html>

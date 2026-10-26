@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Add new IAM User to EKS Cluster – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Add new IAM User to EKS Cluster</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo một <strong>IAM User</strong> mới (<code>developer01</code>).</li>
+    <li>Gán quyền cho user vào cluster bằng <strong>Access Entry</strong> (RBAC).</li>
+    <li>Dùng IAM User đó truy cập cluster và kiểm tra quyền.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/svg-icon/user.svg' style='width:30px;height:30px;'/><br/>developer01<br/>(IAM User)"]
+      Profile["aws cli<br/>--profile developer01"]
+      AE["EKS Access Entry<br/>+ AmazonEKSViewPolicy"]
+      API["🔌 Kubernetes API"]
+      Dev --> Profile --> AE --> API
+  </div>
+  <p class="arch-caption">developer01 được gán vào cluster qua Access Entry (policy AmazonEKSViewPolicy), sau đó dùng aws cli profile để tạo kubeconfig và xem resource.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã có EKS Cluster (Lab 1) và kết nối được bằng kubectl (user Admin).</li>
+    <li>Có quyền tạo IAM User trong tài khoản AWS.</li>
+    <li>Source code: <code>sourcecode/section_14_eks_basic/lab4_rbac/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo user developer01</strong>
+        <p>Vào <strong>IAM → Users</strong> tạo user <code>developer01</code> với quyền <code>PowerUserAccess</code>. Tạo sẵn một <strong>Access Key</strong> cho user.</p>
+        <p>Thử đăng nhập AWS Console bằng user <code>developer01</code>, tìm đến cluster → <strong>không thấy resource</strong> (permission denied) vì chưa được cấp quyền trên EKS.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Gán quyền cho developer01 (quay lại user Admin)</strong>
+        <p>Vào <strong>EKS Cluster → tab Access → IAM access entries → Create access entry</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>IAM principal ARN: <code>arn:aws:iam::&lt;ACCOUNT_ID&gt;:user/developer01</code></li>
+          <li>Type: <strong>Standard</strong></li>
+          <li>Access policy: <strong>AmazonEKSViewPolicy</strong>, Access scope: <strong>Cluster</strong></li>
+        </ul>
+        <p>Review và nhấn <strong>Create</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình aws cli cho developer01</strong>
+        <p>Tạo thêm profile <code>developer01</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws configure --profile developer01</code></pre>
+        <p>Kiểm tra profile:</p>
+        <pre class="command-line" data-prompt="$" data-output="2-6"><code class="language-bash">aws sts get-caller-identity --profile developer01
+{
+    "UserId": "AIDAWIVVHVPNJTU7GKK72",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/developer01"
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cập nhật kubeconfig cho developer01</strong>
+        <p>Xoá (hoặc backup) file kubeconfig hiện tại (<code>C:\Users\&lt;user&gt;\.kube\config</code> hoặc <code>~/.kube/config</code>), sau đó:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws eks update-kubeconfig --region ap-southeast-1 --name devops-test-cluster --profile developer01</code></pre>
+        <p>Kiểm tra context và quyền:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl config get-contexts
+kubectl cluster-info
+kubectl get pods
+kubectl get all -A</code></pre>
+        <p>Kết quả: xem được các resource trong cluster (do đã gán <code>AmazonEKSViewPolicy</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Xoá user developer01 (tuỳ chọn)</strong>
+        <p>Vào <strong>IAM</strong> xoá user <code>developer01</code> khi không dùng nữa.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Khôi phục kubeconfig cho user Admin</strong>
+        <pre class="command-line" data-prompt="$" data-output="2-6"><code class="language-bash">aws sts get-caller-identity
+{
+    "UserId": "AIDAWIVVHVPNJTU7GKK72",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/linhnguyen.admin"
+}</code></pre>
+        <p>Cập nhật lại config cho user Admin:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws eks update-kubeconfig --region ap-southeast-1 --name devops-test-cluster
+kubectl config get-contexts
+kubectl get all -A</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>aws sts get-caller-identity --profile developer01</code> trả về user <code>developer01</code>.</li>
+      <li><code>kubectl get pods</code> (với profile developer01) xem được resource trong cluster.</li>
+      <li>Sau khi khôi phục kubeconfig Admin, user Admin thao tác bình thường.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">developer01 xem resource báo lỗi <code>forbidden</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> chưa gán Access Entry/policy đúng, hoặc kubeconfig đang trỏ user khác.<br/><strong>Giải pháp:</strong> kiểm tra lại Access Entry trong EKS, đảm bảo chạy <code>update-kubeconfig --profile developer01</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>aws eks update-kubeconfig</code> báo lỗi access denied</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> profile developer01 chưa có quyền <code>eks:DescribeCluster</code>.<br/><strong>Giải pháp:</strong> gán quyền (PowerUserAccess đã có) hoặc thêm policy mô tả cluster; kiểm tra lại credential của profile.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> xoá IAM user developer01 và EKS Cluster khi hoàn thành.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

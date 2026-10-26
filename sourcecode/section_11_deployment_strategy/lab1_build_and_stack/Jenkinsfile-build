@@ -1,0 +1,59 @@
+// Section 11 – Job 1: Build Docker image theo Git tag & push lên Amazon ECR (image tag = Git tag)
+// Job: bluegreen-job1-build | Pipeline definition: Pipeline script (dán nội dung file này)
+// This project is parameterized:
+//   - String parameter VERSION (Default: v2.0.0) – Git tag cần build, cũng là image tag trên ECR
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        // Thay <your-github-username>; credential github-ssh-key đã tạo ở Section 10 – Lab 8
+        GIT_REPO       = 'git@github.com:<your-github-username>/nodejs-random-color.git'
+        GIT_CREDENTIAL = 'github-ssh-key'
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_REPO       = 'nodejs-random-color'
+    }
+
+    stages {
+        stage('Checkout using tag') {
+            steps {
+                checkout scmGit(
+                    branches: [[name: "refs/tags/${params.VERSION}"]],
+                    userRemoteConfigs: [[url: "${GIT_REPO}", credentialsId: "${GIT_CREDENTIAL}"]]
+                )
+                sh 'git log -1 --oneline --decorate'
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${VERSION} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                // Lấy Account ID từ IAM Role của Jenkins server -> không hard-code Account ID
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${VERSION} ${ECR_REGISTRY}/${ECR_REPO}:${VERSION}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${VERSION}
+                    echo "Pushed image: ${ECR_REGISTRY}/${ECR_REPO}:${VERSION}"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            // Xoá image không còn dùng để tránh đầy ổ đĩa Jenkins server
+            sh 'docker image prune -f'
+        }
+    }
+}

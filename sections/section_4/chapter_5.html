@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ôn tập: IAM, VPC &amp; Networking, Load Balancer – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">4. Giới thiệu &amp; ôn lại kiến thức AWS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Ôn tập: IAM, VPC &amp; Networking, Load Balancer</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>IAM</strong> (ai được làm gì), <strong>VPC</strong> (mạng chạy ở đâu) và <strong>Load Balancer</strong> (traffic đi vào thế nào) là 3 nền móng của mọi hệ thống trên AWS.
+    Hầu hết các lỗi “không kết nối được”, “Access Denied” khi làm lab hay khi chạy CICD pipeline đều xuất phát từ việc cấu hình sai một trong ba phần này.
+    Chương này ôn lại nhanh các khái niệm cốt lõi.
+  </p>
+
+  <!-- ───────────── IAM ───────────── -->
+  <h2 class="section-heading">1. IAM – Identity and Access Management</h2>
+  <p class="body-text">Để thiết kế hệ thống đảm bảo Security và không gặp trouble về quyền, cần nắm vững 4 concept cơ bản của IAM:</p>
+  <div class="concept-grid">
+    <div class="concept-card">
+      <div class="label">👤 User</div>
+      <p>Đại diện cho một người (hoặc ứng dụng) với <strong>credential dài hạn</strong>: password đăng nhập Console, Access Key cho CLI/SDK. Nên bật <strong>MFA</strong>.</p>
+    </div>
+    <div class="concept-card">
+      <div class="label">👥 Group</div>
+      <p>Tập hợp nhiều User có chung quyền (Developers, Admins...). Gán policy cho Group thay vì gán cho từng User.</p>
+    </div>
+    <div class="concept-card">
+      <div class="label">🎭 Role</div>
+      <p>Danh tính được “assume” tạm thời, cấp <strong>credential tạm thời</strong> qua AWS STS. Dùng cho EC2, Lambda, CodeBuild, truy cập cross-account.</p>
+    </div>
+    <div class="concept-card">
+      <div class="label">📜 Policy (Permission)</div>
+      <p>Văn bản JSON định nghĩa <code>Effect</code> (Allow/Deny), <code>Action</code>, <code>Resource</code>, <code>Condition</code>. Gắn vào User, Group hoặc Role.</p>
+    </div>
+  </div>
+
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section4/iam-concepts.png" alt="Các thành phần của AWS IAM: User, Group, Role, Permission, STS, MFA, credential..." />
+    <div class="figure-title">Các thành phần của AWS IAM: User, Group, Role, Permission, STS, MFA, credential...</div>
+  </div>
+  <div class="alert alert-tip">
+    <strong>Best practice:</strong> không dùng root account cho công việc hằng ngày; áp dụng <strong>least privilege</strong>; ứng dụng chạy trên AWS (EC2, Lambda, ECS, CodeBuild) luôn dùng <strong>Role</strong>, tuyệt đối không hard-code Access Key trong source code.
+  </div>
+
+  <!-- ───────────── VPC ───────────── -->
+  <h2 class="section-heading">2. VPC &amp; Networking</h2>
+  <ul class="feature-list">
+    <li><strong>VPC:</strong> một mạng ảo được tạo ra ở cấp độ <strong>Region</strong>, có dải IP (CIDR) riêng, ví dụ <code>10.0.0.0/16</code>.</li>
+    <li><strong>Subnet:</strong> một dải IP con nằm trong VPC. Mỗi subnet phải được chỉ định <strong>Availability Zone</strong> tại thời điểm tạo.</li>
+    <li><strong>IP Address:</strong> IPv4 hoặc IPv6, gồm Public IP và Private IP.</li>
+    <li><strong>Route table:</strong> xác định traffic sẽ được điều hướng đi đâu. Subnet có route <code>0.0.0.0/0 → Internet Gateway</code> là <strong>public subnet</strong>.</li>
+    <li><strong>Elastic IP:</strong> Public IP cố định, không bị thu hồi khi instance stop → start.</li>
+    <li><strong>Các component khác:</strong> Internet Gateway, NAT Gateway, Elastic Network Interface (ENI), VPC Endpoint, VPC Peering, Transit Gateway, VPN, Flow Logs.</li>
+  </ul>
+
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section4/vpc-networking-concepts.png" alt="Các khái niệm cơ bản: Region, Availability Zone, VPC, Public/Private subnet, Router, Elastic IP" />
+    <div class="figure-title">Các khái niệm cơ bản: Region, Availability Zone, VPC, Public/Private subnet, Router, Elastic IP</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/vpc-networking-components.png" alt="Các component khác của VPC: Flow logs, VPN, Internet gateway, NAT gateway, Peering, Transit Gateway, ENI, Endpoints" />
+    <div class="figure-title">Các component khác của VPC: Flow logs, VPN, Internet gateway, NAT gateway, Peering, Transit Gateway, ENI, Endpoints</div>
+  </div>
+
+  <h3 class="section-subheading">Thiết kế VPC chuẩn (3 tầng, 2 AZ)</h3>
+  <div class="figure-centered">
+    <img src="../../images/section4/vpc-standard-design.png" alt="Thiết kế VPC chuẩn: public/private subnet trên 2 AZ, IGW, NAT Gateway, Security Group, VPC Endpoint" />
+    <div class="figure-title">Thiết kế VPC chuẩn: public/private subnet trên 2 AZ, IGW, NAT Gateway, Security Group, VPC Endpoint</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/vpc-route-table.png" alt="Route table: public subnet đi ra Internet qua Internet gateway, private subnet kết nối về data center qua VPN gateway" />
+    <div class="figure-title">Route table: public subnet đi ra Internet qua Internet gateway, private subnet kết nối về data center qua VPN gateway</div>
+  </div>
+  <table class="req-table">
+    <thead><tr><th>Route table</th><th>Destination</th><th>Target</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2">Public route table</td><td><code>10.0.0.0/16</code></td><td>local</td><td>Giao tiếp nội bộ trong VPC</td></tr>
+      <tr><td><code>0.0.0.0/0</code></td><td>Internet Gateway</td><td>Ra/vào Internet trực tiếp</td></tr>
+      <tr><td rowspan="2">Private route table</td><td><code>10.0.0.0/16</code></td><td>local</td><td>Giao tiếp nội bộ trong VPC</td></tr>
+      <tr><td><code>0.0.0.0/0</code></td><td>NAT Gateway</td><td>Chỉ đi ra Internet (pull image, update package), không nhận kết nối từ ngoài vào</td></tr>
+    </tbody>
+  </table>
+  <div class="figure-centered">
+    <img src="../../assets/images/sample-aws-architecture.png" alt="Ví dụ kiến trúc VPC 3 tầng với ALB, ECS, RDS" />
+    <div class="figure-title">Ví dụ một kiến trúc thực tế: VPC 2 AZ, ALB ở public subnet, ECS Fargate ở private subnet (app), RDS Multi-AZ ở private subnet (data)</div>
+  </div>
+
+  <h3 class="section-subheading">Thiết kế Security Group chuẩn</h3>
+  <ul class="feature-list">
+    <li>Security Group dùng để gom nhóm các resource có chung network setting (inbound/outbound, protocol, port).</li>
+    <li>Khi thiết kế cần quan tâm tới <strong>tính tái sử dụng</strong> và <strong>dễ quản lý</strong>.</li>
+    <li>Source của một rule có thể là <strong>CIDR</strong> hoặc <strong>ID của một Security Group khác</strong> (khuyến nghị cho traffic nội bộ).</li>
+    <li>Rule là <strong>stateful</strong> và <strong>không có deny rule</strong>: nếu Inbound cho phép request đi vào thì response tự động được trả về mà không cần allow Outbound — khác với <strong>Network ACL</strong> (stateless, có deny).</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section4/security-group-standard-design.png" alt="Thiết kế Security Group chuẩn: Public-SG → App-SG → Database-SG, Management-SG cho truy cập quản trị" />
+    <div class="figure-title">Thiết kế Security Group chuẩn: Public-SG → App-SG → Database-SG, Management-SG cho truy cập quản trị</div>
+  </div>
+
+  <!-- ───────────── Load Balancer ───────────── -->
+  <h2 class="section-heading">3. Elastic Load Balancing</h2>
+  <ul class="feature-list">
+    <li>Load Balancer cho phép cấu hình các <strong>Listener</strong> trên một port (ví dụ HTTP:80, HTTPS:443).</li>
+    <li>Mỗi Listener có nhiều <strong>Rule</strong> (theo path, host header, HTTP header...).</li>
+    <li>Request sau khi vào Listener được đánh giá bởi các Rule và forward tới <strong>Target Group</strong> phù hợp.</li>
+    <li>Target Group thực hiện <strong>health check</strong> để phát hiện và loại bỏ target unhealthy.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section4/load-balancer-listener-rule-target-group.png" alt="Load Balancer → Listener → Rule → Target Group (kèm health check)" />
+    <div class="figure-title">Load Balancer → Listener → Rule → Target Group (kèm health check)</div>
+  </div>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section4/load-balancer-types.png" alt="4 loại Load Balancer: Application, Network, Gateway, Classic" />
+    <div class="figure-title">4 loại Load Balancer: Application, Network, Gateway, Classic</div>
+  </div>
+  <div class="lb-grid">
+    <div class="lb-card">
+      <h4>Application Load Balancer (ALB)</h4>
+      <div class="layer">Layer 7 — HTTP/HTTPS</div>
+      <ul><li>Route theo path, host, header</li><li>Phổ biến nhất cho web/API</li><li>Tích hợp ECS, EKS, Lambda, WAF</li></ul>
+    </div>
+    <div class="lb-card">
+      <h4>Network Load Balancer (NLB)</h4>
+      <div class="layer">Layer 4 — TCP/UDP/TLS</div>
+      <ul><li>Hiệu năng cực cao, độ trễ thấp</li><li>Hỗ trợ Static IP / Elastic IP</li><li>Phù hợp game, IoT, gRPC</li></ul>
+    </div>
+    <div class="lb-card">
+      <h4>Gateway Load Balancer (GWLB)</h4>
+      <div class="layer">Layer 3 — IP</div>
+      <ul><li>Đưa traffic qua thiết bị bảo mật bên thứ 3</li><li>Firewall, IDS/IPS</li></ul>
+    </div>
+    <div class="lb-card">
+      <h4>Classic Load Balancer (CLB)</h4>
+      <div class="layer">Layer 4/7 — thế hệ cũ</div>
+      <ul><li>Không khuyến nghị cho hệ thống mới</li><li>Chỉ còn gặp ở hệ thống legacy</li></ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="req-table">
+    <thead><tr><th>Lựa chọn</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+    <tbody>
+      <tr><td>Đặt server ở <strong>public subnet</strong></td><td>Đơn giản, SSH/truy cập trực tiếp</td><td>Lộ ra Internet, rủi ro bảo mật — chỉ nên dùng cho lab</td></tr>
+      <tr><td>Đặt server ở <strong>private subnet</strong> sau ALB</td><td>Bảo mật, chuẩn best practice</td><td>Cần NAT Gateway (tốn phí) hoặc VPC Endpoint để đi ra ngoài</td></tr>
+      <tr><td>Security Group source = <strong>CIDR</strong></td><td>Dễ hiểu</td><td>IP thay đổi khi scale → khó quản lý</td></tr>
+      <tr><td>Security Group source = <strong>SG ID</strong></td><td>Tự động áp dụng khi scale, dễ tái sử dụng</td><td>Chỉ dùng được trong cùng VPC (hoặc peered VPC)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>CodeBuild push image lên ECR</h4>
+      <p>Gán IAM Role cho CodeBuild project với quyền <code>ecr:PutImage</code>... thay vì lưu Access Key trong buildspec.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Web app 3 tầng chuẩn production</h4>
+      <p>ALB ở public subnet, ECS/EC2 ở private subnet app, RDS ở private subnet data, Security Group xâu chuỗi alb-sg → app-sg → db-sg.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Microservices dùng chung một ALB</h4>
+      <p>Một ALB, nhiều rule theo path (<code>/user/*</code>, <code>/order/*</code>) trỏ tới các Target Group khác nhau — tiết kiệm chi phí ALB.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-warning">
+    <strong>Chi phí:</strong> <strong>NAT Gateway</strong> và <strong>Load Balancer</strong> tính phí theo giờ ngay cả khi không có traffic. Khi làm lab, hãy xoá ngay sau khi thực hành xong.
+    Elastic IP không gắn vào instance đang chạy cũng bị tính phí (hiện nay mọi Public IPv4 đều tính phí).
+  </div>
+  <div class="alert alert-tip">
+    <strong>Debug kết nối:</strong> khi không kết nối được, kiểm tra theo thứ tự: Route table → Security Group (inbound) → Network ACL → ứng dụng có đang listen đúng port không → Target Group health check.
+  </div>
+
+</body>
+</html>

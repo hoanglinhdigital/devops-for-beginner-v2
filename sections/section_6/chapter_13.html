@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết, lệnh thường dùng khác &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết, lệnh thường dùng khác &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Nội dung đã học</h2>
+  <ul class="feature-list">
+    <li>Linux là gì, lịch sử, các họ distro (Debian, Red Hat...) và Amazon Linux 2023.</li>
+    <li>Tạo EC2 Linux, kết nối SSH, cấu trúc thư mục và các lệnh làm việc với file/folder.</li>
+    <li>Sử dụng trình soạn thảo Vim và Nano để sửa file cấu hình trên server.</li>
+    <li>Quản lý user, group, quyền <code>sudo</code>; phân quyền file/folder bằng <code>chmod</code>, <code>chown</code>.</li>
+    <li>Quản lý process (<code>ps</code>, <code>top</code>, <code>kill</code>) và service (<code>systemctl</code>, <code>journalctl</code>, tự viết systemd unit).</li>
+    <li>Làm việc với EBS volume: partition, format, mount, <code>/etc/fstab</code>, mở rộng dung lượng.</li>
+    <li>Lập lịch tác vụ với cron job và quản lý SSH key cho thành viên dự án.</li>
+  </ul>
+
+  <h2 class="section-heading">Lộ trình các bài lab</h2>
+  <div class="mermaid">
+  flowchart LR
+      L1["🖥️ Lab 1<br/>EC2 + SSH"] --> L2["📝 Lab 2<br/>Vim &amp; Nano"]
+      L2 --> L3["👥 Lab 3<br/>User &amp; Group"]
+      L3 --> L4["🔒 Lab 4<br/>Permission"]
+      L2 --> L5["📊 Lab 5<br/>Process"]
+      L5 --> L6["⚙️ Lab 6<br/>Service"]
+      L2 --> L7["💽 Lab 7<br/>EBS Volume"]
+      L6 --> L8["⏰ Lab 8<br/>Cron job"]
+      L4 --> L9["🔑 Lab 9<br/>SSH key"]
+  </div>
+
+  <table class="compare-table">
+    <thead><tr><th>Lab</th><th>Lệnh / kiến thức chính</th><th>Source code</th></tr></thead>
+    <tbody>
+      <tr><td>Lab 1</td><td><code>ssh -i</code>, <code>pwd</code>, <code>cd</code>, <code>ls -la</code>, <code>cat</code>, <code>mkdir</code>, <code>cp</code>, <code>mv</code>, <code>rm</code></td><td><code>lab1_ec2_ssh_basic_commands</code></td></tr>
+      <tr><td>Lab 2</td><td><code>dnf install</code>, Vim (<code>i</code>, <code>Esc</code>, <code>:wq</code>, <code>dd</code>, <code>yy</code>, <code>p</code>), Nano</td><td><code>lab2_vim_nano</code></td></tr>
+      <tr><td>Lab 3</td><td><code>useradd</code>, <code>passwd</code>, <code>groupadd</code>, <code>usermod -aG</code>, <code>visudo</code>, <code>sshd_config.d</code></td><td><code>lab3_user_group</code></td></tr>
+      <tr><td>Lab 4</td><td><code>ls -l</code>, <code>chmod 750</code>, <code>chmod g+w</code>, <code>chown -R</code></td><td><code>lab4_file_permission</code></td></tr>
+      <tr><td>Lab 5</td><td><code>ps -ef</code>, <code>ps aux</code>, <code>top</code>, <code>&amp;</code>, <code>jobs</code>, <code>fg</code>/<code>bg</code>, <code>kill -9</code>, <code>pkill</code></td><td><code>lab5_process</code></td></tr>
+      <tr><td>Lab 6</td><td><code>systemctl start/stop/restart/enable</code>, <code>journalctl -u</code>, file <code>.service</code></td><td><code>lab6_service</code></td></tr>
+      <tr><td>Lab 7</td><td><code>lsblk</code>, <code>df -h</code>, <code>fdisk</code>, <code>mkfs</code>, <code>mount</code>, <code>/etc/fstab</code>, <code>growpart</code>, <code>xfs_growfs</code></td><td><code>lab7_ebs_volume</code></td></tr>
+      <tr><td>Lab 8</td><td>Cú pháp cron, <code>crontab -e</code>, <code>/etc/crontab</code></td><td><code>lab8_cronjob</code></td></tr>
+      <tr><td>Lab 9</td><td><code>ssh-keygen</code>, <code>~/.ssh/authorized_keys</code>, <code>~/.ssh/config</code></td><td><code>lab9_ssh_key</code></td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Toàn bộ source code nằm tại <code>sourcecode/section_6_linux_basic_operation/</code> trong repository khoá học.</p>
+
+  <h2 class="section-heading">Các thao tác thường dùng khác (tự thực hành thêm)</h2>
+  <p class="body-text">Các lệnh dưới đây được dùng rất thường xuyên trong công việc DevOps. Hãy SSH vào <code>linux-lab-server</code> và chạy thử trước khi dọn dẹp resource. Source code: <code>sourcecode/section_6_linux_basic_operation/linux_cheatsheet/commands.sh</code>.</p>
+  <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">mkdir -p ~/linux-lab/cheatsheet
+cd ~/linux-lab/cheatsheet</code></pre>
+
+  <h3 class="section-subheading">Download file từ Internet</h3>
+  <pre class="command-line" data-prompt="[ec2-user cheatsheet]$"><code class="language-bash">wget https://raw.githubusercontent.com/torvalds/linux/master/README
+wget -O linux-readme.txt https://raw.githubusercontent.com/torvalds/linux/master/README
+curl -o linux-readme-2.txt https://raw.githubusercontent.com/torvalds/linux/master/README
+curl -I https://aws.amazon.com
+curl -s https://checkip.amazonaws.com</code></pre>
+  <p class="body-text"><code>wget</code> chuyên tải file; <code>curl</code> linh hoạt hơn, hay dùng để gọi/kiểm tra API (<code>-I</code> chỉ lấy header, <code>-s</code> chế độ im lặng).</p>
+
+  <h3 class="section-subheading">Nén / giải nén .tar.gz và .zip</h3>
+  <pre class="command-line" data-prompt="[ec2-user cheatsheet]$"><code class="language-bash">mkdir -p project/logs
+echo "log 1" &gt; project/logs/app.log
+echo "config" &gt; project/app.conf
+tar -czvf project.tar.gz project
+tar -tzvf project.tar.gz
+mkdir extract
+tar -xzvf project.tar.gz -C extract
+ls -R extract</code></pre>
+  <p class="body-text"><code>-c</code> tạo, <code>-x</code> giải nén, <code>-t</code> xem danh sách, <code>-z</code> nén gzip, <code>-v</code> hiển thị chi tiết, <code>-f</code> tên file, <code>-C</code> thư mục đích.</p>
+  <pre class="command-line" data-prompt="[ec2-user cheatsheet]$"><code class="language-bash">sudo dnf install -y zip unzip
+zip -r project.zip project
+unzip -l project.zip
+unzip project.zip -d extract-zip
+ls -R extract-zip</code></pre>
+
+  <h3 class="section-subheading">Xem nội dung &amp; tìm kiếm</h3>
+  <pre class="command-line" data-prompt="[ec2-user cheatsheet]$"><code class="language-bash">head -n 5 linux-readme.txt
+tail -n 5 linux-readme.txt
+less linux-readme.txt
+wc -l linux-readme.txt
+grep -n "kernel" linux-readme.txt
+sudo grep -ri "PermitRootLogin" /etc/ssh/
+find ~ -name "*.log"
+sudo find /var/log -type f -size +1M</code></pre>
+  <p class="body-text"><code>less</code>: xem file dài theo trang (<code>/</code> để tìm, <code>q</code> để thoát). <code>tail -f</code>: theo dõi file log real-time. <code>grep -r</code>: tìm chuỗi trong cả thư mục, <code>-i</code> không phân biệt hoa thường, <code>-n</code> hiển thị số dòng.</p>
+
+  <h3 class="section-subheading">Dung lượng, pipe &amp; redirect, biến môi trường, mạng</h3>
+  <pre class="command-line" data-prompt="[ec2-user cheatsheet]$"><code class="language-bash">df -h
+du -sh ~/linux-lab
+sudo du -h --max-depth=1 /var | sort -h
+free -h
+ps aux | sort -k4 -nr | head -5
+cat /etc/passwd | cut -d: -f1 | sort
+ls /not-exist 2&gt; error.txt
+cat error.txt
+echo $HOME
+echo $PATH
+export APP_ENV=dev
+env | grep APP_ENV
+ip addr
+sudo ss -tulnp
+ping -c 3 google.com</code></pre>
+  <table class="compare-table">
+    <thead><tr><th>Ký hiệu</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>|</code></td><td>Pipe: output của lệnh trước là input của lệnh sau</td></tr>
+      <tr><td><code>&gt;</code> / <code>&gt;&gt;</code></td><td>Ghi đè / ghi thêm output (stdout) vào file</td></tr>
+      <tr><td><code>2&gt;</code></td><td>Ghi thông báo lỗi (stderr) vào file</td></tr>
+      <tr><td><code>&gt; file 2&gt;&amp;1</code></td><td>Ghi cả output và lỗi vào cùng một file</td></tr>
+      <tr><td><code>&amp;&amp;</code></td><td>Chỉ chạy lệnh sau khi lệnh trước thành công, ví dụ <code>sudo dnf update -y &amp;&amp; sudo reboot</code></td></tr>
+    </tbody>
+  </table>
+  <pre class="command-line" data-prompt="[ec2-user cheatsheet]$"><code class="language-bash">rm -rf ~/linux-lab/cheatsheet</code></pre>
+
+  <h2 class="section-heading">Checklist dọn dẹp resource</h2>
+  <div class="alert alert-warning">Trước khi chuyển sang section tiếp theo, hãy xoá toàn bộ resource của section này. EC2 đang chạy, EBS volume (kể cả không gắn vào instance) và Public IPv4/Elastic IP đều <strong>tính phí theo giờ</strong>.</div>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Terminate EC2 instance</strong>
+        <p>Vào <strong>EC2 → Instances</strong>, chọn <code>linux-lab-server</code> → <strong>Instance state → Terminate (delete) instance</strong>. Root volume sẽ tự xoá theo (mặc định <em>Delete on termination = Yes</em>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Xoá EBS volume còn sót lại</strong>
+        <p>Vào <strong>EC2 → Volumes</strong>, lọc trạng thái <strong>Available</strong>. Nếu còn <code>linux-lab-data</code> (Lab 7) hoặc volume nào không dùng → <strong>Delete volume</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Xoá Elastic IP (nếu có)</strong>
+        <p>Vào <strong>EC2 → Elastic IPs</strong>. Nếu đã cấp phát Elastic IP trong quá trình học → <strong>Disassociate</strong> rồi <strong>Release Elastic IP address</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Xoá Security Group và Key pair</strong>
+        <p>Sau khi instance đã <em>terminated</em>: xoá Security Group <code>linux-lab-sg</code> (<strong>EC2 → Security Groups</strong>) và key pair <code>linux-lab-key</code> (<strong>EC2 → Key Pairs</strong>). Hai resource này không tính phí nhưng nên dọn cho gọn. Có thể xoá file <code>linux-lab-key.pem</code> trên PC Local.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra hoá đơn</strong>
+        <p>Vào <strong>Billing and Cost Management → Bills</strong>, kiểm tra mục <em>EC2 – Compute</em> và <em>EC2 – Other</em> (EBS, Public IPv4) để chắc chắn không còn chi phí phát sinh.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Chủ đề nên tìm hiểu thêm: shell script (biến, if/else, vòng lặp, hàm), <code>sed</code>/<code>awk</code>, systemd timer, SELinux, LVM, quản lý log với <code>logrotate</code>, firewall (<code>firewalld</code>/<code>iptables</code>).</li>
+    <li>Trên AWS: <strong>Systems Manager</strong> (Session Manager, Run Command, Patch Manager) giúp quản lý nhiều server Linux mà không cần SSH thủ công; <strong>EC2 User data</strong> giúp tự động chạy script cài đặt khi instance khởi động.</li>
+    <li>Tài liệu học thêm: <code>man &lt;lệnh&gt;</code>, <a href="https://linuxjourney.com" target="_blank" rel="noopener">linuxjourney.com</a>, <a href="https://explainshell.com" target="_blank" rel="noopener">explainshell.com</a> (giải thích từng phần của một câu lệnh).</li>
+    <li>Chứng chỉ tham khảo: <strong>Linux Foundation Certified System Administrator (LFCS)</strong>, <strong>Red Hat Certified System Administrator (RHCSA)</strong>.</li>
+  </ul>
+
+  <div class="alert alert-success"><strong>Chúc mừng bạn đã hoàn thành Section 6!</strong> Những kỹ năng Linux này sẽ được dùng liên tục ở các section về Git, Docker, CI/CD và Kubernetes. Hẹn gặp lại ở chương tiếp theo.</div>
+
+</body>
+</html>

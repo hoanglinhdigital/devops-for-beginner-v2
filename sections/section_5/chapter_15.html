@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết section &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết section &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Nội dung đã học</h2>
+  <ul class="feature-list">
+    <li>IaC là gì và công dụng của IaC: tự động hoá, nhất quán, tái sử dụng, kiểm soát phiên bản.</li>
+    <li>Các công cụ IaC phổ biến (CloudFormation, CDK, Terraform, Ansible...) và cách lựa chọn.</li>
+    <li>Cách setup môi trường làm việc Terraform: AWS CLI, Terraform CLI, VS Code extension.</li>
+    <li>Cơ chế hoạt động và các thành phần cơ bản của Terraform: provider, resource, data source, variable, output, module, state.</li>
+    <li>Các bước triển khai hạ tầng lên AWS với Terraform: <code>init → plan → apply → destroy</code>.</li>
+    <li>Vận dụng Terraform để triển khai hạ tầng theo System Design (VPC, ALB, Auto Scaling, Database).</li>
+    <li>Quy hoạch Terraform theo module để tái sử dụng, quản lý state trên S3 và triển khai multi-environment, multi-region.</li>
+  </ul>
+
+  <h2 class="section-heading">Lộ trình các bài lab</h2>
+  <div class="mermaid">
+  flowchart LR
+      L1["🛠️ Lab 1<br/>Cài đặt"] --> L2["🖥️ Lab 2<br/>EC2 + SG"]
+      L2 --> L3["⚙️ Lab 3<br/>Variable"]
+      L3 --> L4["📤 Lab 4<br/>Output"]
+      L4 --> L5["📦 Lab 5<br/>Module"]
+      L5 --> L6["🏠 Lab 6<br/>VPC hoàn chỉnh"]
+      L6 --> L7["🌐 Lab 7<br/>Registry module"]
+      L7 --> L8["🏆 Lab 8<br/>ALB + ASG + MongoDB"]
+      L6 --> L9["🗂️ Lab 9<br/>S3 backend"]
+      L9 --> L10["🌏 Lab 10<br/>Multi-env, multi-region"]
+  </div>
+
+  <table class="compare-table">
+    <thead><tr><th>Lab</th><th>Kiến thức Terraform chính</th><th>Source code</th></tr></thead>
+    <tbody>
+      <tr><td>Lab 2</td><td>provider, resource, data source, <code>file()</code>, init/plan/apply/destroy</td><td><code>lab2_ec2_basic</code></td></tr>
+      <tr><td>Lab 3</td><td>variable, map, tfvars, <code>-var</code>, <code>-var-file</code>, validation, <code>merge()</code></td><td><code>lab3_variables</code></td></tr>
+      <tr><td>Lab 4</td><td>output, <code>terraform output -raw / -json</code></td><td><code>lab4_outputs</code></td></tr>
+      <tr><td>Lab 5</td><td>module, liên kết module bằng output</td><td><code>lab5_modules</code></td></tr>
+      <tr><td>Lab 6</td><td>module networking, <code>depends_on</code>, tái sử dụng module</td><td><code>lab6_vpc_complete</code></td></tr>
+      <tr><td>Lab 7</td><td>module từ Terraform Registry, version constraint</td><td><code>lab7_registry_module</code></td></tr>
+      <tr><td>Lab 8</td><td>thiết kế module theo kiến trúc, <code>user_data</code>, <code>templatefile()</code></td><td><code>lab8_final_assignment</code></td></tr>
+      <tr><td>Lab 9</td><td>S3 backend, state locking (<code>use_lockfile</code>)</td><td><code>lab9_s3_backend</code></td></tr>
+      <tr><td>Lab 10</td><td>multi-environment, multi-region, state tách biệt</td><td><code>lab10_multi_env</code></td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Toàn bộ source code nằm tại <code>sourcecode/section_5_IaC_using_Terraform/</code> trong repository khoá học.</p>
+
+  <h2 class="section-heading">Checklist dọn dẹp resource</h2>
+  <div class="alert alert-warning">Trước khi chuyển sang section tiếp theo, hãy chắc chắn không còn resource nào của section này đang chạy để tránh phát sinh chi phí ngoài ý muốn.</div>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chạy destroy ở mọi thư mục lab đã apply</strong>
+        <p>Trong mỗi thư mục lab, kiểm tra state còn resource không. Nếu lệnh dưới đây trả về danh sách resource thì chạy <code>terraform destroy -auto-approve</code> ở thư mục đó:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform state list</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Kiểm tra trên AWS Console ở cả 2 region Singapore và Tokyo</strong>
+        <ul class="feature-list">
+          <li><strong>VPC → NAT gateways</strong>: không còn NAT Gateway trạng thái <em>Available</em>.</li>
+          <li><strong>EC2 → Elastic IPs</strong>: không còn IP nào.</li>
+          <li><strong>EC2 → Load Balancers</strong>, <strong>Auto Scaling Groups</strong>, <strong>Instances</strong>: không còn resource của lab.</li>
+          <li><strong>VPC → Your VPCs</strong>: chỉ còn Default VPC.</li>
+          <li><strong>EC2 → Key Pairs</strong>: xoá các key <code>udemy-keypair*</code> còn sót lại (không tính phí nhưng nên dọn).</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Xoá S3 bucket chứa state</strong>
+        <p>Nếu chưa xoá ở Lab 10: chọn bucket <code>udemy-terraform-state-...</code> → <strong>Empty</strong> → <strong>Delete</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Kiểm tra hoá đơn</strong>
+        <p>Vào <strong>Billing and Cost Management → Bills</strong>, xem chi phí theo dịch vụ (EC2-Other là nơi tính phí NAT Gateway và Elastic IP) để chắc chắn không còn chi phí phát sinh thêm.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Chủ đề nên tìm hiểu thêm: <code>count</code>, <code>for_each</code>, <code>locals</code>, <code>dynamic</code> block, block <code>import</code>/<code>moved</code>, <code>terraform test</code>, công cụ scan bảo mật (Checkov, Trivy, tflint).</li>
+    <li>Ở các section sau về CI/CD, bạn có thể đưa các lệnh <code>terraform plan</code>/<code>apply</code> vào pipeline để tự động hoá cả việc triển khai hạ tầng.</li>
+    <li>Chứng chỉ tham khảo: <strong>HashiCorp Certified: Terraform Associate</strong>.</li>
+  </ul>
+
+  <div class="alert alert-success"><strong>Chúc mừng bạn đã hoàn thành Section 5!</strong> Hẹn gặp lại ở chương tiếp theo.</div>
+
+</body>
+</html>

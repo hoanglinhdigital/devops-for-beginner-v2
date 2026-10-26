@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các yếu tố cần quan tâm khi giám sát Kubernetes/EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các yếu tố cần quan tâm khi giám sát hạ tầng &amp; ứng dụng</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Một cluster Kubernetes/EKS chạy hàng chục, hàng trăm pod trải trên nhiều node nên "nhìn bằng mắt thường" là bất khả thi.
+    <strong>Monitoring (giám sát)</strong> là tập hợp các công cụ và phương pháp giúp bạn <strong>liên tục thu thập dữ liệu</strong> về hạ tầng và ứng dụng, từ đó
+    <strong>phát hiện sớm sự cố, truy vết nguyên nhân và phản ứng kịp thời</strong> trước khi người dùng cảm nhận được lỗi.
+  </p>
+  <p class="body-text">
+    Chương này trả lời câu hỏi: <em>"Khi giám sát Kubernetes/EKS, tôi cần quan tâm đến những gì?"</em> — từ đó làm nền tảng cho việc chọn công cụ ở các chương sau.
+  </p>
+
+  <h2 class="section-heading">3 Trụ cột của Observability</h2>
+  <p class="body-text">
+    Toàn bộ hoạt động giám sát hiện đại xoay quanh 3 trụ cột chính. Hãy nhớ chúng như "bộ ba quyền lực" của Observability:
+  </p>
+  <div class="figure-centered">
+    <img src="../../images/section15/observability-3-pillars.png" alt="3 trụ cột của Observability: Metrics, Logging, Tracing" />
+    <div class="figure-title">3 trụ cột của Observability: Metrics – Logging – Tracing</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Metrics (Giám sát chỉ số):</strong> tập trung vào các <strong>con số</strong> như CPU, RAM, số lượng request, thời gian phản hồi. Đây là "xương sống" của monitoring K8s. Tool phổ biến: <em>Prometheus, Metrics Server, Thanos/Cortex</em>.</li>
+    <li><strong>Logging:</strong> tập trung vào việc <strong>ghi lại các sự kiện</strong> diễn ra bên trong ứng dụng và cluster (lỗi 500, lỗi kết nối DB...). Tool phổ biến: <em>Loki (Grafana Labs), ElasticSearch + Kibana (ELK)</em>.</li>
+    <li><strong>Tracing (Giám sát luồng đi của request):</strong> theo dõi <strong>hành trình của một request</strong> khi đi qua nhiều microservices để tìm điểm nghẽn (bottleneck). Tool phổ biến: <em>Jaeger, Zipkin, OpenTelemetry (OTel)</em>.</li>
+  </ul>
+  <div class="alert alert-info">
+    <strong>Mẹo ghi nhớ:</strong> Metrics trả lời <em>"cái gì đang bất thường?"</em>, Log trả lời <em>"chi tiết lỗi ra sao?"</em>, Tracing trả lời <em>"lỗi nằm ở đâu trong chuỗi dịch vụ?"</em>. Ba thứ bổ trợ nhau, không thể thay thế nhau.
+  </div>
+
+  <h2 class="section-heading">Hai phạm vi giám sát: Infrastructure vs Application</h2>
+  <p class="body-text">
+    Khi giám sát Kubernetes, người ta thường chia thành 2 tầng chính. Hiểu rõ tầng nào cần theo dõi gì giúp bạn không bị "chìm" trong một biển chỉ số.
+  </p>
+  <div class="mermaid">
+  flowchart TB
+      Root["🔍 Monitoring for Kubernetes"]
+      Infra["🖥️ <b>Infrastructure</b><br/>(Tầng hạ tầng)"]
+      App["🚀 <b>Application</b><br/>(Tầng ứng dụng)"]
+      Root --> Infra
+      Root --> App
+      Infra --> NH["Node Health<br/>(trạng thái node)"]
+      Infra --> CM["CPU / Memory"]
+      Infra --> DK["Disk<br/>(Usage, IO, Latency)"]
+      App --> AL["App Log"]
+      App --> DT["Distributed Tracing"]
+      App --> AH["App Health check<br/>API Healthcheck"]
+      App --> NW["NW Latency<br/>API Error / API Latency"]
+      App --> AE["Application Error"]
+      App --> JL["Job Log"]
+      App --> SM["Service mesh"]
+      App --> PM["Pod Metrics"]
+      App --> RP["Resource Provisioning"]
+  </div>
+  <p class="arch-caption">Giám sát Kubernetes gồm 2 tầng: Infrastructure (nền tảng) và Application (ứng dụng), mỗi tầng có các đối tượng theo dõi riêng.</p>
+
+  <h3 class="section-subheading">Tầng Infrastructure (hạ tầng)</h3>
+  <ul class="feature-list">
+    <li><strong>Node Health:</strong> node còn sống (Ready) hay đã mất liên lạc (NotReady)? kubelet có chạy tốt không?</li>
+    <li><strong>CPU / Memory:</strong> mức tiêu thụ CPU/RAM của từng node và của cả cluster, tránh node bị "hết tài nguyên".</li>
+    <li><strong>Disk:</strong> dung lượng, tốc độ đọc ghi (IOPS) và độ trễ của ổ đĩa — một node đầy ổ cứng sẽ kéo cả pod trên đó sập.</li>
+  </ul>
+
+  <h3 class="section-subheading">Tầng Application (ứng dụng)</h3>
+  <ul class="feature-list">
+    <li><strong>Pod Metrics:</strong> CPU/RAM/mạng theo từng pod, phát hiện pod rò rỉ bộ nhớ (memory leak) hay tiêu thụ bất thường.</li>
+    <li><strong>App Log &amp; Job Log:</strong> log của ứng dụng và của các job (CronJob) để truy vết lỗi.</li>
+    <li><strong>App Health check / API Healthcheck:</strong> ứng dụng có phản hồi, endpoint health có trả 200?</li>
+    <li><strong>API Error / API Latency / NW Latency:</strong> tỷ lệ lỗi và độ trễ của API, độ trễ mạng giữa các service.</li>
+    <li><strong>Distributed Tracing:</strong> theo dõi luồng request xuyên suốt nhiều microservice.</li>
+    <li><strong>Service mesh:</strong> quan sát traffic giữa các service (mTLS, retry, circuit breaker...) khi dùng Istio/Linkerd.</li>
+    <li><strong>Resource Provisioning:</strong> theo dõi autoscaling (HPA/VPA/Cluster Autoscaler/Karpenter) có cấp phát đủ tài nguyên không.</li>
+  </ul>
+
+  <h2 class="section-heading">Vì sao giám sát K8s "khó" hơn máy chủ truyền thống?</h2>
+  <ul class="feature-list">
+    <li><strong>Động (dynamic):</strong> pod sinh ra rồi chết liên tục, IP thay đổi — không thể giám sát theo "một cái máy cố định".</li>
+    <li><strong>Phân tán:</strong> một request có thể đi qua nhiều pod trên nhiều node, khó nội suy toàn cảnh.</li>
+    <li><strong>Nhiều lớp:</strong> cần quan sát cả hạ tầng (node), tầng điều phối (K8s), tầng ứng dụng và cả service mesh.</li>
+    <li><strong>Quy mô:</strong> số lượng chỉ số (metric series) có thể lên tới hàng triệu, cần công cụ chuyên dụng để lưu trữ và truy vấn.</li>
+  </ul>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-warning">
+    <strong>Lưu ý:</strong> Đừng cố thu thập <em>tất cả</em> mọi thứ ngay từ đầu. Hãy bắt đầu từ nhóm chỉ số quan trọng nhất: <em>node/pod up-down, CPU/RAM, lỗi 5xx, độ trễ request</em>, rồi mở rộng dần.
+  </div>
+  <p class="body-text">
+    Ở các chương tiếp theo, bạn sẽ thấy cùng một nhu cầu này có thể được giải quyết bằng <strong>3 nhóm giải pháp</strong>: Open Source (tự cài), Managed Service của AWS, và SaaS (dịch vụ thuê ngoài).
+  </p>
+
+</body>
+</html>

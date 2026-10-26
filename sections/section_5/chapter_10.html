@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 7: Sử dụng module có sẵn từ Terraform Registry – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 7: Sử dụng module có sẵn từ Terraform Registry</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu về <strong>Terraform Registry</strong> và các module có sẵn do cộng đồng/nhà cung cấp phát triển.</li>
+    <li>Biết cách đọc tài liệu module (Inputs, Outputs) và cố định version module.</li>
+    <li>Thay toàn bộ module networking tự viết ở Lab 6 bằng module <code>terraform-aws-modules/vpc/aws</code>.</li>
+    <li>Deploy VPC hoàn chỉnh lên AWS chỉ với vài chục dòng code.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến thức cần nắm</h2>
+  <p class="body-text">
+    <a href="https://registry.terraform.io/browse/modules" target="_blank" rel="noopener">Terraform Registry</a> là kho chứa provider và module công khai. Bộ module <strong>terraform-aws-modules</strong> (VPC, EKS, RDS, ALB, Security Group...) được dùng rất phổ biến trong các dự án thực tế, đã xử lý sẵn nhiều trường hợp mà tự viết sẽ tốn công: nhiều AZ, NAT Gateway theo từng AZ, subnet cho database, VPC Flow Logs, IPv6...
+  </p>
+  <pre class="code-block"><code class="language-hcl">module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"   # &lt;namespace&gt;/&lt;tên&gt;/&lt;provider&gt;
+  version = "~&gt; 6.0"                          # chỉ module từ Registry mới dùng được "version"
+  # ... các input của module
+}</code></pre>
+  <table class="compare-table">
+    <thead><tr><th>Ký hiệu version</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>= 6.0.1</code></td><td>Đúng version 6.0.1</td></tr>
+      <tr><td><code>~&gt; 6.0</code></td><td>Từ 6.0 tới dưới 7.0 (nhận bản vá và tính năng mới, không nhận thay đổi phá vỡ của major version)</td></tr>
+      <tr><td><code>&gt;= 6.0</code></td><td>Từ 6.0 trở lên, kể cả major version mới — dễ bị lỗi khi module thay đổi lớn</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Root["📁 lab7_registry_module"]
+          direction LR
+          Net["📦 <b>module network</b><br/>./modules/networking"]
+          Reg["🌐 <b>terraform-aws-modules/vpc/aws</b><br/>version ~&gt; 6.0"]
+          Net -->|"gọi module"| Reg
+      end
+      TFR["<img src='../../assets/svg-icon/terraform.svg' style='width:36px;height:36px;'/><br/><b>Terraform Registry</b>"]
+      TFR -.->|"terraform init<br/>tải module"| Reg
+      subgraph AWS["☁️ AWS – ap-southeast-1"]
+          VPC["🏠 <b>VPC</b> 10.0.0.0/16<br/>2 public + 2 private subnet<br/>IGW · 1 NAT Gateway · Route tables"]
+      end
+      Root -->|"apply"| AWS
+  </div>
+  <p class="arch-caption">Module networking của chúng ta trở thành một lớp "wrapper" mỏng, gọi module VPC từ Registry. Root module không cần biết bên trong dùng module tự viết hay module có sẵn.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 6 và <strong>đã destroy</strong> resource (tránh trùng CIDR và vượt quota VPC/Elastic IP).</li>
+    <li>Máy có kết nối Internet để <code>terraform init</code> tải module từ Registry.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu module VPC trên Registry</strong>
+        <p>Mở trang <a href="https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest" target="_blank" rel="noopener">terraform-aws-modules/vpc/aws</a> và xem các tab:</p>
+        <ul class="feature-list">
+          <li><strong>Readme</strong>: ví dụ sử dụng (Usage) — điểm khởi đầu tốt nhất.</li>
+          <li><strong>Inputs</strong>: danh sách tham số, ví dụ <code>name</code>, <code>cidr</code>, <code>azs</code>, <code>public_subnets</code>, <code>private_subnets</code>, <code>enable_nat_gateway</code>, <code>single_nat_gateway</code>.</li>
+          <li><strong>Outputs</strong>: giá trị trả về, ví dụ <code>vpc_id</code>, <code>public_subnets</code>, <code>private_subnets</code>, <code>nat_public_ips</code>.</li>
+          <li><strong>Versions</strong>: lịch sử version để chọn version phù hợp.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo cấu trúc thư mục</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab7_registry_module/modules/networking
+cd ~/terraform-labs/lab7_registry_module
+code .</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo module networking (wrapper)</strong>
+        <p>Đặt <code>single_nat_gateway = true</code> để chỉ tạo 1 NAT Gateway dùng chung — nếu không, module sẽ tạo NAT Gateway cho từng private subnet, tốn gấp đôi chi phí.</p>
+        <p class="code-note">📄 <code>lab7_registry_module/modules/networking/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl"># Sử dụng module VPC có sẵn trên Terraform Registry
+# https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~&gt; 6.0"
+
+  name = var.vpc_name
+  cidr = var.cidr_block
+
+  azs             = var.availability_zones
+  public_subnets  = var.public_subnet_ips
+  private_subnets = var.private_subnet_ips
+
+  # Chỉ tạo 1 NAT Gateway dùng chung cho các private subnet để tiết kiệm chi phí
+  enable_nat_gateway = true
+  single_nat_gateway = true
+  enable_vpn_gateway = false
+
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Project = var.vpc_name
+  }
+}</code></pre>
+        <p class="code-note">📄 <code>lab7_registry_module/modules/networking/variable.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "vpc_name" {
+  type = string
+}
+
+variable "cidr_block" {
+  type = string
+}
+
+variable "availability_zones" {
+  type = list(string)
+}
+
+variable "public_subnet_ips" {
+  type        = list(string)
+  description = "List of public subnet IPs CIDR"
+}
+
+variable "private_subnet_ips" {
+  type        = list(string)
+  description = "List of private subnet IPs CIDR"
+}</code></pre>
+        <p class="code-note">📄 <code>lab7_registry_module/modules/networking/output.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "vpc_id" {
+  description = "The ID of the VPC"
+  value       = module.vpc.vpc_id
+}
+
+output "public_subnets" {
+  description = "List of IDs of public subnets"
+  value       = module.vpc.public_subnets
+}
+
+output "private_subnets" {
+  description = "List of IDs of private subnets"
+  value       = module.vpc.private_subnets
+}
+
+output "nat_public_ips" {
+  description = "Public IP của NAT Gateway"
+  value       = module.vpc.nat_public_ips
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo root module</strong>
+        <p class="code-note">📄 <code>lab7_registry_module/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+module "network" {
+  source             = "./modules/networking"
+  vpc_name           = var.vpc_name
+  cidr_block         = var.cidr_block
+  availability_zones = var.availability_zones
+  public_subnet_ips  = var.public_subnet_ips
+  private_subnet_ips = var.private_subnet_ips
+}</code></pre>
+        <p class="code-note">📄 <code>lab7_registry_module/variable.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "region" {
+  type    = string
+  default = "ap-southeast-1"
+}
+
+variable "vpc_name" {
+  type = string
+}
+
+variable "cidr_block" {
+  type = string
+}
+
+variable "availability_zones" {
+  type = list(string)
+}
+
+variable "public_subnet_ips" {
+  type        = list(string)
+  description = "List of public subnet IPs CIDR"
+}
+
+variable "private_subnet_ips" {
+  type        = list(string)
+  description = "List of private subnet IPs CIDR"
+}</code></pre>
+        <p class="code-note">📄 <code>lab7_registry_module/output.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "vpc_id" {
+  value = module.network.vpc_id
+}
+
+output "public_subnets" {
+  value = module.network.public_subnets
+}
+
+output "private_subnets" {
+  value = module.network.private_subnets
+}
+
+output "nat_public_ips" {
+  value = module.network.nat_public_ips
+}</code></pre>
+        <p class="code-note">📄 <code>lab7_registry_module/terraform.tfvars</code></p>
+        <pre class="code-block"><code class="language-hcl">region             = "ap-southeast-1"
+vpc_name           = "udemy-registry-vpc"
+cidr_block         = "10.0.0.0/16"
+availability_zones = ["ap-southeast-1a", "ap-southeast-1b"]
+public_subnet_ips  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_ips = ["10.0.10.0/24", "10.0.20.0/24"]</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Init, plan và apply</strong>
+        <p>Khi <code>init</code>, Terraform tải module từ Registry về thư mục <code>.terraform/modules/</code>:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform init
+Downloading registry.terraform.io/terraform-aws-modules/vpc/aws 6.x.x for network.vpc...</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform plan
+terraform apply -auto-approve</code></pre>
+        <p>Trong plan, địa chỉ resource có dạng lồng nhau <code>module.network.module.vpc.aws_vpc.this[0]</code> (module trong module).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Kiểm tra và so sánh với Lab 6</strong>
+        <p>Trên Console <strong>VPC → Your VPCs</strong>, chọn <code>udemy-registry-vpc</code> và xem tab <strong>Resource map</strong>: 4 subnet ở 2 AZ, route table, IGW và NAT Gateway — tương đương VPC ở Lab 6. Tên subnet được module tự sinh theo dạng <code>udemy-registry-vpc-public-ap-southeast-1a</code>.</p>
+        <p>Xem danh sách resource mà module đã tạo:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform state list</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>terraform init</code> tải thành công module VPC từ Registry.</li>
+      <li>VPC <code>udemy-registry-vpc</code> có 2 public subnet, 2 private subnet và đúng <strong>1</strong> NAT Gateway.</li>
+      <li><code>terraform output</code> hiển thị <code>vpc_id</code>, danh sách subnet và public IP của NAT Gateway.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Trade-off: tự viết module hay dùng module có sẵn?</h2>
+  <div class="two-col">
+    <div class="card">
+      <h4>🌐 Module từ Registry</h4>
+      <ul class="feature-list">
+        <li>Nhanh, ít code, đã được cộng đồng kiểm chứng.</li>
+        <li>Hỗ trợ nhiều tính năng nâng cao bằng một tham số.</li>
+        <li>Nhưng: nhiều tham số, khó hiểu hết bên trong; nâng major version có thể phá vỡ code.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>✍️ Module tự viết</h4>
+      <ul class="feature-list">
+        <li>Hiểu rõ và kiểm soát 100% resource được tạo.</li>
+        <li>Phù hợp chuẩn riêng của công ty.</li>
+        <li>Nhưng: tốn công viết, test và bảo trì.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="body-text">Khi mới học, hãy tự viết (như Lab 6) để hiểu bản chất; khi làm dự án, ưu tiên module phổ biến từ Registry và luôn <strong>cố định version</strong>.</p>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Failed to query available provider packages</code> / không tải được module</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Không có Internet, hoặc mạng công ty chặn <code>registry.terraform.io</code>, <code>github.com</code>.<br/><strong>Giải pháp:</strong> Kiểm tra kết nối mạng/proxy rồi chạy lại <code>terraform init</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unsupported argument</code> khi truyền tham số vào module VPC</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tên input sai hoặc không tồn tại ở version đang dùng.<br/><strong>Giải pháp:</strong> Đối chiếu tab <strong>Inputs</strong> trên Registry đúng với version đã khai báo.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unsupported provider version</code> / xung đột version provider</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Module yêu cầu AWS provider version khác với khai báo ở root.<br/><strong>Giải pháp:</strong> Chọn version module tương thích (module VPC 6.x yêu cầu AWS provider 6.x), chạy <code>terraform init -upgrade</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>NAT Gateway và Elastic IP tính phí theo giờ.</strong> Destroy ngay sau khi hoàn thành lab.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+
+</body>
+</html>

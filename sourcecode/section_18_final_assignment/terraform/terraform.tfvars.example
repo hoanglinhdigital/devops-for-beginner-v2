@@ -1,0 +1,25 @@
+# File biến mẫu — copy thành terraform.tfvars rồi điền thông tin của bạn
+# cp terraform.tfvars.example terraform.tfvars
+
+region             = "ap-southeast-1"
+availability_zones = ["ap-southeast-1a", "ap-southeast-1b"]
+
+cidr_block         = "10.18.0.0/16"
+public_subnet_ips  = ["10.18.1.0/24", "10.18.2.0/24"]
+private_subnet_ips = ["10.18.3.0/24", "10.18.4.0/24"]
+
+# IP công khai của bạn (lấy bằng cách search "what is my ip"), thêm /32
+my_ip_cidr = "203.0.113.10/32"
+
+# Tên key pair EC2 đã có sẵn trong tài khoản của bạn (tạo ở EC2 → Key Pairs)
+key_name = "my-key-pair"
+
+mongodb_instance_type = "t3.medium"
+mongodb_volume_size   = 20
+
+# Tag của image trên ECR (đã build & push ở bước chuẩn bị)
+frontend_image_tag = "latest"
+backend_image_tag  = "latest"
+
+frontend_desired_count = 2
+backend_desired_count  = 2

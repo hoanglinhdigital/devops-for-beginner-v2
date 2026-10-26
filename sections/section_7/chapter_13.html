@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Best practice khi sử dụng Git, tổng kết &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Best practice khi sử dụng Git, tổng kết &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Best practice khi sử dụng Git</h2>
+  <ul class="feature-list">
+    <li><strong>Sử dụng branch:</strong> tạo branch riêng mỗi khi phát triển feature hoặc fix bug. Developer làm việc không ảnh hưởng lẫn nhau và dễ review thay đổi.</li>
+    <li><strong>Commit thường xuyên, nhỏ gọn (atomic):</strong> mỗi commit chứa một thay đổi logic nhỏ – dễ theo dõi tiến độ, cô lập thay đổi và revert khi cần.</li>
+    <li><strong>Commit message rõ ràng, dễ hiểu:</strong> mô tả “làm gì, vì sao”, gắn mã ticket, theo quy ước chung (ví dụ Conventional Commits <code>feat:</code>, <code>fix:</code>, <code>docs:</code>).</li>
+    <li><strong>Pull before push:</strong> luôn pull code mới nhất từ remote trước khi bắt đầu thay đổi và trước khi push – giảm conflict, đảm bảo làm việc trên codebase mới nhất.</li>
+    <li><strong>Review code qua Pull Request:</strong> phát hiện bug sớm, cải thiện chất lượng code và chia sẻ kiến thức giữa các thành viên. Bảo vệ <code>main</code>/<code>develop</code> để mọi thay đổi đều đi qua PR.</li>
+    <li><strong>Resolve conflict cẩn thận:</strong> dành thời gian hiểu rõ code của cả hai phía (trao đổi với người viết) trước khi chọn; chạy thử/test lại sau khi resolve.</li>
+    <li><strong>Dùng Git tag &amp; Release:</strong> đánh tag cho các milestone quan trọng giúp theo dõi release, quản lý phiên bản ổn định và đơn giản hoá deploy/rollback.</li>
+    <li><strong>Backup &amp; dùng remote repository tin cậy:</strong> push thường xuyên, dùng GitHub/GitLab/CodeCommit và cân nhắc backup định kỳ repository quan trọng để tránh mất dữ liệu.</li>
+    <li><strong>Không commit secret:</strong> dùng <code>.gitignore</code> cho <code>.env</code>, <code>*.pem</code>, <code>terraform.tfvars</code>; bật <strong>Secret scanning / Push protection</strong> của GitHub. Lỡ push secret → rotate ngay, không chỉ xoá file.</li>
+    <li><strong>Hạn chế lệnh viết lại lịch sử trên branch chung:</strong> dùng <code>revert</code> thay vì <code>reset --hard</code> + <code>push --force</code> trên <code>develop</code>/<code>main</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Tổng kết section</h2>
+  <div class="mermaid">
+  flowchart LR
+      T1["📘 <b>Lý thuyết</b><br/>Git &amp; VCS<br/>Kiến trúc &amp; life cycle"] --> L1["🧪 <b>Lab 1–3</b><br/>Cài Git · SSH key<br/>branch · commit · push"]
+      L1 --> T2["📘 <b>Git Workflow</b><br/>Feature Branch · Gitflow<br/>branch ↔ môi trường"]
+      T2 --> L2["🧪 <b>Lab 4–7</b><br/>Protect branch · PR<br/>release · tag · revert · conflict"]
+      L2 --> T3["📘 <b>Merge/Rebase/Squash</b><br/>stash · reset · reflog"]
+      T3 --> L3["<img src='../../assets/aws-svg/CodeCommit.svg' style='width:32px;height:32px;'/><br/><b>Lab 8</b><br/>AWS CodeCommit"]
+  </div>
+
+  <table class="compare-table">
+    <thead><tr><th>Chương</th><th>Nội dung</th><th>Kiến thức chính</th></tr></thead>
+    <tbody>
+      <tr><td>1–2</td><td>Giới thiệu Git, kiến trúc &amp; life cycle</td><td>VCS phân tán, repository/commit/branch/remote, Working Directory → Staging → Local repo → Remote</td></tr>
+      <tr><td>3</td><td>Lab 1: Cài Git, SourceTree &amp; clone</td><td><code>git config</code>, <code>git clone</code>, <code>git branch -a</code></td></tr>
+      <tr><td>4</td><td>Lab 2: GitHub &amp; SSH key</td><td><code>ssh-keygen -t ed25519</code>, <code>ssh-agent</code>, <code>ssh -T git@github.com</code></td></tr>
+      <tr><td>5</td><td>Lab 3: Nhánh develop</td><td><code>checkout -b</code>, <code>status</code>, <code>diff</code>, <code>add</code>, <code>commit</code>, <code>push -u</code>, <code>.gitignore</code></td></tr>
+      <tr><td>6</td><td>Git Workflow</td><td>Centralized, Feature Branch, Gitflow, mapping branch – môi trường</td></tr>
+      <tr><td>7</td><td>Lab 4: Protect branch &amp; PR</td><td>GitHub Ruleset, feature branch, Pull Request, <code>fetch --prune</code></td></tr>
+      <tr><td>8</td><td>Lab 5: Release &amp; tag</td><td><code>release/*</code>, <code>git tag -a</code>, <code>push origin &lt;tag&gt;</code>, back-merge, GitHub Release</td></tr>
+      <tr><td>9</td><td>Lab 6: Log, show &amp; revert</td><td><code>git log</code>, <code>git show</code>, <code>git revert</code>, revert vs reset</td></tr>
+      <tr><td>10</td><td>Lab 7: Conflict</td><td>Dấu conflict, Accept Current/Incoming/Both, <code>merge --abort</code></td></tr>
+      <tr><td>11</td><td>Merge/Rebase/Squash</td><td><code>merge --no-ff</code>, <code>rebase</code>, <code>merge --squash</code>, <code>stash</code>, <code>reset --soft/--mixed/--hard</code>, <code>reflog</code></td></tr>
+      <tr><td>12</td><td>Lab 8: AWS CodeCommit</td><td>IAM User + SSH public key, <code>~/.ssh/config</code>, Pull Request trên Console</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Các lệnh Git thường dùng</h3>
+  <p class="body-text">Bảng tóm tắt; danh sách đầy đủ trong <code>sourcecode/section_7_git_basic_operation/git_cheatsheet/commands.sh</code>.</p>
+  <table class="compare-table">
+    <thead><tr><th>Nhóm</th><th>Lệnh</th></tr></thead>
+    <tbody>
+      <tr><td>Khởi tạo</td><td><code>git init -b main</code> · <code>git clone &lt;url&gt;</code> · <code>git remote -v</code></td></tr>
+      <tr><td>Thay đổi</td><td><code>git status</code> · <code>git diff</code> · <code>git add</code> · <code>git restore</code> · <code>git commit -m</code> · <code>git commit --amend</code></td></tr>
+      <tr><td>Branch</td><td><code>git branch</code> · <code>git checkout -b</code> / <code>git switch -c</code> · <code>git branch -d</code></td></tr>
+      <tr><td>Đồng bộ</td><td><code>git fetch</code> · <code>git pull</code> · <code>git push -u origin &lt;branch&gt;</code></td></tr>
+      <tr><td>Hợp nhất</td><td><code>git merge</code> · <code>git rebase</code> · <code>git merge --squash</code> · <code>git merge --abort</code></td></tr>
+      <tr><td>Lịch sử</td><td><code>git log --oneline --graph --all</code> · <code>git show</code> · <code>git blame</code> · <code>git reflog</code></td></tr>
+      <tr><td>Hoàn tác</td><td><code>git revert</code> · <code>git reset --soft/--mixed/--hard</code> · <code>git stash</code></td></tr>
+      <tr><td>Tag</td><td><code>git tag -a v1.0 -m "..."</code> · <code>git push origin v1.0</code> · <code>git tag -d</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-tip"><strong>Section tiếp theo:</strong> repository Git chính là điểm khởi đầu của mọi pipeline CI/CD. Ở các section Jenkins, CodePipeline, GitHub Actions, mỗi lần push/merge vào <code>develop</code>/<code>main</code> hay đánh tag sẽ tự động kích hoạt build và deploy – đúng như mapping branch ↔ môi trường đã học ở chương Git Workflow.</div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Repository GitHub không phát sinh chi phí – có thể <strong>giữ lại để tham khảo</strong> trong tương lai hoặc xoá nếu không có nhu cầu. Resource AWS (CodeCommit, IAM User) nên được xoá.</div>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>GitHub (tuỳ chọn)</strong>
+        <ul class="feature-list">
+          <li>Xoá repository <code>demo-git</code>: <strong>Settings → General → Danger Zone → Delete this repository</strong>.</li>
+          <li>Giữ lại SSH key trên GitHub nếu vẫn dùng máy này; xoá key tại <strong>Settings → SSH and GPG keys</strong> nếu là máy dùng chung/máy công ty.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>AWS (nếu đã làm Lab 8 và chưa dọn)</strong>
+        <ul class="feature-list">
+          <li>CodeCommit: xoá repository <code>demo-codecommit</code> ở region ap-southeast-1.</li>
+          <li>IAM: xoá SSH public key của <code>codecommit-lab-user</code> và xoá user.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>PC Local</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">rm -rf ~/git-labs/Hello-World ~/git-labs/demo-git-devB ~/git-labs/git-playground ~/git-labs/demo-codecommit
+ls ~/git-labs</code></pre>
+        <p>Có thể giữ <code>~/git-labs/demo-git</code> để tham khảo. Giữ lại cấu hình <code>git config --global</code> và SSH key <code>~/.ssh/id_ed25519</code> – sẽ dùng tiếp ở các section sau.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Tài liệu tham khảo</h2>
+  <ul class="feature-list">
+    <li><a href="https://git-scm.com/docs" target="_blank" rel="noopener">Git Reference</a> · <a href="https://git-scm.com/book/en/v2" target="_blank" rel="noopener">Pro Git book</a></li>
+    <li><a href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets" target="_blank" rel="noopener">GitHub Docs – About rulesets</a></li>
+    <li><a href="https://www.conventionalcommits.org/" target="_blank" rel="noopener">Conventional Commits</a></li>
+    <li><a href="https://docs.aws.amazon.com/codecommit/latest/userguide/welcome.html" target="_blank" rel="noopener">AWS CodeCommit User Guide</a></li>
+    <li><a href="https://learngitbranching.js.org/" target="_blank" rel="noopener">Learn Git Branching</a> – luyện tập branch, merge, rebase trực quan trên trình duyệt</li>
+  </ul>
+
+</body>
+</html>

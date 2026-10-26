@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>In-place (All at once) &amp; Rolling update – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">11. Chiến lược deployment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">In-place (All at once) &amp; Rolling update</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>In-place</strong> (còn gọi là <em>All at once</em>) là hình thức triển khai <strong>thay thế ngay lập tức</strong> version cũ bằng version mới
+    trên toàn bộ server, không quan tâm tới downtime. <strong>Rolling update</strong> cải tiến hơn: thay thế <strong>dần dần</strong> từng nhóm (batch)
+    server/task cho tới khi toàn bộ chạy version mới – hệ thống luôn còn server phục vụ nên không có downtime.
+    Đây là 2 chiến lược đơn giản, rẻ nhất và cũng là mặc định của nhiều dịch vụ (Elastic Beanstalk, ECS).
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>In-place – dừng rồi chạy:</strong> dừng ứng dụng cũ → cài version mới lên <em>chính server đó</em> → khởi động lại. Tất cả server làm cùng lúc.</li>
+    <li><strong>In-place – không cần thêm tài nguyên:</strong> dùng lại hạ tầng hiện có, phù hợp server vật lý hoặc ngân sách hạn chế.</li>
+    <li><strong>Rolling – theo batch:</strong> mỗi lần chỉ thay một nhóm (vd 1 server, 25%, 50%); batch mới healthy thì mới tiếp tục batch sau.</li>
+    <li><strong>Rolling – 2 version song song:</strong> trong lúc deploy, Load Balancer gửi request tới cả version cũ và mới (trải nghiệm không đồng nhất).</li>
+    <li><strong>Rolling – dừng khi lỗi:</strong> nếu task/server mới không qua health check, quá trình deploy dừng lại, phần còn lại vẫn chạy version cũ.</li>
+    <li><strong>Mặc định trên ECS:</strong> deployment controller <code>ECS</code> dùng rolling update – chính là cách job Jenkins ở Section 10 – Lab 7 đã deploy.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">In-place (All at once)</h3>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Users"]
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>Load Balancer"]
+      subgraph Before["① Trước: v1"]
+          direction TB
+          A1["🟦 Server 1 · v1"]
+          A2["🟦 Server 2 · v1"]
+          A3["🟦 Server 3 · v1"]
+      end
+      subgraph During["② Đang deploy"]
+          direction TB
+          B1["⛔ Server 1 · stopped"]
+          B2["⛔ Server 2 · stopped"]
+          B3["⛔ Server 3 · stopped"]
+      end
+      subgraph After["③ Sau: v2"]
+          direction TB
+          C1["🟩 Server 1 · v2"]
+          C2["🟩 Server 2 · v2"]
+          C3["🟩 Server 3 · v2"]
+      end
+      User --> ALB --> Before
+      Before -->|"stop all"| During
+      During -->|"start all"| After
+  </div>
+  <p class="arch-caption">Ở bước ②, không còn server nào phục vụ → người dùng nhận lỗi 502/503 (downtime).</p>
+
+  <h3 class="section-subheading">Rolling update trên ECS</h3>
+  <div class="mermaid">
+  flowchart LR
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>ALB<br/>1 Target Group"]
+      subgraph R1["Batch 1"]
+          direction TB
+          T1["🟦 Task v1"]
+          T2["🟦 Task v1"]
+          N1["🟩 Task v2 (mới)"]
+          N2["🟩 Task v2 (mới)"]
+      end
+      subgraph R2["Batch 2"]
+          direction TB
+          M1["🟩 Task v2"]
+          M2["🟩 Task v2"]
+      end
+      ALB --> R1
+      R1 -->|"v2 healthy → stop 2 task v1"| R2
+  </div>
+  <p class="arch-caption">ECS khởi động task mới, chờ healthy trên Target Group, sau đó mới dừng task cũ (với <code>minimumHealthyPercent = 100</code>, <code>maximumPercent = 200</code>).</p>
+
+  <h3 class="section-subheading">Tham số điều khiển rolling update của ECS</h3>
+  <table class="compare-table">
+    <thead><tr><th>Cấu hình (desired = 4)</th><th>Hành vi</th><th>Nhận xét</th></tr></thead>
+    <tbody>
+      <tr><td><code>min 100%</code> · <code>max 200%</code></td><td>Chạy thêm tối đa 4 task v2, healthy rồi mới dừng 4 task v1</td><td>Nhanh, không giảm năng lực phục vụ, tạm thời gấp đôi task</td></tr>
+      <tr><td><code>min 50%</code> · <code>max 100%</code></td><td>Dừng 2 task v1 trước, chạy 2 task v2, rồi lặp lại</td><td>Không tốn thêm tài nguyên nhưng năng lực giảm còn 50% trong lúc deploy</td></tr>
+      <tr><td><code>min 100%</code> · <code>max 125%</code></td><td>Mỗi lần chỉ thêm 1 task v2, dừng 1 task v1</td><td>Chậm nhưng an toàn, ít tốn thêm tài nguyên</td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Kết hợp với <strong>deployment circuit breaker</strong> (<code>enable = true</code>, <code>rollback = true</code>): nếu task mới liên tục fail, ECS tự rollback về task definition cũ – đã cấu hình sẵn trong Terraform stack của Section 10.</p>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="compare-table">
+    <thead><tr><th></th><th>In-place (All at once)</th><th>Rolling update</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Ưu điểm</strong></td>
+        <td>
+          <ul class="feature-list-sm">
+            <li>Đơn giản, dễ triển khai, deploy nhanh</li>
+            <li>Tiết kiệm tài nguyên, không cần thêm server</li>
+            <li>Chỉ 1 version tại mọi thời điểm</li>
+          </ul>
+        </td>
+        <td>
+          <ul class="feature-list-sm">
+            <li>Không downtime, giảm thiểu rủi ro</li>
+            <li>Tốn ít (hoặc không tốn) tài nguyên thêm</li>
+            <li>Dừng deploy khi batch đầu bị lỗi; dễ rollback (deploy lại bản cũ)</li>
+          </ul>
+        </td>
+      </tr>
+      <tr><td><strong>Nhược điểm</strong></td>
+        <td>
+          <ul class="feature-list-sm">
+            <li>Có downtime, ảnh hưởng người dùng cuối</li>
+            <li>Rủi ro cao: không kiểm tra được version mới trước khi chạy thật</li>
+            <li>Phải lên lịch deploy (ban đêm, cuối tuần); rollback = deploy lại → lại downtime</li>
+          </ul>
+        </td>
+        <td>
+          <ul class="feature-list-sm">
+            <li>Thời gian triển khai kéo dài (nhiều batch)</li>
+            <li>Phức tạp hơn khi quản lý, theo dõi từng batch</li>
+            <li>2 version cùng phục vụ → trải nghiệm không đồng nhất; rollback cũng phải “roll” ngược</li>
+          </ul>
+        </td>
+      </tr>
+      <tr><td><strong>Nên dùng</strong></td><td>Môi trường Dev/Test, hệ thống nội bộ, khi có maintenance window</td><td>Phần lớn ứng dụng web stateless, mặc định cho ECS/Beanstalk</td></tr>
+      <tr><td><strong>Không nên dùng</strong></td><td>Hệ thống yêu cầu 24/7, SLA cao</td><td>Thay đổi không tương thích ngược (API, schema) – 2 version không thể cùng chạy</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Môi trường Dev tự động deploy</h4>
+      <p>Mỗi commit vào nhánh <code>develop</code> deploy ngay lên môi trường Dev (Section 10 – Lab 9). Vài giây gián đoạn không ảnh hưởng ai – In-place hoặc Rolling đều được.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>API stateless trên ECS Fargate</h4>
+      <p>Service 6 task sau ALB: rolling update <code>min 100% / max 200%</code> + circuit breaker, deploy nhiều lần mỗi ngày không downtime.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Ứng dụng legacy trên 1 EC2</h4>
+      <p>Chỉ có 1 server, không có Load Balancer: In-place vào khung giờ bảo trì đã thông báo trước cho người dùng.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <table class="compare-table">
+    <thead><tr><th>Dịch vụ AWS</th><th>In-place / Rolling được hỗ trợ</th></tr></thead>
+    <tbody>
+      <tr><td>Elastic Beanstalk</td><td><em>All at once</em>, <em>Rolling</em> (batch size cố định hoặc %), <em>Rolling with additional batch</em> (thêm 1 batch mới trước để giữ năng lực), <em>Immutable</em> (dựng Auto Scaling group tạm với instance mới)</td></tr>
+      <tr><td>Amazon ECS</td><td>Rolling update với <code>minimumHealthyPercent</code> / <code>maximumPercent</code>, circuit breaker, CloudWatch alarm rollback</td></tr>
+      <tr><td>CodeDeploy (EC2/On-premises)</td><td>In-place: <code>CodeDeployDefault.AllAtOnce</code>, <code>HalfAtATime</code>, <code>OneAtATime</code></td></tr>
+      <tr><td>EC2 Auto Scaling</td><td><em>Instance refresh</em> thay dần instance theo Launch Template mới (<code>MinHealthyPercentage</code>)</td></tr>
+    </tbody>
+  </table>
+  <ul class="feature-list">
+    <li><strong>Graceful shutdown:</strong> cấu hình <em>deregistration delay</em> của Target Group (lab dùng 30 giây) để request đang xử lý trên task cũ hoàn thành trước khi task bị dừng.</li>
+    <li><strong>Health check phải đúng:</strong> rolling update chỉ an toàn khi health check phản ánh đúng ứng dụng đã sẵn sàng (vd endpoint <code>/health</code> kiểm tra cả kết nối DB).</li>
+    <li><strong>Immutable</strong> có thể xem là bước trung gian giữa Rolling và Blue/Green: luôn tạo server mới thay vì cập nhật server cũ, rollback chỉ cần huỷ server mới.</li>
+    <li><strong>Thi chứng chỉ:</strong> “chi phí thấp nhất, chấp nhận downtime” → All at once; “không downtime, không tăng chi phí, chấp nhận năng lực giảm” → Rolling; “không giảm năng lực” → Rolling with additional batch.</li>
+  </ul>
+
+</body>
+</html>

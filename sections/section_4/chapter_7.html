@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ôn tập: Serverless, Container, Monitoring &amp; Messaging – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">4. Giới thiệu &amp; ôn lại kiến thức AWS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Ôn tập: Serverless, Container, Monitoring &amp; Messaging</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Ngoài mô hình “server truyền thống” với EC2, hệ thống hiện đại trên AWS thường kết hợp <strong>Serverless</strong> (Lambda, API Gateway),
+    <strong>Container</strong> (ECS, ECR, EKS), <strong>Monitoring</strong> (CloudWatch) và <strong>Messaging</strong> (SQS, SNS, EventBridge) để tách rời các thành phần.
+    Đây cũng là những “đích đến” mà các CICD pipeline trong khoá học sẽ deploy lên, nên cần nắm vững trước khi đi vào phần DevOps.
+  </p>
+
+  <!-- ───────────── Serverless ───────────── -->
+  <h2 class="section-heading">1. Kiến trúc Serverless (API Gateway, Cognito, Lambda)</h2>
+  <ul class="feature-list">
+    <li><strong>Không quản lý server:</strong> chỉ viết code (function), AWS lo việc chạy, scale và patch hạ tầng.</li>
+    <li><strong>Event-driven:</strong> Lambda được kích hoạt bởi sự kiện — HTTP request (API Gateway), file upload (S3), message (SQS), lịch (EventBridge)...</li>
+    <li><strong>Trả tiền theo request &amp; thời gian chạy:</strong> không có request thì gần như không tốn phí.</li>
+    <li><strong>Tự động scale</strong> từ 0 tới hàng nghìn request đồng thời.</li>
+    <li><strong>Cognito</strong> lo phần đăng ký/đăng nhập, cấp JWT token để API Gateway xác thực request.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section4/serverless-cognito-api-gateway.png" alt="Mô hình kiến trúc Serverless đơn giản kết hợp với Cognito" />
+    <div class="figure-title">Mô hình kiến trúc Serverless đơn giản kết hợp với Cognito</div>
+  </div>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section4/serverless-lambda-integrations.png" alt="Lambda tích hợp với nhiều dịch vụ: được kích hoạt bởi S3, SQS, EventBridge, SNS, API Gateway, DynamoDB... và gọi tới CloudWatch, RDS, S3" />
+    <div class="figure-title">Lambda tích hợp với nhiều dịch vụ: được kích hoạt bởi S3, SQS, EventBridge, SNS, API Gateway, DynamoDB... và gọi tới CloudWatch, RDS, S3</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/serverless-s3-trigger-and-scheduler.png" alt="Tự động xử lý file được upload lên S3 · Chạy các task đơn giản theo lịch" />
+    <div class="figure-title">Tự động xử lý file được upload lên S3 · Chạy các task đơn giản theo lịch</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/serverless-dynamodb-authorizer-iot.png" alt="Xử lý bất đồng bộ kết hợp với DynamoDB · Làm Authorizer hoặc backend function · Backend của IoT, ETL" />
+    <div class="figure-title">Xử lý bất đồng bộ kết hợp với DynamoDB · Làm Authorizer hoặc backend function · Backend của IoT, ETL</div>
+  </div>
+  <div class="usecase-grid">
+    <div class="usecase-card"><h4>Tự động xử lý file upload lên S3</h4><p>Resize ảnh, convert video, scan virus ngay khi file được upload.</p></div>
+    <div class="usecase-card"><h4>Chạy task đơn giản theo lịch</h4><p>Backup, dọn dẹp dữ liệu, gửi báo cáo hằng ngày — thay thế crontab trên server.</p></div>
+    <div class="usecase-card"><h4>Authorizer / backend function</h4><p>Làm backend cho API, hoặc Lambda Authorizer kiểm tra token tuỳ biến.</p></div>
+    <div class="usecase-card"><h4>Xử lý bất đồng bộ với DynamoDB</h4><p>DynamoDB Streams kích hoạt Lambda khi dữ liệu thay đổi.</p></div>
+    <div class="usecase-card"><h4>Backend IoT, ETL</h4><p>Nhận dữ liệu từ thiết bị, biến đổi và đẩy vào kho dữ liệu.</p></div>
+  </div>
+
+  <!-- ───────────── Container ───────────── -->
+  <h2 class="section-heading">2. Container: ECR, ECS, Fargate</h2>
+  <ul class="feature-list">
+    <li><strong>Amazon ECR:</strong> registry private lưu trữ Docker image, tích hợp IAM và image scanning.</li>
+    <li><strong>Amazon ECS:</strong> dịch vụ điều phối container của AWS. Các khái niệm chính: <strong>Cluster</strong>, <strong>Task Definition</strong> (mô tả container: image, CPU, RAM, port, env), <strong>Task</strong>, <strong>Service</strong> (duy trì số lượng task mong muốn, gắn với ALB).</li>
+    <li><strong>Launch type:</strong> <strong>EC2</strong> (tự quản lý instance) hoặc <strong>Fargate</strong> (serverless, không cần quản lý server).</li>
+    <li><strong>Amazon EKS:</strong> Kubernetes được quản lý — sẽ học chi tiết ở các section về Kubernetes.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section4/container-architecture-docker.png" alt="Kiến trúc container và luồng Docker: Client → Docker Host → Registry" />
+    <div class="figure-title">Kiến trúc container và luồng Docker: Client → Docker Host → Registry</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/ecs-ecr-deployment.png" alt="Triển khai hệ thống sử dụng Docker, ECS, ECR" />
+    <div class="figure-title">Triển khai hệ thống sử dụng Docker, ECS, ECR</div>
+  </div>
+
+  <!-- ───────────── Monitoring ───────────── -->
+  <h2 class="section-heading">3. Monitoring với CloudWatch &amp; CloudTrail</h2>
+  <div class="concept-grid">
+    <div class="concept-card"><div class="label">📈 Metrics</div><p>Số liệu theo thời gian: CPU, memory, request count, latency... Có metric mặc định và custom metric. Metrics Insights để truy vấn.</p></div>
+    <div class="concept-card"><div class="label">📜 Logs</div><p>Log Group / Log Stream thu thập log từ EC2, Lambda, ECS... Logs Insights để tìm kiếm, phân tích log.</p></div>
+    <div class="concept-card"><div class="label">🚨 Alarm</div><p>Cảnh báo khi metric vượt ngưỡng → gửi SNS (email, Slack), trigger Auto Scaling.</p></div>
+    <div class="concept-card"><div class="label">⏰ Event / Rule</div><p>Phản ứng theo sự kiện (event-based) hoặc theo lịch (time-based) — nay thuộc Amazon EventBridge.</p></div>
+    <div class="concept-card"><div class="label">🧪 Synthetics &amp; RUM</div><p>Synthetics: script giả lập người dùng kiểm tra endpoint định kỳ. RUM: đo trải nghiệm người dùng thật trên trình duyệt.</p></div>
+    <div class="concept-card"><div class="label">🕵️ CloudTrail</div><p>Ghi lại mọi API call trên account: ai, làm gì, lúc nào, từ đâu — phục vụ audit và điều tra sự cố.</p></div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/cloudwatch-features.png" alt="Các tính năng của Amazon CloudWatch: Alarm, Rule, Event, Logs, Metrics Insights, RUM, Evidently, Synthetics..." />
+    <div class="figure-title">Các tính năng của Amazon CloudWatch: Alarm, Rule, Event, Logs, Metrics Insights, RUM, Evidently, Synthetics...</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/monitoring-architecture.png" alt="Mô hình monitoring: CloudWatch thu thập log/metric từ các target, Alarm gửi SNS tới team vận hành hoặc trigger Lambda tự động xử lý" />
+    <div class="figure-title">Mô hình monitoring: CloudWatch thu thập log/metric từ các target, Alarm gửi SNS tới team vận hành hoặc trigger Lambda tự động xử lý</div>
+  </div>
+
+  <!-- ───────────── Decoupling ───────────── -->
+  <h2 class="section-heading">4. Decoupling &amp; Messaging (SQS, SNS, EventBridge)</h2>
+  <ul class="feature-list">
+    <li><strong>Decoupling:</strong> các thành phần giao tiếp qua message thay vì gọi trực tiếp — một bên chậm hoặc lỗi không kéo sập bên còn lại.</li>
+    <li><strong>Amazon SQS (queue):</strong> producer gửi message vào hàng đợi, consumer lấy ra xử lý theo tốc độ của mình. Hỗ trợ Standard và FIFO queue, Dead-Letter Queue (DLQ).</li>
+    <li><strong>Amazon SNS (pub/sub):</strong> một message được gửi tới nhiều subscriber cùng lúc (SQS, Lambda, email, SMS, HTTP).</li>
+    <li><strong>Fan-out pattern:</strong> SNS → nhiều SQS queue để nhiều hệ thống cùng xử lý một sự kiện.</li>
+    <li><strong>Amazon EventBridge:</strong> event bus định tuyến sự kiện theo rule, tích hợp sẵn với hàng trăm dịch vụ AWS và SaaS.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section4/decoupling-sqs-sns.png" alt="Decoupling với SQS (Producer → Queue → Consumer) và SNS fan-out tới nhiều subscriber" />
+    <div class="figure-title">Decoupling với SQS (Producer → Queue → Consumer) và SNS fan-out tới nhiều subscriber</div>
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="req-table">
+    <thead><tr><th>Lựa chọn</th><th>Phù hợp khi</th><th>Không phù hợp khi</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Lambda</strong></td><td>Tác vụ ngắn, theo sự kiện, traffic không đều</td><td>Tác vụ chạy &gt; 15 phút, cần kết nối lâu dài (WebSocket server), traffic cao và đều đặn (đắt hơn container)</td></tr>
+      <tr><td><strong>ECS Fargate</strong></td><td>Ứng dụng đã container hoá, không muốn quản lý server</td><td>Cần GPU, cần tuỳ biến sâu ở mức OS</td></tr>
+      <tr><td><strong>ECS trên EC2 / EKS</strong></td><td>Hệ thống lớn, cần tối ưu chi phí, cần hệ sinh thái Kubernetes</td><td>Team nhỏ, chưa có kinh nghiệm vận hành</td></tr>
+      <tr><td><strong>Messaging (SQS/SNS)</strong></td><td>Xử lý bất đồng bộ, chịu được độ trễ, cần chống quá tải</td><td>Cần phản hồi đồng bộ ngay lập tức cho user</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Pipeline deploy container</h4>
+      <p>CodeBuild build image → push ECR → cập nhật Task Definition → ECS Service rolling update — nội dung sẽ thực hành ở section CodePipeline.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Cảnh báo sự cố production</h4>
+      <p>CloudWatch Alarm theo dõi 5xx của ALB, CPU của ECS; vượt ngưỡng thì gửi SNS tới email/Slack của team DevOps.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Xử lý đơn hàng chịu tải cao</h4>
+      <p>Đơn hàng vào SQS, worker xử lý dần; giờ cao điểm hàng đợi dài ra nhưng hệ thống không sập, message lỗi được đưa vào DLQ để xử lý lại.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Giới hạn cần nhớ:</strong> Lambda timeout tối đa 15 phút, memory tối đa 10 GB; SQS message tối đa 1 MiB (trước 8/2025 là 256 KB) (lớn hơn thì lưu S3 và gửi đường dẫn); CloudWatch Logs mặc định lưu <strong>vĩnh viễn</strong> — hãy đặt retention để tránh tốn phí.
+  </div>
+  <div class="alert alert-warning">
+    <strong>Chi phí:</strong> ECS Fargate tính phí theo vCPU/RAM mỗi giây khi task chạy; ECR tính phí lưu trữ image — hãy đặt lifecycle policy xoá image cũ. Khi làm lab, nhớ scale service về 0 hoặc xoá cluster.
+  </div>
+  <div class="alert alert-tip">
+    <strong>Kết thúc phần ôn tập:</strong> nếu phần nào trong Section 4 bạn còn chưa chắc, hãy dành thời gian ôn lại trước khi sang các section DevOps — các bài lab phía sau sẽ dùng lại toàn bộ những kiến thức này.
+  </div>
+
+</body>
+</html>

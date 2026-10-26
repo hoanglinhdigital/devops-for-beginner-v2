@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Container là gì? Tại sao cần Container? – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Container là gì? Tại sao cần Container?</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu của section</h2>
+  <ul class="feature-list">
+    <li>Nắm được các khái niệm cơ bản về <strong>Container</strong> và <strong>Docker</strong>.</li>
+    <li>Cài đặt môi trường làm việc với Docker trên máy local (Windows/MacOS) hoặc EC2 Linux.</li>
+    <li>Biết cách thao tác với <strong>Image, Container, Dockerfile</strong>.</li>
+    <li>Thực hành <strong>Docker &amp; Docker Compose</strong> qua các bài lab, từ 1 container đơn giản tới nhiều container có load balancer.</li>
+    <li>Làm quen với <strong>Amazon ECR &amp; Amazon ECS</strong> – nền tảng cho các chương CI/CD và Kubernetes phía sau.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Container</strong> là một cách đóng gói ứng dụng <strong>cùng với mọi thứ cần thiết để chạy ứng dụng đó</strong> (runtime, thư viện, công cụ hệ thống, cấu hình) thành một đơn vị độc lập,
+    có thể chạy giống hệt nhau ở bất cứ đâu có hỗ trợ container: laptop của developer, server test hay môi trường Cloud.
+    Container ra đời để giải quyết các vấn đề kinh điển khi triển khai ứng dụng trực tiếp lên server/máy ảo (VM): xung đột thư viện, môi trường không nhất quán và triển khai chậm.
+  </p>
+
+  <h2 class="section-heading">Câu chuyện: một ngày cài phần mềm lên server production</h2>
+  <p class="body-text">Hãy cùng xét mô hình triển khai truyền thống, nhiều ứng dụng chạy chung trên một VM/EC2 server:</p>
+  <ol class="step-list">
+    <li><div><p>Sếp giao nhiệm vụ cài một software mới lên server production. Bạn tìm hiểu rất kỹ các thư viện, runtime cần thiết và tải về đầy đủ.</p></div></li>
+    <li><div><p>Đến ngày thực hiện, việc đầu tiên là backup server (đương nhiên rồi 😄).</p></div></li>
+    <li><div><p>Software mới cần thư viện <code>Jxxx 20</code>, nhưng trình cài đặt báo không thể tồn tại 2 version song song. Bạn gỡ <code>Jxxx 19</code> ra và cài <code>Jxxx 20</code> vào (mới hơn tất nhiên là tốt hơn?).</p></div></li>
+    <li><div><p>Cài đặt xong, bạn báo sếp là đã hoàn thành.</p></div></li>
+    <li><div><p>30 phút sau, khách hàng gọi điện: một số software trước giờ vẫn chạy bình thường thì hôm nay không khởi động được và văng lỗi <strong>thiếu thư viện</strong>... 😱</p></div></li>
+  </ol>
+
+  <div class="mermaid">
+  flowchart TB
+      subgraph VM["<img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/> VM / EC2 Server"]
+          direction TB
+          subgraph Apps["Ứng dụng"]
+              direction LR
+              A1["📦 App A<br/>cần Jxxx 19"]
+              A2["📦 App B<br/>cần Jxxx 19"]
+              A3["🆕 App C<br/>cần Jxxx 20"]
+              A1 --- A2 --- A3
+          end
+          Lib["📚 Thư viện dùng chung: Jxxx 19 → 20 ❌"]
+          OS["🐧 Guest OS"]
+          Apps --> Lib --> OS
+      end
+  </div>
+  <p class="arch-caption">Nhiều ứng dụng dùng chung một bộ thư viện trên cùng OS: nâng version cho App C làm App A, App B bị lỗi.</p>
+
+  <h3 class="section-subheading">Các vấn đề khi triển khai trực tiếp trên VM</h3>
+  <ul class="feature-list">
+    <li><strong>Xung đột version</strong> giữa library, binary, runtime khi cài nhiều ứng dụng trên cùng một VM.</li>
+    <li><strong>Không độc lập môi trường</strong> giữa các ứng dụng: một ứng dụng thay đổi có thể ảnh hưởng ứng dụng khác.</li>
+    <li><strong>Triển khai mất thời gian:</strong> chuẩn bị OS, cài thư viện, setup môi trường... lặp lại cho mỗi server.</li>
+    <li><strong>Khó đảm bảo tính nhất quán:</strong> ứng dụng chạy OK trên máy dev nhưng không chắc chạy được trên server test/production (“It works on my machine!”).</li>
+  </ul>
+
+  <h2 class="section-heading">Container giải quyết vấn đề như thế nào?</h2>
+  <ul class="feature-list">
+    <li><strong>Đóng gói</strong> ứng dụng cùng những thứ cần thiết để chạy ứng dụng đó thành một <strong>image</strong>, có thể chạy ở bất cứ đâu có hỗ trợ container.</li>
+    <li><strong>Cung cấp môi trường &amp; cơ chế cấp phát tài nguyên</strong> (CPU, RAM, network, file system riêng) để image đó chạy cô lập với các ứng dụng khác.</li>
+    <li><strong>Cung cấp công cụ</strong> cho phép đóng gói, lưu trữ, phân phối và triển khai ứng dụng một cách thuận tiện (build → push lên registry → pull → run).</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc: Virtual Machine vs Container</h2>
+  <div class="two-col">
+    <div class="card">
+      <h4>Virtual Machine</h4>
+      <div class="mermaid">
+      flowchart TB
+          subgraph VM1["VM 1"]
+              direction TB
+              AppA["📦 App A"] --> LibA["📚 Libs"] --> OSA["🐧 Guest OS"]
+          end
+          subgraph VM2["VM 2"]
+              direction TB
+              AppB["📦 App B"] --> LibB["📚 Libs"] --> OSB["🪟 Guest OS"]
+          end
+          VM1 --> HV["⚙️ Hypervisor"]
+          VM2 --> HV
+          HV --> HW["🖥️ Hardware"]
+      </div>
+    </div>
+    <div class="card">
+      <h4>Container</h4>
+      <div class="mermaid">
+      flowchart TB
+          subgraph C1["Container 1"]
+              direction TB
+              CA["📦 App A"] --> CLA["📚 Libs"]
+          end
+          subgraph C2["Container 2"]
+              direction TB
+              CB["📦 App B"] --> CLB["📚 Libs"]
+          end
+          C1 --> RT["<img src='../../assets/svg-icon/docker.svg' style='width:28px;height:28px;'/><br/>Container Runtime"]
+          C2 --> RT
+          RT --> HOS["🐧 Host OS (Kernel dùng chung)"]
+          HOS --> HW2["🖥️ Hardware / VM"]
+      </div>
+    </div>
+  </div>
+  <p class="arch-caption">Mỗi VM có một Guest OS đầy đủ (vài GB). Các container dùng chung kernel của Host OS, mỗi container chỉ chứa ứng dụng và thư viện của riêng nó (vài MB tới vài trăm MB).</p>
+
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Virtual Machine</th><th>Container</th></tr></thead>
+    <tbody>
+      <tr><td>Mức độ ảo hoá</td><td>Ảo hoá phần cứng (Hypervisor)</td><td>Ảo hoá ở mức hệ điều hành (dùng chung kernel)</td></tr>
+      <tr><td>Kích thước</td><td>Vài GB (bao gồm Guest OS)</td><td>Vài MB – vài trăm MB</td></tr>
+      <tr><td>Thời gian khởi động</td><td>Vài chục giây tới vài phút</td><td>Vài giây hoặc nhanh hơn</td></tr>
+      <tr><td>Mức độ cô lập</td><td>Rất cao (OS riêng)</td><td>Tốt, nhưng thấp hơn VM (dùng chung kernel)</td></tr>
+      <tr><td>Mật độ trên 1 server</td><td>Vài – vài chục VM</td><td>Hàng chục – hàng trăm container</td></tr>
+      <tr><td>Hệ điều hành</td><td>Chạy được OS khác host (Windows trên Linux host...)</td><td>Container Linux cần kernel Linux</td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Trên thực tế, container và VM <strong>không loại trừ nhau</strong>: trên AWS, container thường chạy bên trong EC2 (VM) hoặc Fargate (micro-VM do AWS quản lý).</p>
+
+  <h2 class="section-heading">Lợi ích của việc sử dụng Container</h2>
+  <ul class="feature-list">
+    <li><strong>Độc lập với môi trường:</strong> đóng gói ứng dụng và toàn bộ dependencies (thư viện, tools...), giúp ứng dụng chạy độc lập và nhất quán trên mọi môi trường: Dev, Test, Staging, Production.</li>
+    <li><strong>Đơn giản hoá quy trình triển khai:</strong> nhất quán, nhanh, thuận tiện; dễ dàng tích hợp vào pipeline CI/CD (build image 1 lần, deploy nhiều nơi).</li>
+    <li><strong>Quản lý tài nguyên hiệu quả:</strong> chạy nhiều container trên cùng một máy chủ vật lý hoặc máy ảo, tận dụng tối đa CPU/RAM của hệ thống.</li>
+    <li><strong>Linh hoạt &amp; dễ mở rộng:</strong> scale horizontal bằng cách chạy thêm container để đáp ứng workload; chạy song song nhiều version của một ứng dụng.</li>
+    <li><strong>Rollback nhanh:</strong> mỗi version là một image có tag, quay về version cũ chỉ cần chạy lại image cũ.</li>
+    <li><strong>Phù hợp kiến trúc Microservices:</strong> mỗi service đóng gói thành container riêng, dùng ngôn ngữ/thư viện riêng mà không ảnh hưởng nhau.</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="two-col">
+    <div class="card">
+      <h4>✅ Nên dùng Container khi</h4>
+      <ul class="feature-list">
+        <li>Ứng dụng web/API, microservices cần deploy thường xuyên.</li>
+        <li>Cần môi trường Dev/Test/Prod nhất quán.</li>
+        <li>Cần scale nhanh theo traffic.</li>
+        <li>Muốn chuẩn hoá quy trình CI/CD cho nhiều ngôn ngữ khác nhau.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>⚠️ Cân nhắc khi</h4>
+      <ul class="feature-list">
+        <li>Ứng dụng cần cô lập bảo mật tuyệt đối hoặc chạy OS/kernel khác (dùng VM).</li>
+        <li>Ứng dụng legacy phụ thuộc chặt vào phần cứng, GUI hoặc license theo máy.</li>
+        <li>Database production: container chạy được, nhưng nên ưu tiên dịch vụ managed (RDS, ElastiCache).</li>
+        <li>Team chưa có kiến thức container: cần thời gian học Docker, registry, orchestration.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Môi trường dev đồng nhất</h4>
+      <p>Thành viên mới vào dự án chỉ cần cài Docker và chạy <code>docker compose up</code> là có đủ web, cache, database giống hệt các thành viên khác.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>CI/CD build once – run anywhere</h4>
+      <p>Pipeline build image 1 lần, đẩy lên registry (ECR), sau đó deploy cùng một image lên Dev → Staging → Production.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Microservices trên AWS</h4>
+      <p>Mỗi service (user, order, payment) chạy trong container riêng trên ECS/EKS, scale độc lập theo tải của từng service.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Container không phải công nghệ mới:</strong> Linux đã có các cơ chế <code>chroot</code>, <strong>namespaces</strong> (cô lập process, network, file system) và <strong>cgroups</strong> (giới hạn CPU/RAM) từ lâu.
+    Docker (2013) giúp container trở nên phổ biến nhờ đóng gói các cơ chế này thành công cụ dễ dùng cùng định dạng image chuẩn hoá.
+  </div>
+  <div class="alert alert-tip">
+    <strong>Tiêu chuẩn OCI:</strong> định dạng image và runtime container được chuẩn hoá bởi <em>Open Container Initiative (OCI)</em>. Image build bằng Docker có thể chạy trên containerd, Podman, ECS, Kubernetes...
+  </div>
+
+</body>
+</html>

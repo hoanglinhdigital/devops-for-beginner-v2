@@ -1,0 +1,17 @@
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: compose-web:1.0
+    ports:
+      - "8080:3000"
+    volumes:
+      # Bind mount source code từ máy host vào container: sửa file trên host => container thấy ngay
+      - ./web:/app
+      # Anonymous volume giữ lại node_modules đã cài trong image (không bị bind mount ghi đè)
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - APP_VERSION=1.0
+    restart: unless-stopped

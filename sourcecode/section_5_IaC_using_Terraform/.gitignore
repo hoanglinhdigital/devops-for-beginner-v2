@@ -1,0 +1,10 @@
+# Keypair do học viên tự sinh bằng ssh-keygen — KHÔNG commit lên Git
+keypair/*
+!keypair/.gitkeep
+
+# Terraform working files
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log

@@ -1,0 +1,40 @@
+// Lab 3 (tham khảo) – Cùng nội dung với job Freestyle nhưng viết bằng Declarative Pipeline.
+// Sẽ dễ hiểu hơn sau chương "Jenkins Pipeline: Jenkinsfile, Declarative vs Scripted".
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'APP_ENV', defaultValue: 'dev', description: 'Môi trường deploy')
+        choice(name: 'REGION', choices: ['ap-southeast-1', 'ap-northeast-1'], description: 'AWS Region')
+        booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Chỉ in thông tin, không deploy')
+    }
+
+    environment {
+        // Biến của job, dùng được trong mọi stage
+        APP_NAME = 'demo-app'
+    }
+
+    stages {
+        stage('Built-in variables') {
+            steps {
+                sh 'echo "JOB_NAME=${JOB_NAME}, BUILD_NUMBER=${BUILD_NUMBER}, WORKSPACE=${WORKSPACE}"'
+            }
+        }
+        stage('Parameters') {
+            steps {
+                echo "APP_NAME=${env.APP_NAME}, APP_ENV=${params.APP_ENV}, REGION=${params.REGION}, DRY_RUN=${params.DRY_RUN}"
+            }
+        }
+        stage('Credentials') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dblogin', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                    // Dùng nháy đơn để shell (không phải Groovy) đọc biến bí mật -> tránh lộ secret
+                    sh '''
+                        echo "Username: $USERNAME"
+                        echo "Password: $PASSWORD"
+                    '''
+                }
+            }
+        }
+    }
+}

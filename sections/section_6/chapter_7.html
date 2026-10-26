@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Process &amp; Service trong Linux – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Process &amp; Service trong Linux</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Process</strong> là một instance của chương trình đang chạy: mỗi lần bạn gõ <code>ls</code>, mở <code>vim</code> hay khởi động web server, hệ điều hành tạo ra một process với mã định danh riêng <strong>PID</strong>.
+    <strong>Service</strong> (còn gọi là daemon) là process được thiết kế để <strong>chạy ngầm liên tục</strong> và cung cấp dịch vụ cho hệ thống hoặc ứng dụng khác — ví dụ <code>sshd</code> (cho phép SSH), <code>httpd</code> (web server), <code>crond</code> (lập lịch).
+    Trên các distro hiện đại, service được quản lý bởi <strong>systemd</strong> thông qua lệnh <code>systemctl</code>.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>PID &amp; PPID:</strong> mỗi process có một PID duy nhất và một PPID (PID của process cha). Process đầu tiên là <code>systemd</code> với <strong>PID 1</strong>, là “tổ tiên” của mọi process khác.</li>
+    <li><strong>Tài nguyên riêng:</strong> OS cấp phát cho mỗi process vùng nhớ (memory), file đang mở, biến môi trường và chạy với quyền của một user nhất định.</li>
+    <li><strong>Trạng thái:</strong> Running (R), Sleeping (S), Stopped (T), Zombie (Z) — hiển thị ở cột <code>STAT</code> của <code>ps aux</code> hoặc cột <code>S</code> của <code>top</code>.</li>
+    <li><strong>Foreground &amp; Background:</strong> process có thể chạy trước mặt (chiếm terminal) hoặc chạy nền (thêm <code>&amp;</code> sau lệnh).</li>
+    <li><strong>Signal:</strong> cơ chế để “nói chuyện” với process, ví dụ <code>kill</code> gửi tín hiệu yêu cầu process dừng.</li>
+    <li><strong>Service (systemd unit):</strong> được định nghĩa bằng file <code>.service</code>, có thể tự khởi động cùng OS (<em>enable</em>) và tự khởi động lại khi bị lỗi (<em>Restart=always</em>).</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc: systemd quản lý process &amp; service</h2>
+  <div class="mermaid">
+  flowchart TB
+      Kernel["🐧 <b>Linux Kernel</b>"] -->|"khởi động"| Systemd["⚙️ <b>systemd</b><br/>PID 1"]
+      Admin["<img src='../../assets/svg-icon/user.svg' style='width:32px;height:32px;'/><br/><b>DevOps</b>"] -->|"systemctl start/stop/enable"| Systemd
+      subgraph Services["🧩 Services (daemon chạy ngầm)"]
+          direction LR
+          SSHD["🔐 sshd<br/>port 22"]
+          HTTPD["🌐 httpd<br/>port 80"]
+          CROND["⏰ crond"]
+      end
+      Systemd --> SSHD
+      Systemd --> HTTPD
+      Systemd --> CROND
+      SSHD -->|"fork"| Bash["⌨️ bash<br/>phiên SSH của bạn"]
+      Bash -->|"fork"| Cmd["📦 ps · vim · sleep<br/>process ngắn hạn"]
+      HTTPD -->|"fork"| Workers["👷 httpd worker<br/>xử lý request"]
+      Systemd -.->|"ghi log"| Journal["📜 journald<br/>journalctl -u httpd"]
+  </div>
+  <p class="arch-caption">systemd (PID 1) khởi chạy và giám sát các service. Mỗi phiên SSH là một process bash con của sshd; các lệnh bạn gõ là process con của bash.</p>
+
+  <h3 class="section-subheading">Vòng đời và trạng thái của process</h3>
+  <div class="mermaid">
+  flowchart LR
+      New["🆕 Created<br/>(fork/exec)"] --> R["🟢 Running (R)"]
+      R -->|"chờ I/O, sleep"| S["😴 Sleeping (S/D)"]
+      S -->|"có dữ liệu / hết thời gian chờ"| R
+      R -->|"Ctrl + Z / SIGSTOP"| T["⏸️ Stopped (T)"]
+      T -->|"fg / bg / SIGCONT"| R
+      R -->|"kết thúc / bị kill"| Z["🧟 Zombie (Z)<br/>chờ process cha thu dọn"]
+      Z --> End["⚫ Terminated"]
+  </div>
+
+  <h3 class="section-subheading">Các signal hay dùng</h3>
+  <table class="compare-table">
+    <thead><tr><th>Signal</th><th>Số</th><th>Cách gửi</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>SIGTERM</code></td><td>15</td><td><code>kill &lt;PID&gt;</code> (mặc định)</td><td>Yêu cầu dừng “lịch sự”: process được dọn dẹp, lưu dữ liệu trước khi thoát</td></tr>
+      <tr><td><code>SIGKILL</code></td><td>9</td><td><code>kill -9 &lt;PID&gt;</code></td><td>Buộc dừng ngay lập tức, không thể bị chặn. Chỉ dùng khi SIGTERM không có tác dụng</td></tr>
+      <tr><td><code>SIGINT</code></td><td>2</td><td><code>Ctrl + C</code></td><td>Ngắt process đang chạy ở foreground</td></tr>
+      <tr><td><code>SIGSTOP</code> / <code>SIGTSTP</code></td><td>19 / 20</td><td><code>Ctrl + Z</code></td><td>Tạm dừng process, có thể chạy tiếp bằng <code>fg</code>/<code>bg</code></td></tr>
+      <tr><td><code>SIGHUP</code></td><td>1</td><td><code>kill -HUP &lt;PID&gt;</code></td><td>Nhiều service hiểu là “đọc lại file cấu hình” (reload) mà không cần restart</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Lệnh quản lý process và service</h3>
+  <div class="two-col">
+    <div class="card">
+      <h4>Process</h4>
+      <ul class="feature-list">
+        <li><code>ps</code>: process của user hiện tại trong terminal</li>
+        <li><code>ps -ef</code> / <code>ps aux</code>: tất cả process, có owner, %CPU, %MEM</li>
+        <li><code>top</code>: theo dõi real-time</li>
+        <li><code>pgrep -a &lt;tên&gt;</code>: tìm PID theo tên</li>
+        <li><code>kill</code>, <code>kill -9</code>, <code>pkill &lt;tên&gt;</code>: dừng process</li>
+        <li><code>jobs</code>, <code>fg</code>, <code>bg</code>, <code>&amp;</code>: quản lý foreground/background</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>Service (systemctl)</h4>
+      <ul class="feature-list">
+        <li><code>systemctl start | stop | restart &lt;service&gt;</code></li>
+        <li><code>systemctl reload &lt;service&gt;</code>: đọc lại cấu hình</li>
+        <li><code>systemctl status &lt;service&gt;</code>: trạng thái, PID, log gần nhất</li>
+        <li><code>systemctl enable | disable &lt;service&gt;</code>: bật/tắt tự khởi động cùng OS</li>
+        <li><code>systemctl enable --now &lt;service&gt;</code>: enable và start cùng lúc</li>
+        <li><code>journalctl -u &lt;service&gt;</code>: xem log của service</li>
+      </ul>
+    </div>
+  </div>
+  <p class="code-note">💡 Lệnh cũ <code>service httpd restart</code> (trong slide/tài liệu cũ) vẫn chạy được trên AL2023 nhưng thực chất được chuyển sang <code>systemctl</code>. Hãy dùng <code>systemctl</code>.</p>
+
+  <h2 class="section-heading">Trade-off: chạy ứng dụng thủ công hay dưới dạng service?</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Cách chạy</th><th>Ưu điểm</th><th>Nhược điểm</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Chạy thủ công trong terminal (<code>node app.js</code>, <code>java -jar app.jar &amp;</code>)</td><td>Nhanh, tiện khi debug/thử nghiệm</td><td>Đóng SSH là app có thể dừng; server reboot không tự chạy lại; log không tập trung</td></tr>
+      <tr><td>Đóng gói thành systemd service</td><td>Tự khởi động cùng OS, tự restart khi crash, log tập trung qua journald, quản lý thống nhất bằng <code>systemctl</code></td><td>Cần viết file <code>.service</code>, hiểu thêm một số khái niệm</td></tr>
+      <tr><td>Chạy bằng container (Docker, ECS, EKS)</td><td>Đóng gói cả môi trường, dễ scale, phổ biến trong DevOps hiện đại</td><td>Thêm một lớp công nghệ phải học và vận hành (sẽ học ở section sau)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Xử lý server bị chậm, treo</h4>
+      <p>Dùng <code>top</code> hoặc <code>ps aux --sort=-%cpu</code> tìm process chiếm CPU/RAM bất thường, xem process đó của ai, sau đó <code>kill</code> hoặc restart service tương ứng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Triển khai web server / ứng dụng</h4>
+      <p>Cài <code>httpd</code>/<code>nginx</code> và <code>enable</code> để tự chạy khi Auto Scaling tạo instance mới; đóng gói ứng dụng Spring Boot/Node.js thành service để tự restart khi crash.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Cập nhật cấu hình không gián đoạn</h4>
+      <p>Sửa file cấu hình Nginx rồi dùng <code>systemctl reload nginx</code> thay vì restart để các kết nối đang phục vụ không bị ngắt.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>File service do hệ thống/package cài nằm ở <code>/usr/lib/systemd/system/</code>; file do bạn tự tạo hoặc ghi đè đặt ở <code>/etc/systemd/system/</code>. Sau khi sửa file service phải chạy <code>sudo systemctl daemon-reload</code>.</li>
+    <li><code>start</code> chỉ chạy service ngay lúc đó; <code>enable</code> chỉ cài đặt để chạy ở lần boot sau. Muốn cả hai, dùng <code>enable --now</code>.</li>
+    <li>Không nên lạm dụng <code>kill -9</code> với database hoặc ứng dụng đang ghi dữ liệu — có thể gây hỏng dữ liệu. Ưu tiên <code>systemctl stop</code> hoặc <code>kill</code> (SIGTERM).</li>
+    <li>Công cụ theo dõi thân thiện hơn <code>top</code>: <code>htop</code>, <code>btop</code>. Trên AWS, có thể đẩy metric CPU/RAM và log của service lên <strong>CloudWatch</strong> bằng CloudWatch Agent.</li>
+  </ul>
+
+</body>
+</html>

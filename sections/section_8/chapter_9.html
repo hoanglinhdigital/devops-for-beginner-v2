@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Docker Compose – giới thiệu &amp; cú pháp – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Docker Compose – giới thiệu &amp; cú pháp</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Docker Compose</strong> là công cụ dùng để định nghĩa và chạy các ứng dụng <strong>multi-container</strong>. Thay vì gõ nhiều lệnh <code>docker run</code> dài với hàng loạt tham số,
+    bạn khai báo các service, network, volume và cấu hình trong <strong>một file YAML duy nhất</strong> (<code>docker-compose.yaml</code> hoặc <code>compose.yaml</code>),
+    sau đó chỉ cần <code>docker compose up</code> để tạo và chạy toàn bộ hệ thống.
+  </p>
+  <div class="alert alert-info">
+    Trong thực tế, Docker Compose được developer dùng để <strong>dựng môi trường local</strong> nhanh chóng (web + cache + database) và áp dụng thay đổi tức thì.
+    Trên Cloud thường <strong>không</strong> dùng Docker Compose để deploy production, mà dùng các dịch vụ orchestration như <strong>Amazon ECS</strong>, <strong>Kubernetes (EKS)</strong>.
+  </div>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Khai báo (declarative):</strong> mô tả trạng thái mong muốn của hệ thống trong YAML, lưu trên Git cùng source code.</li>
+    <li><strong>Một lệnh cho cả hệ thống:</strong> <code>docker compose up</code> / <code>down</code> tạo hoặc xoá toàn bộ container, network, volume.</li>
+    <li><strong>Network tự động:</strong> Compose tạo một network riêng cho project; các service gọi nhau bằng <strong>tên service</strong> (ví dụ <code>db:3306</code>) nhờ DNS nội bộ.</li>
+    <li><strong>Thứ tự khởi động:</strong> <code>depends_on</code> kết hợp <code>healthcheck</code> đảm bảo database sẵn sàng trước khi ứng dụng start.</li>
+    <li><strong>Biến môi trường:</strong> đọc từ file <code>.env</code>, tách cấu hình nhạy cảm (password) ra khỏi file compose.</li>
+    <li><strong>Scale đơn giản:</strong> <code>docker compose up --scale web=3</code> chạy nhiều replica của một service.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      YAML["📄 <b>docker-compose.yaml</b><br/>services · volumes · networks"]
+      YAML -->|"docker compose up -d"| Project
+      subgraph Project["Compose project (network: myapp_default)"]
+          direction LR
+          WEB["📦 <b>web</b><br/>Node.js :3000"]
+          CACHE["<img src='../../assets/aws-svg/ElastiCache.svg' style='width:32px;height:32px;'/><br/><b>cache</b><br/>Redis :6379"]
+          DB["<img src='../../assets/svg-icon/database.svg' style='width:32px;height:32px;'/><br/><b>db</b><br/>MySQL :3306"]
+          VOL["💾 volume<br/>db-data"]
+          WEB -->|"redis://cache:6379"| CACHE
+          WEB -->|"db:3306"| DB
+          DB --- VOL
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:36px;height:36px;'/><br/>Browser"] -->|"localhost:8080"| WEB
+  </div>
+  <p class="arch-caption">Các service trong cùng project giao tiếp với nhau qua tên service; chỉ những port được khai báo trong <code>ports</code> mới truy cập được từ máy host.</p>
+
+  <h2 class="section-heading">Cú pháp file docker-compose.yaml cơ bản</h2>
+  <pre class="code-block"><code class="language-yaml">services:                    # danh sách service – đơn vị quản lý của Compose
+  web:
+    build:                     # build image từ Dockerfile
+      context: ./web
+      dockerfile: Dockerfile
+    image: my-web:1.0          # tên image sau khi build
+    ports:
+      - "8080:3000"            # host-port:container-port
+    environment:               # khai báo / ghi đè biến môi trường
+      - NODE_ENV=development
+      - DB_PASSWORD=${MYSQL_PASSWORD}   # lấy giá trị từ file .env
+    volumes:
+      - ./web:/app             # bind mount: thư mục host -> container
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.4           # dùng image có sẵn, không cần build
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql # named volume: dữ liệu bền vững
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      retries: 10
+
+volumes:                       # định nghĩa các named volume
+  db-data:</code></pre>
+
+  <table class="req-table">
+    <thead><tr><th>Thuộc tính</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>services</code></td><td>Đơn vị quản lý của Docker Compose. Mỗi service có thể chạy 1 hoặc nhiều container (replica).</td></tr>
+      <tr><td><code>build</code></td><td>Chỉ thị build: dùng Dockerfile nào, build context ở đâu để tạo ra image.</td></tr>
+      <tr><td><code>image</code></td><td>Image dùng để chạy (hoặc tên đặt cho image khi kết hợp với <code>build</code>).</td></tr>
+      <tr><td><code>ports</code></td><td>Mapping <code>host-port:container-port</code>. Chỉ ghi <code>"3000"</code> → Docker tự chọn port ngẫu nhiên trên host.</td></tr>
+      <tr><td><code>volumes</code> (trong service)</td><td>Mapping giữa thư mục máy host / named volume và thư mục trong container.</td></tr>
+      <tr><td><code>environment</code></td><td>Khai báo hoặc ghi đè biến môi trường cho container.</td></tr>
+      <tr><td><code>depends_on</code></td><td>Thứ tự khởi động; <code>condition: service_healthy</code> đợi service phụ thuộc pass healthcheck.</td></tr>
+      <tr><td><code>volumes</code> (cấp cao nhất)</td><td>Định nghĩa các persistent volume dùng chung cho các service.</td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-tip">
+    <strong>Compose V2:</strong> lệnh mới là <code>docker compose</code> (có dấu cách, là plugin của Docker CLI), thay cho <code>docker-compose</code> (V1, đã ngừng hỗ trợ).
+    Thuộc tính <code>version: '3'</code> ở đầu file cũng không còn cần thiết – Compose V2 sẽ cảnh báo <em>“version is obsolete”</em> nếu bạn vẫn khai báo.
+  </div>
+
+  <h2 class="section-heading">Bind mount vs Named volume</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Bind mount <code>./web:/app</code></th><th>Named volume <code>db-data:/var/lib/mysql</code></th></tr></thead>
+    <tbody>
+      <tr><td>Dữ liệu nằm ở đâu</td><td>Thư mục cụ thể trên máy host</td><td>Vùng lưu trữ do Docker quản lý</td></tr>
+      <tr><td>Mục đích chính</td><td>Chia sẻ source code để sửa code thấy ngay (dev)</td><td>Lưu dữ liệu bền vững (database, upload)</td></tr>
+      <tr><td>Khi <code>docker compose down</code></td><td>Không ảnh hưởng</td><td>Vẫn giữ lại (chỉ xoá khi thêm <code>-v</code>)</td></tr>
+      <tr><td>Phụ thuộc OS host</td><td>Có (đường dẫn, quyền file, hiệu năng trên Windows/Mac)</td><td>Không</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Các lệnh thường dùng</h2>
+  <table class="req-table">
+    <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>docker compose config</code></td><td>Kiểm tra cú pháp, hiển thị cấu hình sau khi thay biến từ <code>.env</code></td></tr>
+      <tr><td><code>docker compose up -d --build</code></td><td>Build image (nếu cần) và tạo, chạy toàn bộ service ở chế độ nền</td></tr>
+      <tr><td><code>docker compose ps</code></td><td>Liệt kê container của project</td></tr>
+      <tr><td><code>docker compose logs -f &lt;service&gt;</code></td><td>Xem log của service</td></tr>
+      <tr><td><code>docker compose exec &lt;service&gt; sh</code></td><td>Mở shell trong container của service</td></tr>
+      <tr><td><code>docker compose stop</code> / <code>start</code> / <code>restart</code></td><td>Dừng / chạy lại container (không xoá)</td></tr>
+      <tr><td><code>docker compose down</code></td><td>Xoá container &amp; network (thêm <code>-v</code> để xoá volume, <code>--rmi local</code> để xoá image đã build)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="two-col">
+    <div class="card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list">
+        <li>Rất dễ học, cấu hình ngắn gọn, đọc là hiểu.</li>
+        <li>Dựng môi trường dev giống nhau cho cả team chỉ với 1 lệnh.</li>
+        <li>Phù hợp chạy integration test trong pipeline CI.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>⚠️ Hạn chế</h4>
+      <ul class="feature-list">
+        <li>Chỉ chạy trên <strong>1 máy host</strong> – không có high availability.</li>
+        <li>Không có auto scaling, rolling update, self-healing mạnh như ECS/Kubernetes.</li>
+        <li>Không phù hợp để vận hành production quy mô lớn.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Môi trường dev local</h4>
+      <p>Web + Redis + MySQL chạy bằng 1 lệnh, source code mount vào container để sửa code thấy ngay.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Integration test trong CI</h4>
+      <p>Pipeline dựng database &amp; các dependency bằng Compose, chạy test, sau đó <code>down -v</code> để dọn sạch.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Demo / PoC nhanh</h4>
+      <p>Chia sẻ một file <code>docker-compose.yaml</code> để người khác chạy thử toàn bộ hệ thống trên máy của họ.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Tên project mặc định là tên thư mục chứa file compose; container được đặt tên dạng <code>&lt;project&gt;-&lt;service&gt;-&lt;số thứ tự&gt;</code>. Có thể đổi bằng <code>-p &lt;tên&gt;</code>.</li>
+    <li>File <code>.env</code> cùng thư mục được Compose tự động đọc. Hãy thêm <code>.env</code> vào <code>.gitignore</code> và cung cấp <code>.env.example</code> cho người khác.</li>
+    <li>Tài liệu tham khảo: <a href="https://docs.docker.com/reference/compose-file/" target="_blank" rel="noopener">docs.docker.com/reference/compose-file</a>.</li>
+  </ul>
+
+</body>
+</html>

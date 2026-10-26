@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: Multi-stage Dockerfile – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: Multi-stage Dockerfile</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Build một ứng dụng Node.js (webpack) thành static web, đóng gói vào <code>httpd</code> bằng Dockerfile <strong>2 stage</strong>:
+      <ul class="feature-list-sm">
+        <li><strong>Stage #1:</strong> dùng image <code>node:20</code> để build ra static file.</li>
+        <li><strong>Stage #2:</strong> dùng image <code>httpd:2.4</code>, chỉ copy output từ stage #1, tạo thành image <code>custom-httpd</code> hoàn chỉnh.</li>
+      </ul>
+    </li>
+    <li>So sánh kích thước image single-stage và multi-stage.</li>
+    <li>Chạy container từ image <code>custom-httpd</code> và kiểm tra kết quả.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      SRC["📁 Source code<br/>app/ · package.json<br/>webpack.config.js"]
+      subgraph S1["Stage #1: buildstep (node:20)"]
+          direction TB
+          N1["npm install"] --> N2["npm run build"] --> OUT["📦 /app/build<br/>index.html · bundle.js · png"]
+      end
+      subgraph S2["Stage #2: final (httpd:2.4)"]
+          direction TB
+          H["🌐 httpd<br/>/usr/local/apache2/htdocs/"]
+      end
+      SRC --> S1
+      OUT -->|"COPY --from=buildstep"| H
+      S2 --> IMG["🗂️ <b>custom-httpd</b><br/>~175 MB"]
+      S1 -.->|"bị bỏ lại<br/>(node_modules, npm, source)"| X["🗑️"]
+  </div>
+  <p class="arch-caption">Image cuối cùng chỉ chứa httpd và các file static đã build; toàn bộ công cụ build ở stage #1 bị bỏ lại.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3. Đã đọc phần <strong>Multi-stage Dockerfile</strong> trong chương Dockerfile.</li>
+    <li>Dung lượng trống tối thiểu 3 GB (image <code>node:20</code> khá lớn). Không cần cài Node.js trên máy vì toàn bộ quá trình build diễn ra trong container.</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab5_multi_stage/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu cấu trúc project</strong>
+        <p>Copy thư mục <code>lab5_multi_stage</code> từ source code về máy (hoặc EC2):</p>
+        <pre class="file-tree"><span class="dir">lab5_multi_stage/</span>
+├── <span class="dir">app/</span>                 <span class="desc"># source: index.html, scripts, styles, images</span>
+├── <span class="file">package.json</span>         <span class="desc"># khai báo thư viện webpack, script "build"</span>
+├── <span class="file">package-lock.json</span>
+├── <span class="file">webpack.config.js</span>    <span class="desc"># output ra thư mục ./build</span>
+├── <span class="file">webpack.parts.js</span>
+├── <span class="file">.dockerignore</span>        <span class="desc"># loại node_modules, build khỏi build context</span>
+├── <span class="file">Dockerfile-single</span>    <span class="desc"># 1 stage – để so sánh</span>
+└── <span class="file">Dockerfile</span>           <span class="desc"># 2 stage</span></pre>
+        <p>Lệnh <code>npm run build</code> dùng webpack gom <code>app/</code> thành các file tĩnh trong thư mục <code>build/</code> – chỉ thư mục này là cần thiết để chạy website.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Build image single-stage để so sánh</strong>
+        <p>Nội dung <code>Dockerfile-single</code>:</p>
+        <pre class="code-block"><code class="language-docker"># Single stage: dùng để so sánh kích thước với multi-stage
+FROM node:20
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+RUN npm run build</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd lab5_multi_stage
+docker build -t tmp-nodejs -f Dockerfile-single .</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Viết &amp; build Dockerfile multi-stage</strong>
+        <p>Nội dung <code>Dockerfile</code>:</p>
+        <pre class="code-block"><code class="language-docker"># ===== Stage 1: build source Node.js thành static file =====
+FROM node:20 AS buildstep
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+# ===== Stage 2: image cuối cùng chỉ chứa httpd + static file =====
+FROM httpd:2.4
+
+# Chỉ copy kết quả build (/app/build) từ stage 1, bỏ lại node_modules &amp; source code
+COPY --from=buildstep /app/build/ /usr/local/apache2/htdocs/
+
+EXPOSE 80
+
+CMD ["httpd-foreground"]</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build -t custom-httpd -f Dockerfile .</code></pre>
+        <p class="code-note">💡 Build lần 2 rất nhanh: các bước của stage #1 trùng với <code>Dockerfile-single</code> nên được lấy từ cache (<code>CACHED</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: So sánh kích thước image</strong>
+        <pre class="command-line" data-prompt="$" data-output="2-3,5-6"><code class="language-bash">docker images tmp-nodejs
+REPOSITORY   TAG       IMAGE ID       CREATED         SIZE
+tmp-nodejs   latest    6f0c2a1b3d4e   2 minutes ago   1.7GB
+docker images custom-httpd
+REPOSITORY     TAG       IMAGE ID       CREATED         SIZE
+custom-httpd   latest    9a8b7c6d5e4f   1 minute ago    175MB</code></pre>
+        <p>Image multi-stage nhỏ hơn khoảng <strong>10 lần</strong> (con số cụ thể tuỳ version image và cách Docker tính dung lượng trên máy bạn). Xem nội dung bên trong 2 image:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker run --rm tmp-nodejs ls /app
+docker run --rm custom-httpd ls /usr/local/apache2/htdocs</code></pre>
+        <p>Image <code>tmp-nodejs</code> chứa cả <code>node_modules</code>, source code và Node.js runtime; image <code>custom-httpd</code> chỉ có <code>index.html</code>, <code>bundle.js</code> và 2 file ảnh.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Chạy container từ image custom-httpd</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker run -d -p 8080:80 --name custom-httpd custom-httpd
+curl http://localhost:8080</code></pre>
+        <p>Truy cập <code>http://localhost:8080</code> (hoặc <code>http://&lt;EC2_PUBLIC_IP&gt;:8080</code>), bạn sẽ thấy trang <strong>Welcome to DevOps!!!</strong> với 2 hình minh hoạ.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6 (tuỳ chọn): Chỉ build tới một stage</strong>
+        <p>Cờ <code>--target</code> cho phép dừng ở stage chỉ định – hữu ích khi muốn debug quá trình build hoặc chạy test ở stage trung gian:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build -t build-only --target buildstep -f Dockerfile .
+docker run --rm build-only ls /app/build</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Image <code>custom-httpd</code> nhỏ hơn rất nhiều so với <code>tmp-nodejs</code>.</li>
+      <li>Truy cập <code>http://localhost:8080</code> hiển thị trang <strong>Welcome to DevOps!!!</strong> kèm hình ảnh.</li>
+      <li>Giải thích được vì sao image cuối không chứa <code>node_modules</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>npm ERR! network</code> / build rất lâu ở bước <code>RUN npm install</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Mạng chậm hoặc proxy công ty chặn registry npm.<br/><strong>Giải pháp:</strong> Thử lại; nếu mạng công ty chặn, thực hành trên EC2 (Lab 1 – Cách 2).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>COPY --from=buildstep ... "/app/build": not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Lệnh <code>npm run build</code> ở stage #1 lỗi hoặc output ra thư mục khác, hoặc tên stage trong <code>AS</code> và <code>--from</code> không khớp.<br/><strong>Giải pháp:</strong> Xem log của bước <code>npm run build</code>; kiểm tra <code>output.path</code> trong <code>webpack.config.js</code> và tên stage.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>no space left on device</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Ổ đĩa hết dung lượng (hay gặp trên EC2 dùng EBS 8 GB mặc định).<br/><strong>Giải pháp:</strong> <code>docker system prune -a</code> để xoá image không dùng; tăng EBS volume (Section 6 – Lab 7).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker rm -f custom-httpd
+docker rmi tmp-nodejs custom-httpd build-only
+docker builder prune -f</code></pre>
+  <p class="body-text"><code>docker builder prune</code> xoá build cache (có thể chiếm hàng GB sau khi build nhiều lần).</p>
+
+</body>
+</html>

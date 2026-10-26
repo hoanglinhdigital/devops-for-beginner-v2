@@ -1,0 +1,3 @@
+Danh sách chức năng của hệ thống:
+Chức năng: Đăng nhập
+Trạng thái: Đang phát triển

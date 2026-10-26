@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 8: Bài tập cuối chương – ALB, Auto Scaling &amp; MongoDB – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 8: Bài tập cuối chương – ALB, Auto Scaling &amp; MongoDB</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Phân tích một sơ đồ hệ thống và thiết kế cấu trúc Terraform có phân chia module.</li>
+    <li>Implement Terraform template theo thiết kế có sẵn gồm 5 module: <code>network</code>, <code>security</code>, <code>bastion</code>, <code>storage</code>, <code>application</code>.</li>
+    <li>Deploy một stack hoàn chỉnh: VPC, Subnet, Security Group, Bastion EC2, Application Load Balancer, Target Group, Auto Scaling Group và MongoDB database.</li>
+    <li>Sử dụng <code>user_data</code> và hàm <code>templatefile()</code> để tự động cài đặt ứng dụng khi EC2 khởi động.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <p class="body-text">Ứng dụng mẫu là <strong>Vote App</strong> (mã nguồn mở của CloudAcademy): Frontend React chạy trên nginx (port 80) và API viết bằng Go (port 8080), dữ liệu lưu trong MongoDB.</p>
+  <div class="mermaid">
+  flowchart TB
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/><b>Users</b><br/>Browser"]
+      Admin["💻 <b>Workstation</b><br/>workstation_ip/32"]
+      GH["<img src='../../assets/svg-icon/github.svg' style='width:32px;height:32px;'/><br/>GitHub Releases<br/>voteapp-frontend · voteapp-api-go"]
+      subgraph VPC["VPC udemy · 10.10.0.0/16"]
+          direction TB
+          subgraph PUB["Public subnets (AZ a, AZ b)"]
+              direction LR
+              ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:44px;height:44px;'/><br/><b>ALB</b><br/>:80"]
+              Bastion["<img src='../../assets/aws-svg/EC2.svg' style='width:36px;height:36px;'/><br/><b>Bastion</b>"]
+              NAT["🔁 <b>NAT Gateway</b>"]
+          end
+          subgraph PRI["Private subnets (AZ a, AZ b)"]
+              direction LR
+              subgraph ASG["📈 Auto Scaling Group (2 instance)"]
+                  App1["<img src='../../assets/aws-svg/EC2.svg' style='width:36px;height:36px;'/><br/>App 1<br/>nginx :80 · API :8080"]
+                  App2["<img src='../../assets/aws-svg/EC2.svg' style='width:36px;height:36px;'/><br/>App 2<br/>nginx :80 · API :8080"]
+              end
+              Mongo["<img src='../../assets/svg-icon/database.svg' style='width:36px;height:36px;'/><br/><b>MongoDB</b><br/>EC2 :27017"]
+          end
+      end
+      User -->|"HTTP :80"| ALB
+      ALB -->|"/ → TG webserver :80"| App1
+      ALB -->|"/languages*, /ok → TG api :8080"| App2
+      App1 -->|":27017"| Mongo
+      App2 -->|":27017"| Mongo
+      Admin -->|"SSH :22"| Bastion
+      Bastion -.->|"SSH :22"| App1
+      Bastion -.->|"SSH :22"| Mongo
+      PRI -->|"tải app, cài package"| NAT
+      NAT --> GH
+  </div>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section5/lab8-final-assignment-architecture.png" alt="Sơ đồ hệ thống của đề bài Lab 8: VPC 2 AZ, ALB, Auto Scaling, Bastion, NAT Gateway, MongoDB" />
+    <div class="figure-title">Sơ đồ hệ thống của đề bài (slide gốc)</div>
+  </div>
+
+  <h2 class="section-heading">Phân tích thiết kế &amp; phân chia module</h2>
+  <table class="compare-table">
+    <thead><tr><th>Module</th><th>Resource</th><th>Input chính</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td><code>network</code></td><td>VPC, 4 subnet, IGW, 1 NAT Gateway, route table (dùng module VPC từ Registry như Lab 7)</td><td>CIDR, AZ, subnet CIDR</td><td><code>vpc_id</code>, <code>public_subnets</code>, <code>private_subnets</code></td></tr>
+      <tr><td><code>security</code></td><td>4 Security Group: bastion, alb, application, mongodb</td><td><code>vpc_id</code>, <code>workstation_ip</code></td><td>ID của 4 SG</td></tr>
+      <tr><td><code>bastion</code></td><td>1 EC2 ở public subnet</td><td>subnet, SG, key</td><td><code>public_ip</code></td></tr>
+      <tr><td><code>storage</code></td><td>1 EC2 cài MongoDB ở private subnet</td><td>subnet, SG, key</td><td><code>private_ip</code></td></tr>
+      <tr><td><code>application</code></td><td>Launch Template, ALB, 2 Target Group, Listener + Rule, Auto Scaling Group</td><td>subnets, SG, <code>mongodb_ip</code></td><td><code>dns_name</code>, <code>private_ips</code></td></tr>
+    </tbody>
+  </table>
+  <h3 class="section-subheading">Thiết kế Security Group (SG chaining)</h3>
+  <table class="compare-table">
+    <thead><tr><th>Security Group</th><th>Inbound</th></tr></thead>
+    <tbody>
+      <tr><td><code>bastion</code></td><td>22 từ <code>workstation_ip</code> (chỉ IP của bạn)</td></tr>
+      <tr><td><code>alb</code></td><td>80 từ <code>0.0.0.0/0</code></td></tr>
+      <tr><td><code>application</code></td><td>80, 8080 từ SG <code>alb</code>; 22, 80, 8080 từ SG <code>bastion</code></td></tr>
+      <tr><td><code>mongodb</code></td><td>27017 từ SG <code>application</code>; 22 từ SG <code>bastion</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 5, 6, 7 (hiểu module, output, module Registry) và đã destroy toàn bộ resource của các lab trước.</li>
+    <li>Keypair tại <code>~/terraform-labs/keypair/</code>.</li>
+    <li><strong>Sử dụng region Singapore (<code>ap-southeast-1</code>)</strong> như cấu hình mẫu.</li>
+    <li>Ôn lại kiến thức ALB, Target Group, Listener Rule, Auto Scaling ở Section 4.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> Lab này chạy đồng thời NAT Gateway, Application Load Balancer và 4 EC2 <code>t3.micro</code> — tổng khoảng 0.12–0.15 USD/giờ. Hoàn thành trong một buổi và destroy ngay khi xong.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo cấu trúc thư mục</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab8_final_assignment/modules/{network,security,bastion,storage,application}
+cd ~/terraform-labs/lab8_final_assignment
+code .</code></pre>
+        <pre class="file-tree"><span class="dir">lab8_final_assignment/</span>
+├── <span class="file">main.tf</span>  <span class="file">variables.tf</span>  <span class="file">outputs.tf</span>  <span class="file">terraform.tfvars</span>
+└── <span class="dir">modules/</span>
+    ├── <span class="dir">network/</span>       <span class="file">main.tf  vars.tf  outputs.tf</span>
+    ├── <span class="dir">security/</span>      <span class="file">main.tf  vars.tf  outputs.tf</span>
+    ├── <span class="dir">bastion/</span>       <span class="file">main.tf  vars.tf  outputs.tf</span>
+    ├── <span class="dir">storage/</span>       <span class="file">main.tf  vars.tf  outputs.tf  install.sh</span>
+    └── <span class="dir">application/</span>   <span class="file">main.tf  vars.tf  outputs.tf  userdata.sh.tftpl</span></pre>
+        <div class="tip-box"><strong>Gợi ý:</strong> Trước khi xem code mẫu, hãy thử tự viết từng module dựa trên bảng phân tích ở trên và tài liệu Terraform Registry. Sau đó đối chiếu với code mẫu bên dưới.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Module network</strong>
+        <p>Tái sử dụng module VPC từ Registry, chỉ tạo 1 NAT Gateway để tiết kiệm chi phí:</p>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/network/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~&gt; 6.0"
+
+  name = "udemy"
+  cidr = var.cidr_block
+
+  azs             = var.availability_zones
+  public_subnets  = var.public_subnet_ips
+  private_subnets = var.private_subnet_ips
+
+  # 1 NAT Gateway dùng chung để tiết kiệm chi phí (môi trường lab)
+  enable_nat_gateway = true
+  single_nat_gateway = true
+  enable_vpn_gateway = false
+
+  tags = {
+    Name = "udemy"
+    Demo = "Terraform"
+  }
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/network/vars.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "availability_zones" {
+  type = list(string)
+}
+
+variable "cidr_block" {
+  type = string
+}
+
+variable "public_subnet_ips" {
+  type = list(string)
+}
+
+variable "private_subnet_ips" {
+  type = list(string)
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/network/outputs.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "vpc_id" {
+  description = "The ID of the VPC"
+  value       = module.vpc.vpc_id
+}
+
+output "public_subnets" {
+  description = "List of IDs of public subnets"
+  value       = module.vpc.public_subnets
+}
+
+output "private_subnets" {
+  description = "List of IDs of private subnets"
+  value       = module.vpc.private_subnets
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Module security</strong>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/security/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">resource "aws_security_group" "bastion" {
+  name        = "bastion"
+  description = "bastion network traffic"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "22 from workstation"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.workstation_ip]
+  }
+
+  egress {
+    description = "allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "bastion-sg"
+  }
+}
+
+resource "aws_security_group" "alb" {
+  name        = "alb"
+  description = "alb network traffic"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "80 from anywhere"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "alb-sg"
+  }
+}
+
+resource "aws_security_group" "application" {
+  name        = "application"
+  description = "application network traffic"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "80 from alb"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  ingress {
+    description     = "8080 from alb"
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  ingress {
+    description     = "22 from bastion"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion.id]
+  }
+
+  ingress {
+    description     = "80 from bastion"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion.id]
+  }
+
+  ingress {
+    description     = "8080 from bastion"
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion.id]
+  }
+
+  egress {
+    description = "allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "application-sg"
+  }
+}
+
+resource "aws_security_group" "mongodb" {
+  name        = "mongodb"
+  description = "mongodb network traffic"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "27017 from application"
+    from_port       = 27017
+    to_port         = 27017
+    protocol        = "tcp"
+    security_groups = [aws_security_group.application.id]
+  }
+
+  ingress {
+    description     = "22 from bastion"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion.id]
+  }
+
+  egress {
+    description = "allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "mongodb-sg"
+  }
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/security/vars.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "vpc_id" {
+  type = string
+}
+
+variable "workstation_ip" {
+  type = string
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/security/outputs.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "bastion_sg_id" {
+  description = "bastion sg id"
+  value       = aws_security_group.bastion.id
+}
+
+output "alb_sg_id" {
+  description = "alb sg id"
+  value       = aws_security_group.alb.id
+}
+
+output "application_sg_id" {
+  description = "web server sg id"
+  value       = aws_security_group.application.id
+}
+
+output "mongodb_sg_id" {
+  description = "mongodb sg id"
+  value       = aws_security_group.mongodb.id
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Module bastion</strong>
+        <p>Bastion host là "cửa ngõ" duy nhất để SSH vào các EC2 trong private subnet. Ổ đĩa root được mã hoá (<code>encrypted = true</code>).</p>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/bastion/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">resource "aws_instance" "bastion" {
+  ami                         = var.ami
+  instance_type               = var.instance_type
+  key_name                    = var.key_name
+  subnet_id                   = var.subnet_id
+  vpc_security_group_ids      = [var.sg_id]
+  associate_public_ip_address = true
+
+  root_block_device {
+    volume_size = 10
+    encrypted   = true
+  }
+
+  tags = {
+    Name  = "Bastion"
+    Owner = "Udemy"
+  }
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/bastion/vars.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "ami" {
+  type = string
+}
+
+variable "instance_type" {
+  type    = string
+  default = "t3.micro"
+}
+
+variable "key_name" {
+  type     = string
+  nullable = false
+}
+
+variable "subnet_id" {
+  type = string
+}
+
+variable "sg_id" {
+  type = string
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/bastion/outputs.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "public_ip" {
+  description = "public ip address"
+  value       = aws_instance.bastion.public_ip
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Module storage (MongoDB)</strong>
+        <p>EC2 trong private subnet, <code>user_data</code> đọc từ file <code>install.sh</code> — script chạy một lần khi EC2 khởi động lần đầu để cài MongoDB 7.0 và tạo dữ liệu mẫu. Biến <code>path.module</code> là đường dẫn tới thư mục của module hiện tại.</p>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/storage/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">resource "aws_instance" "mongo" {
+  ami                    = var.ami
+  instance_type          = var.instance_type
+  key_name               = var.key_name
+  subnet_id              = var.subnet_id
+  vpc_security_group_ids = [var.sg_id]
+
+  root_block_device {
+    volume_size = 10
+    encrypted   = true
+  }
+
+  # Script cài MongoDB 7.0 và tạo dữ liệu mẫu khi EC2 khởi động lần đầu
+  user_data = file("${path.module}/install.sh")
+
+  tags = {
+    Name  = "Mongo"
+    Owner = "Udemy"
+  }
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/storage/install.sh</code></p>
+        <pre class="code-block"><code class="language-bash">#!/bin/bash
+apt-get -y update
+apt-get -y install gnupg curl
+curl -fsSL https://pgp.mongodb.com/server-7.0.asc | \
+   gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg \
+   --dearmor
+echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+apt-get -y update
+apt-get -y install mongodb-org
+
+cat &gt; /etc/mongod.conf &lt;&lt; EOF
+storage:
+  dbPath: /var/lib/mongodb
+
+systemLog:
+  destination: file
+  logAppend: true
+  path: /var/log/mongodb/mongod.log
+
+net:
+  port: 27017
+  bindIp: 0.0.0.0
+
+processManagement:
+  timeZoneInfo: /usr/share/zoneinfo
+EOF
+
+echo starting mongo...
+systemctl enable mongod
+systemctl start mongod
+
+echo preparing mongodb data population script...
+mkdir -p /tmp/cloudacademy-app
+cd /tmp/cloudacademy-app
+
+cat &gt; db.setup.js &lt;&lt; EOF
+use langdb;
+db.languages.insertOne({"name" : "csharp", "codedetail" : { "usecase" : "system, web, server-side", "rank" : 5, "compiled" : false, "homepage" : "https://dotnet.microsoft.com/learn/csharp", "download" : "https://dotnet.microsoft.com/download/", "votes" : 0}});
+db.languages.insertOne({"name" : "python", "codedetail" : { "usecase" : "system, web, server-side", "rank" : 3, "script" : false, "homepage" : "https://www.python.org/", "download" : "https://www.python.org/downloads/", "votes" : 0}});
+db.languages.insertOne({"name" : "javascript", "codedetail" : { "usecase" : "web, client-side", "rank" : 7, "script" : false, "homepage" : "https://en.wikipedia.org/wiki/JavaScript", "download" : "n/a", "votes" : 0}});
+db.languages.insertOne({"name" : "go", "codedetail" : { "usecase" : "system, web, server-side", "rank" : 12, "compiled" : true, "homepage" : "https://golang.org", "download" : "https://golang.org/dl/", "votes" : 0}});
+db.languages.insertOne({"name" : "java", "codedetail" : { "usecase" : "system, web, server-side", "rank" : 1, "compiled" : true, "homepage" : "https://www.java.com/en/", "download" : "https://www.java.com/en/download/", "votes" : 0}});
+db.languages.insertOne({"name" : "nodejs", "codedetail" : { "usecase" : "system, web, server-side", "rank" : 20, "script" : false, "homepage" : "https://nodejs.org/en/", "download" : "https://nodejs.org/en/download/", "votes" : 0}});
+db.languages.find();
+EOF
+
+until mongosh &lt; db.setup.js; do sleep 5; done
+
+echo fin v1.00!</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/storage/vars.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "ami" {
+  type = string
+}
+
+variable "instance_type" {
+  type = string
+}
+
+variable "key_name" {
+  type = string
+}
+
+variable "subnet_id" {
+  type = string
+}
+
+variable "sg_id" {
+  type = string
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/storage/outputs.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "private_ip" {
+  description = "private ip address"
+  value       = aws_instance.mongo.private_ip
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Module application</strong>
+        <p>Script cài đặt cần biết DNS của ALB và IP của MongoDB — đây là các giá trị chỉ có sau khi resource được tạo. Hàm <code>templatefile()</code> đọc file template và thay các biến <code>${alb_dns}</code>, <code>${mongodb_ip}</code> bằng giá trị thật trước khi gán vào Launch Template.</p>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/application/userdata.sh.tftpl</code></p>
+        <pre class="code-block"><code class="language-bash">#!/bin/bash
+# File template: Terraform thay ${alb_dns} và ${mongodb_ip} bằng giá trị thật thông qua hàm templatefile()
+apt-get -y update
+apt-get -y install nginx jq
+
+ALB_DNS=${alb_dns}
+MONGODB_PRIVATEIP=${mongodb_ip}
+
+mkdir -p /tmp/cloudacademy-app
+cd /tmp/cloudacademy-app
+
+echo ===========================
+echo FRONTEND - download latest release and install...
+mkdir -p ./voteapp-frontend-react-2023
+pushd ./voteapp-frontend-react-2023
+curl -sL https://api.github.com/repos/cloudacademy/voteapp-frontend-react-2023/releases/latest | jq -r '.assets[0].browser_download_url' | xargs curl -OL
+INSTALL_FILENAME=$(curl -sL https://api.github.com/repos/cloudacademy/voteapp-frontend-react-2023/releases/latest | jq -r '.assets[0].name')
+tar -xvzf $INSTALL_FILENAME
+rm -rf /var/www/html
+cp -R build /var/www/html
+cat &gt; /var/www/html/env-config.js &lt;&lt; EOFF
+window._env_ = {REACT_APP_APIHOSTPORT: "$ALB_DNS"}
+EOFF
+popd
+
+echo ===========================
+echo API - download latest release, install, and start...
+mkdir -p ./voteapp-api-go
+pushd ./voteapp-api-go
+curl -sL https://api.github.com/repos/cloudacademy/voteapp-api-go/releases/latest | jq -r '.assets[] | select(.name | contains("linux-amd64")) | .browser_download_url' | xargs curl -OL
+INSTALL_FILENAME=$(curl -sL https://api.github.com/repos/cloudacademy/voteapp-api-go/releases/latest | jq -r '.assets[] | select(.name | contains("linux-amd64")) | .name')
+tar -xvzf $INSTALL_FILENAME
+# Start the API (port 8080) ở background
+MONGO_CONN_STR=mongodb://$MONGODB_PRIVATEIP:27017/langdb nohup ./api &gt; /var/log/voteapp-api.log 2&gt;&amp;1 &amp;
+popd
+
+systemctl restart nginx
+echo fin v1.00!</code></pre>
+        <p>ALB có 1 listener port 80 với 2 rule: request tới <code>/languages*</code>, <code>/ok</code> chuyển tới target group <code>api</code> (port 8080), còn lại chuyển tới target group <code>webserver</code> (port 80). Auto Scaling Group đăng ký instance vào cả 2 target group.</p>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/application/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">#==========Launch Template===========
+resource "aws_launch_template" "apptemplate" {
+  name = "application"
+
+  image_id               = var.ami
+  instance_type          = var.instance_type
+  key_name               = var.key_name
+  vpc_security_group_ids = [var.webserver_sg_id]
+
+  # templatefile(): đọc file template và truyền giá trị biến vào
+  user_data = base64encode(templatefile("${path.module}/userdata.sh.tftpl", {
+    alb_dns    = aws_lb.alb1.dns_name
+    mongodb_ip = var.mongodb_ip
+  }))
+
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Name  = "FrontendApp"
+      Owner = "Udemy"
+    }
+  }
+}
+
+#==========Application Load Balancer=
+resource "aws_lb" "alb1" {
+  name                       = "udemy-alb"
+  internal                   = false
+  load_balancer_type         = "application"
+  security_groups            = [var.alb_sg_id]
+  subnets                    = var.public_subnets
+  drop_invalid_header_fields = true
+  enable_deletion_protection = false
+
+  tags = {
+    Environment = "Lab"
+  }
+}
+
+resource "aws_lb_target_group" "webserver" {
+  name     = "udemy-tg-webserver"
+  vpc_id   = var.vpc_id
+  port     = 80
+  protocol = "HTTP"
+
+  health_check {
+    path                = "/"
+    interval            = 10
+    healthy_threshold   = 3
+    unhealthy_threshold = 6
+    timeout             = 5
+  }
+}
+
+resource "aws_lb_target_group" "api" {
+  name     = "udemy-tg-api"
+  vpc_id   = var.vpc_id
+  port     = 8080
+  protocol = "HTTP"
+
+  health_check {
+    path                = "/ok"
+    interval            = 10
+    healthy_threshold   = 3
+    unhealthy_threshold = 6
+    timeout             = 5
+  }
+}
+
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.alb1.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.webserver.arn
+  }
+}
+
+resource "aws_lb_listener_rule" "frontend_rule1" {
+  listener_arn = aws_lb_listener.front_end.arn
+  priority     = 100
+
+  condition {
+    path_pattern {
+      values = ["/"]
+    }
+  }
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.webserver.arn
+  }
+}
+
+# Request tới API được chuyển tới target group port 8080
+resource "aws_lb_listener_rule" "api_rule1" {
+  listener_arn = aws_lb_listener.front_end.arn
+  priority     = 10
+
+  condition {
+    path_pattern {
+      values = [
+        "/languages",
+        "/languages/*",
+        "/languages/*/*",
+        "/ok"
+      ]
+    }
+  }
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+}
+
+#==========Auto Scaling Group========
+resource "aws_autoscaling_group" "asg" {
+  name                = "udemy-app-asg"
+  vpc_zone_identifier = var.private_subnets
+
+  desired_capacity = var.asg_desired
+  max_size         = var.asg_max_size
+  min_size         = var.asg_min_size
+
+  target_group_arns = [aws_lb_target_group.webserver.arn, aws_lb_target_group.api.arn]
+
+  launch_template {
+    id      = aws_launch_template.apptemplate.id
+    version = "$Latest"
+  }
+}
+
+data "aws_instances" "application" {
+  instance_tags = {
+    Name  = "FrontendApp"
+    Owner = "Udemy"
+  }
+
+  instance_state_names = ["pending", "running"]
+
+  depends_on = [
+    aws_autoscaling_group.asg
+  ]
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/application/vars.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "ami" {
+  type = string
+}
+
+variable "instance_type" {
+  type = string
+}
+
+variable "key_name" {
+  type = string
+}
+
+variable "vpc_id" {
+  type = string
+}
+
+variable "public_subnets" {
+  type = list(string)
+}
+
+variable "private_subnets" {
+  type = list(string)
+}
+
+variable "webserver_sg_id" {
+  type = string
+}
+
+variable "alb_sg_id" {
+  type = string
+}
+
+variable "mongodb_ip" {
+  type = string
+}
+
+variable "asg_desired" {
+  type    = number
+  default = 2
+}
+
+variable "asg_max_size" {
+  type    = number
+  default = 2
+}
+
+variable "asg_min_size" {
+  type    = number
+  default = 2
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/modules/application/outputs.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "dns_name" {
+  description = "alb dns"
+  value       = aws_lb.alb1.dns_name
+}
+
+output "private_ips" {
+  description = "application instance private ips"
+  value       = data.aws_instances.application.private_ips
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Root module</strong>
+        <p>Data source <code>aws_ami.ubuntu</code> tìm AMI Ubuntu 22.04 mới nhất của Canonical (owner <code>099720109477</code>), dùng chung cho 3 module EC2. Thứ tự tạo resource được Terraform tự suy ra từ các tham chiếu <code>module.xxx.yyy</code>, không cần <code>depends_on</code>.</p>
+        <p class="code-note">📄 <code>lab8_final_assignment/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+# Ubuntu 22.04 LTS mới nhất (Canonical) - dùng chung cho Bastion, App, MongoDB
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"]
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+}
+
+#==========Keypair===================
+resource "aws_key_pair" "udemy_keypair" {
+  key_name   = "udemy-keypair"
+  public_key = file(var.keypair_path)
+}
+
+#==========Network===================
+module "network" {
+  source = "./modules/network"
+
+  availability_zones = var.availability_zones
+  cidr_block         = var.cidr_block
+  public_subnet_ips  = var.public_subnet_ips
+  private_subnet_ips = var.private_subnet_ips
+}
+
+#==========Security==================
+module "security" {
+  source = "./modules/security"
+
+  vpc_id         = module.network.vpc_id
+  workstation_ip = var.workstation_ip
+}
+
+#==========Bastion===================
+module "bastion" {
+  source = "./modules/bastion"
+
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = var.bastion_instance_type
+  key_name      = aws_key_pair.udemy_keypair.key_name
+  subnet_id     = module.network.public_subnets[0]
+  sg_id         = module.security.bastion_sg_id
+}
+
+#==========Storage (MongoDB)=========
+module "storage" {
+  source = "./modules/storage"
+
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = var.db_instance_type
+  key_name      = aws_key_pair.udemy_keypair.key_name
+  subnet_id     = module.network.private_subnets[0]
+  sg_id         = module.security.mongodb_sg_id
+}
+
+#==========Application===============
+module "application" {
+  source = "./modules/application"
+
+  ami             = data.aws_ami.ubuntu.id
+  instance_type   = var.app_instance_type
+  key_name        = aws_key_pair.udemy_keypair.key_name
+  vpc_id          = module.network.vpc_id
+  public_subnets  = module.network.public_subnets
+  private_subnets = module.network.private_subnets
+  webserver_sg_id = module.security.application_sg_id
+  alb_sg_id       = module.security.alb_sg_id
+  mongodb_ip      = module.storage.private_ip
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/variables.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "region" {
+  type    = string
+  default = "ap-southeast-1"
+}
+
+variable "workstation_ip" {
+  type        = string
+  description = "Public IP của máy bạn dạng CIDR, ví dụ: 113.161.10.20/32"
+
+  validation {
+    condition     = can(cidrhost(var.workstation_ip, 0))
+    error_message = "workstation_ip phải là CIDR hợp lệ, ví dụ: 113.161.10.20/32"
+  }
+}
+
+variable "cidr_block" {
+  type        = string
+  description = "VPC cidr block. Example: 10.10.0.0/16"
+}
+
+variable "availability_zones" {
+  type = list(string)
+}
+
+variable "public_subnet_ips" {
+  type = list(string)
+}
+
+variable "private_subnet_ips" {
+  type = list(string)
+}
+
+variable "keypair_path" {
+  type    = string
+  default = "../keypair/udemy-key.pub"
+}
+
+variable "bastion_instance_type" {
+  type    = string
+  default = "t3.micro"
+}
+
+variable "app_instance_type" {
+  type    = string
+  default = "t3.micro"
+}
+
+variable "db_instance_type" {
+  type    = string
+  default = "t3.micro"
+}</code></pre>
+        <p class="code-note">📄 <code>lab8_final_assignment/outputs.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "alb_dns" {
+  description = "alb dns"
+  value       = module.application.dns_name
+}
+
+output "bastion_public_ip" {
+  description = "bastion public ip"
+  value       = module.bastion.public_ip
+}
+
+output "application_private_ips" {
+  description = "application instance private ips"
+  value       = module.application.private_ips
+}
+
+output "mongodb_private_ip" {
+  description = "mongodb private ip"
+  value       = module.storage.private_ip
+}
+
+output "web_app_wait_command" {
+  description = "Test command - tests readiness of the web app"
+  value       = "until curl --max-time 5 http://${module.application.dns_name} &gt;/dev/null 2&gt;&amp;1; do echo preparing...; sleep 5; done; echo; echo -e 'Ready!!'"
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Tạo terraform.tfvars với IP của bạn</strong>
+        <p>Lấy public IP của máy bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -s https://checkip.amazonaws.com</code></pre>
+        <p>Tạo file <code>terraform.tfvars</code> và <strong>thay giá trị <code>workstation_ip</code></strong> bằng IP vừa lấy, giữ hậu tố <code>/32</code>:</p>
+        <p class="code-note">📄 <code>lab8_final_assignment/terraform.tfvars</code></p>
+        <pre class="code-block"><code class="language-hcl">region             = "ap-southeast-1"
+availability_zones = ["ap-southeast-1a", "ap-southeast-1b"]
+cidr_block         = "10.10.0.0/16"
+public_subnet_ips  = ["10.10.1.0/24", "10.10.2.0/24"]
+private_subnet_ips = ["10.10.101.0/24", "10.10.102.0/24"]
+
+# Thay bằng public IP của bạn (kiểm tra bằng: curl ifconfig.me), giữ nguyên /32
+workstation_ip = "113.161.10.20/32"
+
+keypair_path          = "../keypair/udemy-key.pub"
+bastion_instance_type = "t3.micro"
+app_instance_type     = "t3.micro"
+db_instance_type      = "t3.micro"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Deploy</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform init
+terraform validate
+terraform plan
+terraform apply -auto-approve</code></pre>
+        <p>Quá trình apply mất khoảng 5–7 phút. Sau khi apply xong, EC2 vẫn cần thêm vài phút để chạy <code>user_data</code> (cài MongoDB, tải và cài app). Chạy lệnh chờ đến khi web app sẵn sàng:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eval "$(terraform output -raw web_app_wait_command)"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 10: Truy cập ứng dụng</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform output -raw alb_dns</code></pre>
+        <p>Mở <code>http://&lt;alb_dns&gt;</code> trên trình duyệt, bạn sẽ thấy trang Vote App với danh sách ngôn ngữ lập trình; thử bấm vote. Kiểm tra API trực tiếp:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl http://$(terraform output -raw alb_dns)/ok
+curl http://$(terraform output -raw alb_dns)/languages</code></pre>
+        <p>Trên Console vào <strong>EC2 → Target Groups</strong>: <code>udemy-tg-webserver</code> và <code>udemy-tg-api</code> đều có 2 target <em>healthy</em>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 11: SSH qua Bastion vào MongoDB</strong>
+        <p>Dùng <strong>SSH agent forwarding</strong> để không phải copy private key lên Bastion:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eval $(ssh-agent -s)
+ssh-add ../keypair/udemy-key
+terraform output -raw mongodb_private_ip
+ssh -A ubuntu@$(terraform output -raw bastion_public_ip)</code></pre>
+        <p>Từ Bastion, SSH tiếp vào MongoDB (thay <code>&lt;MONGODB_PRIVATE_IP&gt;</code> bằng IP in ra ở lệnh trên) và kiểm tra dữ liệu:</p>
+        <pre class="command-line" data-prompt="ubuntu@bastion:~$"><code class="language-bash">ssh ubuntu@&lt;MONGODB_PRIVATE_IP&gt;</code></pre>
+        <pre class="command-line" data-prompt="ubuntu@mongo:~$"><code class="language-bash">mongosh langdb --eval "db.languages.find({}, {name: 1, 'codedetail.votes': 1})"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 12: Kiểm chứng Auto Scaling tự phục hồi</strong>
+        <p>Trên Console vào <strong>EC2 → Instances</strong>, chọn một instance <code>FrontendApp</code> và <strong>Terminate</strong>. Quan sát trong <strong>EC2 → Auto Scaling Groups → udemy-app-asg → Activity</strong>: ASG tự tạo instance mới để duy trì 2 instance; ứng dụng qua ALB vẫn truy cập được trong lúc thay thế.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>http://&lt;alb_dns&gt;</code> hiển thị Vote App và vote được; <code>/ok</code> trả về OK.</li>
+      <li>2 target group có đủ 2 target healthy.</li>
+      <li>SSH được vào Bastion từ máy bạn và từ Bastion vào MongoDB; từ IP khác không SSH được vào Bastion.</li>
+      <li>Terminate 1 app instance, ASG tự tạo instance thay thế.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Invalid value for variable: workstation_ip phải là CIDR hợp lệ</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Nhập IP thiếu <code>/32</code> hoặc sai định dạng.<br/><strong>Giải pháp:</strong> Sửa thành dạng <code>x.x.x.x/32</code> trong <code>terraform.tfvars</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">ALB trả về <code>502 Bad Gateway</code> / <code>503</code>, target <em>unhealthy</em></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>user_data</code> chưa chạy xong (mất vài phút), hoặc app chưa tải được từ GitHub.<br/><strong>Giải pháp:</strong> Đợi thêm 3–5 phút. Nếu vẫn lỗi, SSH qua Bastion vào app instance và xem log: <code>sudo tail -n 50 /var/log/cloud-init-output.log</code> và <code>cat /var/log/voteapp-api.log</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Trang web hiển thị nhưng không có dữ liệu / API lỗi kết nối DB</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> MongoDB chưa cài xong khi API khởi động, hoặc SG <code>mongodb</code> chưa cho phép 27017 từ SG <code>application</code>.<br/><strong>Giải pháp:</strong> Kiểm tra trên MongoDB: <code>sudo systemctl status mongod</code>, <code>sudo tail /var/log/cloud-init-output.log</code>; sau đó terminate các app instance để ASG tạo lại instance mới.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">SSH vào Bastion bị timeout</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Public IP của bạn đã thay đổi (mạng di động, đổi Wi-Fi) so với <code>workstation_ip</code>.<br/><strong>Giải pháp:</strong> Cập nhật <code>workstation_ip</code> trong tfvars rồi chạy <code>terraform apply</code> — chỉ Security Group bastion được cập nhật.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Permission denied (publickey)</code> khi SSH từ Bastion vào private instance</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Không bật agent forwarding hoặc chưa <code>ssh-add</code> private key.<br/><strong>Giải pháp:</strong> Chạy lại <code>ssh-add -l</code> để kiểm tra key đã được thêm, SSH vào Bastion với tham số <code>-A</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>NAT Gateway, ALB và 4 EC2 đều tính phí theo giờ.</strong> Destroy ngay sau khi hoàn thành lab, sau đó kiểm tra trên Console: <strong>EC2 → Load Balancers</strong>, <strong>Auto Scaling Groups</strong>, <strong>Instances</strong>, <strong>VPC → NAT gateways</strong> không còn resource của lab.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+
+</body>
+</html>

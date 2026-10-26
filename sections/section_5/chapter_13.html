@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 9: Sử dụng S3 để quản lý Terraform State – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 9: Sử dụng S3 để quản lý Terraform State</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Chuẩn bị một S3 bucket (bật versioning, encryption, chặn public access) để lưu state.</li>
+    <li>Cấu hình <strong>S3 backend</strong> với state locking bằng <code>use_lockfile</code>.</li>
+    <li>Deploy lại hạ tầng của Lab 6 với state được lưu trên S3.</li>
+    <li>Kiểm tra file state, lock file và các version của state trên S3.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["💻 <b>PC Local</b><br/><img src='../../assets/svg-icon/terraform.svg' style='width:36px;height:36px;'/><br/>lab9_s3_backend"]
+      subgraph AWS["☁️ AWS – ap-southeast-1"]
+          direction TB
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:44px;height:44px;'/><br/><b>S3 bucket</b><br/>udemy-terraform-state-xxx<br/>lab9/terraform.tfstate"]
+          subgraph VPC["VPC udemy-vpc (từ Lab 6)"]
+              EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:40px;height:40px;'/><br/>EC2 + SG + NAT GW"]
+          end
+      end
+      PC -->|"đọc / ghi state<br/>+ lock file"| S3
+      PC -->|"create / update"| VPC
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 6 — lab này dùng lại toàn bộ code của Lab 6 (module networking, security, compute).</li>
+    <li>Đã đọc chương <strong>Terraform State &amp; các phương án quản lý State</strong>.</li>
+    <li>Terraform &gt;= 1.10 (bắt buộc để dùng <code>use_lockfile</code>). Kiểm tra bằng <code>terraform -version</code>.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> Lab tạo lại VPC với NAT Gateway và Elastic IP (tính phí theo giờ). Chi phí lưu state trên S3 gần như bằng 0.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo S3 bucket để lưu state</strong>
+        <p>Trên AWS Console, vào <strong>S3</strong> và tạo bucket với các thông số:</p>
+        <ul class="feature-list">
+          <li>Region: <code>ap-southeast-1</code></li>
+          <li>Bucket name: <code>udemy-terraform-state-&lt;tên-của-bạn&gt;-&lt;số ngẫu nhiên&gt;</code>, ví dụ <code>udemy-terraform-state-linh-2026</code> (tên bucket là duy nhất trên toàn cầu, chỉ gồm chữ thường, số và dấu <code>-</code>)</li>
+          <li>Block all public access: <strong>Bật</strong> (mặc định)</li>
+          <li>Bucket Versioning: <strong>Enable</strong> — để có thể khôi phục state cũ</li>
+          <li>Default encryption: <strong>SSE-S3</strong> (mặc định)</li>
+        </ul>
+        <p>Bucket này sẽ được dùng tiếp cho Lab 10, hãy ghi lại tên bucket.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Copy code từ Lab 6</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab9_s3_backend
+cd ~/terraform-labs/lab9_s3_backend
+cp -r ../lab6_vpc_complete/modules .
+cp ../lab6_vpc_complete/variable.tf ../lab6_vpc_complete/output.tf ../lab6_vpc_complete/terraform.tfvars .
+code .</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo main.tf có cấu hình S3 backend</strong>
+        <p>So với Lab 6, chỉ thêm khối <code>backend "s3"</code> bên trong khối <code>terraform</code>. <strong>Đổi giá trị <code>bucket</code></strong> thành tên bucket bạn đã tạo ở Bước 1:</p>
+        <p class="code-note">📄 <code>lab9_s3_backend/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+  # Lưu state trên S3 bucket. Đổi tên bucket thành bucket bạn đã tạo ở Bước 1
+  backend "s3" {
+    bucket       = "udemy-terraform-state-change-me"
+    key          = "lab9/terraform.tfstate"
+    region       = "ap-southeast-1"
+    encrypt      = true
+    use_lockfile = true # S3 native state locking (Terraform &gt;= 1.10), không cần DynamoDB
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+# PART 1: Create a complete VPC using module networking
+module "networking" {
+  source              = "./modules/networking"
+  name_prefix         = var.name_prefix
+  availability_zone_1 = var.availability_zone_1
+  availability_zone_2 = var.availability_zone_2
+  cidr_block          = var.cidr_block
+  public_subnet_ips   = var.public_subnet_ips
+  private_subnet_ips  = var.private_subnet_ips
+}
+
+# PART 2: Security + Compute deploy vào VPC vừa tạo
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+resource "aws_key_pair" "udemy_keypair" {
+  key_name   = "${var.name_prefix}-keypair"
+  public_key = file(var.keypair_path)
+}
+
+module "security" {
+  source = "./modules/security"
+  vpc_id = module.networking.vpc_id
+}
+
+module "compute" {
+  source                 = "./modules/compute"
+  image_id               = data.aws_ami.amazon_linux.id
+  instance_type          = var.instance_type
+  key_name               = aws_key_pair.udemy_keypair.key_name
+  subnet_id              = module.networking.public_subnet_ids[0]
+  ec2_security_group_ids = [module.security.public_security_group_id]
+}</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Tham số</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>bucket</code></td><td>Tên S3 bucket chứa state</td></tr>
+            <tr><td><code>key</code></td><td>Đường dẫn file state trong bucket — mỗi project/môi trường dùng một key riêng</td></tr>
+            <tr><td><code>region</code></td><td>Region của <strong>bucket</strong> (có thể khác region deploy resource)</td></tr>
+            <tr><td><code>encrypt</code></td><td>Mã hoá file state phía server</td></tr>
+            <tr><td><code>use_lockfile</code></td><td>Tạo file <code>&lt;key&gt;.tflock</code> trên S3 để khoá state trong lúc thao tác</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Init với backend S3</strong>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform init
+Successfully configured the backend "s3"! Terraform will automatically use this backend unless the backend configuration changes.</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Deploy và quan sát lock file</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform apply -auto-approve</code></pre>
+        <p>Trong lúc apply đang chạy (NAT Gateway mất 1–2 phút), mở bucket trên S3 Console, vào thư mục <code>lab9/</code> và bấm Refresh: bạn sẽ thấy file <code>terraform.tfstate.tflock</code>. File này tự biến mất khi apply kết thúc.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Thử chạy đồng thời để thấy state locking</strong>
+        <p>Thay <code>instance_type</code> trong <code>terraform.tfvars</code> thành <code>"t3.small"</code> và chạy <code>terraform apply</code> (chưa gõ <code>yes</code>, để lệnh đang chờ). Mở một terminal thứ hai ở cùng thư mục và chạy:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform plan
+Error: Error acquiring the state lock</code></pre>
+        <p>Terraform từ chối vì state đang bị khoá bởi lệnh ở terminal thứ nhất — đây là cơ chế bảo vệ state khi làm việc nhóm. Quay lại terminal thứ nhất gõ <code>yes</code> để hoàn tất.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kiểm tra state trên S3</strong>
+        <ul class="feature-list">
+          <li>Trong thư mục lab <strong>không còn</strong> file <code>terraform.tfstate</code> ở local (chỉ còn file cấu hình backend trong <code>.terraform/</code>).</li>
+          <li>Trên S3 Console, file <code>lab9/terraform.tfstate</code> tồn tại. Bật <strong>Show versions</strong> để thấy mỗi lần apply tạo ra một version mới của state.</li>
+          <li>Terraform vẫn đọc state bình thường từ S3:</li>
+        </ul>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform state list
+terraform output</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>terraform init</code> báo cấu hình thành công backend <code>s3</code>.</li>
+      <li>File <code>lab9/terraform.tfstate</code> có trên S3 với nhiều version; không có file state ở local.</li>
+      <li>Chạy 2 lệnh Terraform đồng thời, lệnh thứ hai báo lỗi <code>Error acquiring the state lock</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error: Failed to get existing workspaces: S3 bucket "..." does not exist</code> hoặc <code>AccessDenied</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa đổi tên bucket trong <code>main.tf</code>, gõ sai tên, hoặc bucket thuộc tài khoản khác.<br/><strong>Giải pháp:</strong> Sửa <code>bucket</code> đúng tên bucket ở Bước 1 rồi chạy <code>terraform init -reconfigure</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>An argument named "use_lockfile" is not expected here</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Terraform cũ hơn 1.10.<br/><strong>Giải pháp:</strong> Nâng cấp Terraform (xem Lab 1).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Backend configuration changed</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sửa khối backend (bucket, key...) sau khi đã init.<br/><strong>Giải pháp:</strong> Chạy <code>terraform init -reconfigure</code> (bắt đầu với backend mới) hoặc <code>terraform init -migrate-state</code> (chuyển state cũ sang backend mới).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">State bị khoá mãi không mở (lệnh trước bị ngắt bằng Ctrl+C, mất mạng)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Lock file không được xoá do lệnh kết thúc bất thường.<br/><strong>Giải pháp:</strong> Khi chắc chắn không ai đang chạy Terraform, dùng <code>terraform force-unlock &lt;LOCK_ID&gt;</code> với Lock ID hiển thị trong thông báo lỗi.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>NAT Gateway và Elastic IP tính phí theo giờ.</strong> Destroy hạ tầng ngay sau khi hoàn thành lab. <strong>Giữ lại S3 bucket</strong> để dùng cho Lab 10 (bucket sẽ được xoá ở cuối Lab 10).</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+
+</body>
+</html>

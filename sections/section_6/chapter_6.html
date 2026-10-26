@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Phân quyền &amp; thay đổi owner của File/Folder – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Phân quyền &amp; thay đổi owner của File/Folder</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Đọc và hiểu kết quả của lệnh <code>ls -l</code> (loại file, quyền, owner, group).</li>
+    <li>Thay đổi quyền bằng <code>chmod</code> theo cả 2 cách: dạng số (<code>750</code>) và dạng ký hiệu (<code>g+w</code>).</li>
+    <li>Thay đổi owner/group sở hữu bằng <code>chown</code>, <code>chown -R</code>.</li>
+    <li>Quan sát trực tiếp cơ chế owner → group → other khi user <code>developer1</code> truy cập file của <code>ec2-user</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b>"]
+      subgraph EC2["🖥️ EC2 · linux-lab-server"]
+          direction LR
+          U1["<img src='../../assets/svg-icon/user.svg' style='width:28px;height:28px;'/><br/><b>ec2-user</b><br/>owner"]
+          U2["<img src='../../assets/svg-icon/developer.svg' style='width:28px;height:28px;'/><br/><b>developer1</b><br/>developer_group"]
+          F["📁 /home/ec2-user/test_folder<br/>📄 test_file.txt"]
+          P["📁 /opt/project<br/>thư mục dùng chung"]
+          U1 -->|"tạo, chmod, chown"| F
+          U2 -.->|"đọc / ghi?"| F
+          U2 -->|"chown -R"| P
+      end
+      PC -->|"SSH :22"| U1
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3: đã có user <code>developer1</code> thuộc group <code>developer_group</code>. Kiểm tra bằng <code>id developer1</code>.</li>
+    <li>Nắm bảng quyền dạng số (r = 4, w = 2, x = 1) trong chương <strong>User, Group &amp; phân quyền trong Linux</strong>.</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab4_file_permission/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Đọc kết quả ls -l</strong>
+        <p>SSH vào server bằng <code>ec2-user</code> và xem quyền của một số file hệ thống:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">cd /etc
+ls -l
+ls -ld /etc/ssh
+ls -l /etc/passwd /etc/shadow</code></pre>
+        <p>Nhận xét: <code>/etc/passwd</code> có quyền <code>-rw-r--r--</code> (ai cũng đọc được danh sách user), còn <code>/etc/shadow</code> có quyền <code>----------</code> (chỉ root đọc được vì chứa mật khẩu đã mã hoá). Thử <code>cat /etc/shadow</code> sẽ thấy <code>Permission denied</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo folder và file bằng ec2-user</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">cd /home/ec2-user
+mkdir test_folder
+cd test_folder
+vim test_file.txt</code></pre>
+        <p>Nhập một dòng bất kỳ, ví dụ <code>Hello from ec2-user</code>, lưu và thoát (<code>Esc</code> → <code>:wq</code>). Kiểm tra quyền mặc định:</p>
+        <pre class="command-line" data-prompt="[ec2-user test_folder]$" data-output="2,4-5"><code class="language-bash">ls -l
+-rw-r--r--. 1 ec2-user ec2-user 20 Oct 25 08:00 test_file.txt
+ls -ld /home/ec2-user /home/ec2-user/test_folder
+drwx------. 4 ec2-user ec2-user 120 Oct 25 08:00 /home/ec2-user
+drwxr-xr-x. 2 ec2-user ec2-user  27 Oct 25 08:00 /home/ec2-user/test_folder</code></pre>
+        <p>File mới có quyền <code>644</code>, folder mới <code>755</code> (do <code>umask 0022</code>). Riêng thư mục home <code>/home/ec2-user</code> có quyền <code>700</code> — chỉ ec2-user vào được.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Đổi quyền bằng chmod dạng số</strong>
+        <p>Đặt quyền <code>rwx r-x ---</code> cho file: owner toàn quyền, group đọc + chạy, other không có quyền gì:</p>
+        <pre class="command-line" data-prompt="[ec2-user test_folder]$" data-output="3"><code class="language-bash">chmod 750 test_file.txt
+ls -l test_file.txt
+-rwxr-x---. 1 ec2-user ec2-user 20 Oct 25 08:00 test_file.txt</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: developer1 thử đọc file</strong>
+        <p>Chuyển sang user <code>developer1</code> bằng <code>sudo su -</code> (ec2-user có quyền sudo nên không cần mật khẩu của developer1):</p>
+        <pre class="command-line" data-prompt="[ec2-user test_folder]$"><code class="language-bash">sudo su - developer1</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$" data-output="2,4"><code class="language-bash">cat /home/ec2-user/test_folder/test_file.txt
+cat: /home/ec2-user/test_folder/test_file.txt: Permission denied
+ls /home/ec2-user
+ls: cannot open directory '/home/ec2-user': Permission denied
+exit</code></pre>
+        <p>Bị từ chối ngay từ thư mục <code>/home/ec2-user</code> (quyền <code>700</code>, developer1 là <em>other</em> nên không có quyền <code>x</code> để đi qua).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Mở quyền “đi qua” thư mục cho other</strong>
+        <p>Thay vì <code>chmod -R 755</code> cả thư mục home (mở quá nhiều quyền, kể cả thư mục <code>.ssh</code>), ta chỉ cấp quyền <code>x</code> cho other trên thư mục home:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">chmod 711 /home/ec2-user
+ls -ld /home/ec2-user /home/ec2-user/test_folder
+sudo su - developer1</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$" data-output="2,4"><code class="language-bash">ls -l /home/ec2-user/test_folder
+-rwxr-x---. 1 ec2-user ec2-user 20 Oct 25 08:00 test_file.txt
+cat /home/ec2-user/test_folder/test_file.txt
+cat: /home/ec2-user/test_folder/test_file.txt: Permission denied
+exit</code></pre>
+        <p>Giờ developer1 đã “đi qua” được thư mục và liệt kê được <code>test_folder</code> (quyền <code>755</code>), nhưng vẫn không đọc được file vì developer1 là <em>other</em> và other có quyền <code>---</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Đổi group sở hữu file bằng chown</strong>
+        <p>Đổi group sở hữu của file thành <code>developer_group</code> (cần <code>sudo</code> vì ec2-user không thuộc group này):</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="3"><code class="language-bash">sudo chown ec2-user:developer_group /home/ec2-user/test_folder/test_file.txt
+ls -l /home/ec2-user/test_folder/test_file.txt
+-rwxr-x---. 1 ec2-user developer_group 20 Oct 25 08:00 /home/ec2-user/test_folder/test_file.txt
+sudo su - developer1</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$" data-output="2,4"><code class="language-bash">cat /home/ec2-user/test_folder/test_file.txt
+Hello from ec2-user
+echo "developer1 was here" &gt;&gt; /home/ec2-user/test_folder/test_file.txt
+-bash: /home/ec2-user/test_folder/test_file.txt: Permission denied
+exit</code></pre>
+        <p>developer1 thuộc group sở hữu → áp dụng quyền <strong>group</strong> <code>r-x</code>: đọc được nhưng không ghi được.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Đổi quyền bằng chmod dạng ký hiệu</strong>
+        <p>Cú pháp: <code>u</code> (owner), <code>g</code> (group), <code>o</code> (other), <code>a</code> (all) kết hợp <code>+</code> (thêm), <code>-</code> (bớt), <code>=</code> (gán). Thêm quyền ghi cho group:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="3"><code class="language-bash">chmod g+w /home/ec2-user/test_folder/test_file.txt
+ls -l /home/ec2-user/test_folder/test_file.txt
+-rwxrwx---. 1 ec2-user developer_group 20 Oct 25 08:00 /home/ec2-user/test_folder/test_file.txt
+sudo su - developer1</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$" data-output="3-4"><code class="language-bash">echo "developer1 was here" &gt;&gt; /home/ec2-user/test_folder/test_file.txt
+cat /home/ec2-user/test_folder/test_file.txt
+Hello from ec2-user
+developer1 was here
+exit</code></pre>
+        <p>Thử thêm vài cách viết dạng ký hiệu trên folder:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="4"><code class="language-bash">chmod o-x /home/ec2-user/test_folder
+chmod u=rwx,g=rx,o= /home/ec2-user/test_folder
+ls -ld /home/ec2-user/test_folder
+drwxr-x---. 2 ec2-user ec2-user 27 Oct 25 08:00 /home/ec2-user/test_folder</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Thư mục dùng chung cho team với chown -R</strong>
+        <p>Tình huống thực tế: tạo thư mục source code <code>/opt/project</code> cho developer1 làm owner và cả <code>developer_group</code> cùng sửa được:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo mkdir -p /opt/project/src
+sudo touch /opt/project/README.md /opt/project/src/app.py
+ls -lR /opt/project
+sudo chown -R developer1:developer_group /opt/project
+sudo chmod -R g+w /opt/project
+ls -lR /opt/project</code></pre>
+        <p><code>-R</code> (recursive) áp dụng cho thư mục và toàn bộ file, thư mục con bên trong. Kiểm tra developer1 ghi được file:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo su - developer1</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$"><code class="language-bash">echo "print('hello')" &gt;&gt; /opt/project/src/app.py
+cat /opt/project/src/app.py
+exit</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Giải thích được vì sao developer1 bị <code>Permission denied</code> ở bước 4 và bước 5.</li>
+      <li><code>test_file.txt</code> có quyền <code>-rwxrwx---</code>, group <code>developer_group</code> và chứa dòng <code>developer1 was here</code>.</li>
+      <li>Toàn bộ <code>/opt/project</code> có owner <code>developer1</code>, group <code>developer_group</code>; developer1 ghi được vào <code>app.py</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>chown: changing ownership of '...': Operation not permitted</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chỉ root mới đổi được owner của file; user thường chỉ đổi được group sang group mà mình là thành viên.<br/><strong>Giải pháp:</strong> Thêm <code>sudo</code> trước lệnh <code>chown</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Đã chmod file đúng nhưng vẫn <code>Permission denied</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thiếu quyền <code>x</code> trên một trong các thư mục cha của đường dẫn.<br/><strong>Giải pháp:</strong> Dùng <code>namei -l /đường/dẫn/tới/file</code> để xem quyền của từng thư mục trên đường đi và bổ sung quyền <code>x</code> cần thiết.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Sau khi <code>chmod -R 777</code> thư mục home, SSH bằng key bị từ chối</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> SSH server (StrictModes) từ chối dùng <code>authorized_keys</code> nếu thư mục home hoặc <code>.ssh</code> cho phép user khác ghi.<br/><strong>Giải pháp:</strong> Dùng EC2 Instance Connect để vào lại server và chạy <code>chmod 700 /home/ec2-user</code>, <code>chmod 700 ~/.ssh</code>, <code>chmod 600 ~/.ssh/authorized_keys</code>. Không bao giờ dùng <code>777</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>chown: invalid group: 'ec2-user:developer_group'</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Group chưa tồn tại (chưa làm Lab 3 hoặc đã xoá).<br/><strong>Giải pháp:</strong> Tạo lại theo Lab 3: <code>sudo groupadd developer_group</code>, <code>sudo useradd developer1</code>, <code>sudo usermod -a -G developer_group developer1</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Khôi phục quyền thư mục home, xoá file thực hành và user/group tạo ở Lab 3. Instance <code>linux-lab-server</code> được giữ lại cho các lab sau.</div>
+  <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">chmod 700 /home/ec2-user
+rm -rf /home/ec2-user/test_folder
+sudo rm -rf /opt/project
+sudo rm -f /etc/sudoers.d/developer_group
+sudo userdel -r developer1
+sudo groupdel developer_group</code></pre>
+
+</body>
+</html>

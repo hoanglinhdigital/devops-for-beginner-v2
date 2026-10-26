@@ -1,0 +1,10 @@
+region             = "ap-southeast-1"
+availability_zones = ["ap-southeast-1a", "ap-southeast-1b"]
+cidr_block         = "10.0.0.0/16"
+public_subnet_ips  = ["10.0.1.0/24", "10.0.2.0/24"]
+
+# Thay 123456789012 bằng AWS Account ID của bạn;
+# v1.0.0 là image tag đã build & push bằng workflow "Build and Push Docker Image" (Lab 1)
+ecr_image_uri = "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:v1.0.0"
+
+desired_count = 2

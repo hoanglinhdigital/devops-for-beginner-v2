@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu về Amazon Web Services (AWS) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">4. Giới thiệu &amp; ôn lại kiến thức AWS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu về Amazon Web Services (AWS)</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Amazon Web Services (AWS)</strong> là nền tảng điện toán đám mây (Cloud Computing) của Amazon, cung cấp hơn 200 dịch vụ
+    từ máy chủ ảo, lưu trữ, database, network cho tới AI/ML theo mô hình <strong>trả tiền theo mức sử dụng (pay-as-you-go)</strong>.
+    Thay vì tự mua server, thuê data center, doanh nghiệp chỉ cần vài cú click (hoặc vài dòng code) là có hạ tầng sẵn sàng trên toàn cầu.
+    Toàn bộ khoá học này sẽ sử dụng AWS làm môi trường để xây dựng hệ thống và các CICD pipeline.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính của AWS</h2>
+  <ul class="feature-list">
+    <li><strong>Cloud provider lâu đời nhất:</strong> ra mắt công khai từ 2006 với S3 và EC2 — đi trước các đối thủ nhiều năm.</li>
+    <li><strong>Thị phần lớn nhất:</strong> dẫn đầu thị trường Cloud Infrastructure với khoảng 30% thị phần, liên tục nhiều năm được Gartner xếp hạng <em>Leader</em>.</li>
+    <li><strong>Hệ sinh thái dịch vụ đa dạng:</strong> 200+ dịch vụ, từ Compute, Storage, Database, Networking tới Container, Serverless, Data, AI/ML.</li>
+    <li><strong>Hạ tầng toàn cầu:</strong> hàng chục Region, hơn 100 Availability Zone và hàng trăm Edge Location trên khắp thế giới.</li>
+    <li><strong>Pay-as-you-go:</strong> dùng bao nhiêu trả bấy nhiêu, không cần đầu tư phần cứng ban đầu, có Free Tier cho người mới.</li>
+    <li><strong>Cộng đồng &amp; tài liệu phong phú:</strong> tài liệu chính thức, blog, re:Post, cộng đồng AWS User Group (kể cả tại Việt Nam) rất lớn.</li>
+  </ul>
+
+  <h2 class="section-heading">Lịch sử hình thành AWS</h2>
+  <div class="inv-timeline">
+    <div class="inv-step">
+      <div class="inv-title">2006 — Public launch: S3, EC2</div>
+      <div class="inv-desc">Hai dịch vụ nền tảng: lưu trữ object (S3) và máy chủ ảo (EC2) được công bố rộng rãi.</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2008 — Elastic Block Store (EBS)</div>
+      <div class="inv-desc">Ổ đĩa (block storage) gắn vào EC2, dữ liệu không mất khi instance stop.</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2009 — Relational Database Service (RDS)</div>
+      <div class="inv-desc">Dịch vụ database quan hệ được quản lý (managed): MySQL, PostgreSQL, SQL Server...</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2011 — CloudFormation</div>
+      <div class="inv-desc">Dịch vụ Infrastructure as Code đầu tiên của AWS — tiền đề cho Terraform/CDK mà bạn sẽ học ở các section sau.</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2012 — Redshift, DynamoDB</div>
+      <div class="inv-desc">Data warehouse cho Big Data và NoSQL database serverless.</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2013 – 2014 — Kinesis, Lambda, EFS</div>
+      <div class="inv-desc">Data streaming, Serverless function (Lambda) và file system dùng chung (EFS).</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2015 — Amazon Aurora</div>
+      <div class="inv-desc">Công nghệ database độc quyền của AWS, tương thích MySQL/PostgreSQL với hiệu năng cao.</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2017 – 2018 — SageMaker, EKS, Fargate</div>
+      <div class="inv-desc">Nền tảng Machine Learning và các dịch vụ Container/Kubernetes được quản lý.</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2019 — AWS Outposts</div>
+      <div class="inv-desc">Mang hạ tầng AWS về đặt tại data center của doanh nghiệp (mô hình hybrid).</div>
+    </div>
+    <div class="inv-step">
+      <div class="inv-title">2023 → nay — Generative AI (Bedrock, Amazon Q)</div>
+      <div class="inv-desc">AWS đầu tư mạnh vào GenAI: các foundation model qua API, trợ lý AI cho developer.</div>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Vị thế của AWS trên thị trường Cloud</h2>
+  <p class="body-text">
+    Thị trường Cloud có nhiều nhà cung cấp, nhưng 3 “ông lớn” chiếm phần lớn thị phần là <strong>AWS</strong>, <strong>Microsoft Azure</strong> và <strong>Google Cloud</strong>.
+    AWS vẫn giữ vị trí số 1 với doanh thu năm 2024 hơn <strong>100 tỷ USD</strong> và là mảng mang lại phần lớn lợi nhuận cho Amazon.
+  </p>
+  <div class="figure-centered">
+    <img src="../../assets/images/cloud-providers.png" alt="Các nhà cung cấp Cloud phổ biến" />
+    <div class="figure-title">Một số nhà cung cấp Cloud / SaaS phổ biến hiện nay</div>
+  </div>
+  <div class="stat-grid">
+    <div class="stat-card"><span class="stat-value">~30%</span><span class="stat-label">Thị phần Cloud Infrastructure</span></div>
+    <div class="stat-card"><span class="stat-value">$100B+</span><span class="stat-label">Doanh thu AWS năm 2024</span></div>
+    <div class="stat-card"><span class="stat-value">200+</span><span class="stat-label">Dịch vụ</span></div>
+    <div class="stat-card"><span class="stat-value">13+ năm</span><span class="stat-label">Gartner xếp hạng Leader</span></div>
+  </div>
+  <p class="note-text">*Số liệu mang tính tham khảo tại thời điểm biên soạn, nguồn: statista.com, Synergy Research, báo cáo tài chính của Amazon.</p>
+
+  <div class="alert alert-info">
+    <strong>Người đứng sau AWS:</strong> <strong>Dr. Werner Vogels</strong> — CTO của Amazon, một trong những người có tầm ảnh hưởng lớn nhất trong lĩnh vực Cloud Computing.
+    Câu nói nổi tiếng của ông: <em>“Everything fails, all the time”</em> — thiết kế hệ thống phải luôn tính đến khả năng lỗi. Đây cũng là tư duy nền tảng cho
+    các khái niệm High Availability, Multi-AZ mà bạn sẽ ôn lại ở các chương sau.
+  </div>
+
+  <h2 class="section-heading">Mô hình: những gì có thể triển khai trên AWS</h2>
+  <p class="body-text">
+    Về cơ bản, AWS cung cấp hạ tầng để triển khai <strong>mọi loại ứng dụng</strong>, miễn là bạn hiểu các service của AWS và biết cách kết hợp chúng.
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/svg-icon/user.svg' style='width:36px;height:36px;'/><br/><b>Người dùng</b><br/>Web · Mobile · IoT"]
+      Dev["<img src='../../assets/svg-icon/developer.svg' style='width:36px;height:36px;'/><br/><b>Developer / DevOps</b>"]
+      subgraph AWS["☁️ AWS Cloud"]
+          direction TB
+          Net["<img src='../../assets/aws-svg/CloudFront.svg' style='width:32px;height:32px;'/><br/><b>Networking</b><br/>Route 53 · CloudFront · VPC · ELB"]
+          Compute["<img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/><br/><b>Compute &amp; Container</b><br/>EC2 · Lambda · ECS · EKS"]
+          Data["<img src='../../assets/aws-svg/RDS.svg' style='width:32px;height:32px;'/><br/><b>Database &amp; Storage</b><br/>RDS · DynamoDB · S3"]
+          Ops["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:32px;height:32px;'/><br/><b>DevOps &amp; Monitoring</b><br/>CodePipeline · CloudWatch"]
+          Net --> Compute --> Data
+      end
+      User -->|"HTTPS"| Net
+      Dev -->|"git push · deploy"| Ops
+      Ops -->|"Triển khai"| Compute
+  </div>
+  <div class="industry-pills">
+    <span class="industry-pill">🛒 E-Commerce, B2B, B2C</span>
+    <span class="industry-pill">🏦 Banking, Finance</span>
+    <span class="industry-pill">🏥 Health care</span>
+    <span class="industry-pill">🏛️ Hệ thống cho tổ chức chính phủ</span>
+    <span class="industry-pill">🎓 Education</span>
+    <span class="industry-pill">🎮 Game server</span>
+    <span class="industry-pill">💼 SaaS products</span>
+    <span class="industry-pill">🤖 AI / Machine Learning</span>
+    <span class="industry-pill">...và nhiều hơn nữa</span>
+  </div>
+
+  <h2 class="section-heading">Trade-off khi chọn AWS</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Ưu điểm</th><th>Nhược điểm / Lưu ý</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Nhiều dịch vụ nhất, trưởng thành nhất, ít khi “thiếu” tính năng</td><td>Quá nhiều dịch vụ → người mới dễ bị “ngợp”, khó chọn đúng service</td></tr>
+      <tr><td>Tài liệu, cộng đồng, nhân sự có kinh nghiệm AWS rất nhiều</td><td>Mô hình tính phí phức tạp, dễ phát sinh chi phí nếu quên xoá resource</td></tr>
+      <tr><td>Hạ tầng toàn cầu, có Region gần Việt Nam (Singapore, Tokyo...)</td><td>Phụ thuộc vào một nhà cung cấp (vendor lock-in) khi dùng nhiều dịch vụ managed</td></tr>
+      <tr><td>Nhiều chương trình hỗ trợ startup, credit, Free Tier</td><td>Giao diện Console thay đổi thường xuyên — nên nắm <em>khái niệm</em> thay vì nhớ giao diện</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Các công ty lớn trên thế giới</h4>
+      <p>Netflix, Airbnb, Samsung, Pinterest, Expedia, BMW, Coca-Cola... đều vận hành phần lớn hệ thống trên AWS. Xem thêm tại
+        <a href="https://aws.amazon.com/solutions/case-studies" target="_blank" rel="noopener noreferrer">AWS Case Studies</a>.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Doanh nghiệp tại Việt Nam</h4>
+      <p>Nhiều ngân hàng, công ty fintech, e-commerce, công ty outsource tại Việt Nam đã chuyển hệ thống lên AWS. AWS thường xuyên tổ chức sự kiện <strong>AWS Cloud Day Vietnam</strong> tại Hà Nội và TP.HCM.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Startup &amp; dự án cá nhân</h4>
+      <p>Bắt đầu với chi phí gần như bằng 0 (Free Tier, credit), sau đó mở rộng dần khi lượng người dùng tăng mà không cần thay đổi nền tảng.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-tip">
+    <strong>Mẹo:</strong> Kiến thức Cloud của các provider khá tương đồng (VPC ↔ VNet, EC2 ↔ Virtual Machine, S3 ↔ Blob Storage...).
+    Nắm vững AWS sẽ giúp bạn tiếp cận Azure hay Google Cloud nhanh hơn rất nhiều.
+  </div>
+  <div class="alert alert-info">
+    <strong>Tiếp theo:</strong> chương sau giới thiệu <strong>hệ thống chứng chỉ AWS</strong> và một số câu hỏi thường gặp về việc thi chứng chỉ.
+  </div>
+
+</body>
+</html>

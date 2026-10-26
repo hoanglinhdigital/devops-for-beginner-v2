@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hạ tầng toàn cầu của AWS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">4. Giới thiệu &amp; ôn lại kiến thức AWS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Hạ tầng toàn cầu: Region, AZ, Local Zone, Edge Location</span>
+  </div>
+
+  <div class="alert alert-info">
+    <strong>Mục tiêu từ chương này:</strong> hệ thống hoá lại các kiến thức AWS đã được giới thiệu ở level Associate.
+    Phần nào bạn chưa nắm chắc có thể Google hoặc ôn lại các khoá học tương ứng. <em>“Không có việc gì khó, chỉ sợ không biết làm!”</em>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>AWS Global Infrastructure</strong> là mạng lưới data center của AWS trải khắp thế giới, được tổ chức thành nhiều tầng:
+    <strong>Region</strong> → <strong>Availability Zone (AZ)</strong>, cùng với <strong>Local Zone</strong> và <strong>Edge Location</strong> để đưa dịch vụ đến gần người dùng hơn.
+    Hiểu đúng các khái niệm này là nền tảng để thiết kế hệ thống có tính sẵn sàng cao (High Availability), độ trễ thấp và tuân thủ quy định về dữ liệu.
+  </p>
+
+  <div class="stat-grid">
+    <div class="stat-card"><span class="stat-value">30+</span><span class="stat-label">Regions</span></div>
+    <div class="stat-card"><span class="stat-value">100+</span><span class="stat-label">Availability Zones</span></div>
+    <div class="stat-card"><span class="stat-value">600+</span><span class="stat-label">Points of Presence (Edge)</span></div>
+    <div class="stat-card"><span class="stat-value">30+</span><span class="stat-label">Local Zones</span></div>
+    <div class="stat-card"><span class="stat-value">100+</span><span class="stat-label">Direct Connect Locations</span></div>
+    <div class="stat-card"><span class="stat-value">245</span><span class="stat-label">Quốc gia &amp; vùng lãnh thổ được phục vụ</span></div>
+  </div>
+  <p class="note-text">*Số liệu thay đổi liên tục, xem bản mới nhất tại <a href="https://aws.amazon.com/about-aws/global-infrastructure/" target="_blank" rel="noopener noreferrer">aws.amazon.com/about-aws/global-infrastructure</a>.</p>
+  <div class="figure-centered">
+    <img src="../../assets/images/aws-region-map.png" alt="Bản đồ AWS Region" />
+    <div class="figure-title">Bản đồ các AWS Region trên thế giới</div>
+  </div>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Region:</strong> một khu vực địa lý (ví dụ Singapore <code>ap-southeast-1</code>, Tokyo <code>ap-northeast-1</code>) với hạ tầng và dịch vụ độc lập. Mỗi Region gồm nhiều AZ.</li>
+    <li><strong>Availability Zone (AZ):</strong> một hoặc một nhóm data center trong cùng Region, có nguồn điện, làm mát, network riêng và vận hành hoàn toàn độc lập với nhau.</li>
+    <li><strong>Ít nhất 3 AZ mỗi Region:</strong> ví dụ Singapore có <code>ap-southeast-1a</code>, <code>ap-southeast-1b</code>, <code>ap-southeast-1c</code>.</li>
+    <li><strong>Local Zone:</strong> mở rộng của Region, đặt compute/storage/database gần các thành phố lớn để giảm độ trễ (single-digit millisecond).</li>
+    <li><strong>Edge Location (PoP):</strong> data center nhỏ dùng bởi CloudFront, Route 53, WAF... để cache nội dung và phục vụ người dùng cuối nhanh nhất.</li>
+    <li><strong>Private Region (ví dụ China):</strong> không switch trực tiếp trên Console được, cần đăng ký account riêng, tách biệt hoàn toàn với account thông thường.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/svg-icon/user.svg' style='width:36px;height:36px;'/><br/><b>Người dùng</b><br/>Việt Nam"]
+      Edge["<img src='../../assets/aws-svg/CloudFront.svg' style='width:36px;height:36px;'/><br/><b>Edge Location</b><br/>Hà Nội / TP.HCM<br/><i>Cache nội dung</i>"]
+      subgraph Region["🌏 Region: ap-southeast-1 (Singapore)"]
+          direction TB
+          subgraph AZa["🏢 AZ: ap-southeast-1a"]
+              EC2a["<img src='../../assets/aws-svg/EC2.svg' style='width:30px;height:30px;'/><br/>EC2"]
+              RDSa["<img src='../../assets/aws-svg/RDS.svg' style='width:30px;height:30px;'/><br/>RDS Primary"]
+          end
+          subgraph AZb["🏢 AZ: ap-southeast-1b"]
+              EC2b["<img src='../../assets/aws-svg/EC2.svg' style='width:30px;height:30px;'/><br/>EC2"]
+              RDSb["<img src='../../assets/aws-svg/RDS.svg' style='width:30px;height:30px;'/><br/>RDS Standby"]
+          end
+          subgraph AZc["🏢 AZ: ap-southeast-1c"]
+              EC2c["<img src='../../assets/aws-svg/EC2.svg' style='width:30px;height:30px;'/><br/>EC2"]
+          end
+          RDSa <-.->|"Replication"| RDSb
+      end
+      LZ["<img src='../../assets/aws-svg/Local-Zones.svg' style='width:36px;height:36px;'/><br/><b>Local Zone</b><br/><i>Gần thành phố lớn</i>"]
+      User -->|"Nội dung tĩnh"| Edge
+      Edge -->|"Cache miss"| Region
+      User -->|"API request"| Region
+      Region -.->|"Mở rộng"| LZ
+  </div>
+  <p class="arch-caption">
+    Ứng dụng được triển khai trên nhiều AZ trong cùng Region: nếu một AZ gặp sự cố, các AZ còn lại vẫn phục vụ bình thường. Edge Location cache nội dung tĩnh gần người dùng.
+  </p>
+
+  <h3 class="section-subheading">Lựa chọn Region</h3>
+  <p class="body-text">Việc lựa chọn Region để triển khai hệ thống dựa trên 4 tiêu chí:</p>
+  <ul class="feature-list">
+    <li><strong>Compliance:</strong> tuân thủ tiêu chuẩn ngành, luật pháp về nơi lưu trữ dữ liệu (data residency).</li>
+    <li><strong>Latency:</strong> gần người dùng để mang lại trải nghiệm tốt nhất (giảm độ trễ).</li>
+    <li><strong>Service availability:</strong> dịch vụ cần sử dụng có ở Region đó hay chưa (dịch vụ mới thường ra mắt ở <code>us-east-1</code> trước).</li>
+    <li><strong>Pricing:</strong> giá dịch vụ khác nhau giữa các Region (ví dụ <code>us-east-1</code> thường rẻ hơn Singapore/Tokyo).</li>
+  </ul>
+  <div class="two-col">
+    <div class="figure-centered figure-narrow">
+      <img src="../../assets/images/aws-console-region-selector.png" alt="Chọn region trên AWS Console" />
+      <div class="figure-title">Luôn switch sang đúng Region trước khi bắt đầu thao tác</div>
+    </div>
+    <div class="figure-centered figure-narrow">
+      <img src="../../assets/images/aws-console-optin-regions.png" alt="Opt-in regions" />
+      <div class="figure-title">Một số Region không bật mặc định (opt-in), cần enable để sử dụng</div>
+    </div>
+  </div>
+
+  <h3 class="section-subheading">Local Zone &amp; Edge Location</h3>
+  <div class="figure-centered">
+    <img src="../../assets/images/aws-local-zones-map.png" alt="Bản đồ AWS Local Zones" />
+    <div class="figure-title">Các AWS Local Zone — nguồn: aws.amazon.com/about-aws/global-infrastructure/localzones/locations</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../assets/images/aws-console-local-zones.png" alt="Enable Local Zone trên Console" />
+    <div class="figure-title">Enable Local Zone trên Console (EC2 → Settings → Zones). *Chỉ bật khi thật sự có nhu cầu.</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../assets/images/aws-edge-locations-map.png" alt="Bản đồ Edge Location của CloudFront" />
+    <div class="figure-title">Mạng lưới Edge Location của CloudFront — nguồn: aws.amazon.com/cloudfront/features</div>
+  </div>
+
+  <h2 class="section-heading">Trade-off: Single-AZ vs Multi-AZ vs Multi-Region</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Mô hình</th><th>Ưu điểm</th><th>Nhược điểm</th><th>Khi nào dùng</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Single-AZ</strong></td><td>Đơn giản, rẻ nhất</td><td>AZ sự cố → hệ thống dừng</td><td>Môi trường Dev/Test, lab học tập</td></tr>
+      <tr><td><strong>Multi-AZ</strong></td><td>High Availability, chịu được sự cố một AZ</td><td>Chi phí cao hơn (gấp đôi tài nguyên, data transfer giữa AZ)</td><td>Hầu hết hệ thống Production — <strong>best practice</strong></td></tr>
+      <tr><td><strong>Multi-Region</strong></td><td>Disaster Recovery, phục vụ người dùng toàn cầu</td><td>Phức tạp, đắt, phải xử lý đồng bộ dữ liệu</td><td>Hệ thống quan trọng (ngân hàng), sản phẩm global</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Ứng dụng cho người dùng Việt Nam</h4>
+      <p>Chọn Region Singapore (<code>ap-southeast-1</code>) — gần Việt Nam, đầy đủ dịch vụ; kết hợp CloudFront để phục vụ nội dung tĩnh qua Edge tại Hà Nội/TP.HCM.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Hệ thống Production cần HA</h4>
+      <p>Đặt EC2/ECS trên tối thiểu 2 AZ sau một Load Balancer, RDS bật Multi-AZ. Một AZ mất điện, hệ thống vẫn chạy.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Game online / Media cần độ trễ cực thấp</h4>
+      <p>Dùng Local Zone đặt game server sát người dùng tại thành phố lớn, giảm độ trễ xuống vài millisecond.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-warning">
+    <strong>Lỗi thường gặp của người mới:</strong> tạo resource ở Region A, sau đó tìm ở Region B và tưởng resource “biến mất” — hoặc quên xoá resource ở Region khác và bị tính phí.
+    Hãy luôn kiểm tra Region ở góc phải trên Console.
+  </div>
+  <div class="alert alert-tip">
+    <strong>Lưu ý:</strong> tên AZ (<code>ap-southeast-1a</code>) giữa các account khác nhau có thể trỏ tới data center vật lý khác nhau. Khi cần đối chiếu chính xác giữa nhiều account, dùng <strong>AZ ID</strong> (ví dụ <code>apse1-az1</code>).
+  </div>
+  <div class="alert alert-info">
+    <strong>Chi phí:</strong> data transfer giữa các AZ và giữa các Region đều tính phí. Trong khoá học, các lab mặc định dùng một Region duy nhất để tiết kiệm chi phí.
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 6: CodePipeline deploy lên ECS (Rolling update) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 6: CodePipeline deploy lên ECS (Rolling update)</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Triển khai stack <strong>VPC + ALB + ECS Fargate</strong> bằng Terraform có sẵn, chạy image của Lab 4.</li>
+    <li>Cập nhật buildspec của Lab 4 để sinh file <code>imagedefinitions.json</code>.</li>
+    <li>Tạo pipeline <strong>GitHub → CodeBuild → Amazon ECS</strong>, deploy theo phương án <strong>rolling update</strong>.</li>
+    <li>Sửa code, push và quan sát ECS thay thế dần task cũ bằng task mới qua ALB.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>nodejs-random-color"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:26px;height:26px;'/> nodejs-ecs-rolling-pipeline"]
+              direction TB
+              SRC["① Source"] --> BLD["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:32px;height:32px;'/><br/>② Build<br/>nodejs-docker-build"]
+              BLD --> DPL["③ Deploy<br/>Amazon ECS<br/>imagedefinitions.json"]
+          end
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:38px;height:38px;'/><br/>ECR<br/>nodejs-random-color"]
+          subgraph VPC["VPC 10.20.0.0/16 – 2 public subnet (Terraform)"]
+              direction TB
+              ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:38px;height:38px;'/><br/>ALB :80"]
+              subgraph SVC["ECS cluster: codepipeline-lab-cluster · service: nodejs-service"]
+                  T1["<img src='../../assets/aws-svg/Fargate.svg' style='width:32px;height:32px;'/><br/>Task :3000"]
+                  T2["<img src='../../assets/aws-svg/Fargate.svg' style='width:32px;height:32px;'/><br/>Task :3000"]
+              end
+          end
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Browser"]
+      GH -->|"trigger"| SRC
+      BLD -->|"docker push"| ECR
+      DPL -->|"update service"| SVC
+      ECR -.->|"pull image"| SVC
+      User --> ALB --> T1
+      ALB --> T2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 4: ECR repository <code>nodejs-random-color</code> có image tag <code>latest</code>, CodeBuild project <code>nodejs-docker-build</code>.</li>
+    <li>Terraform &gt;= 1.10, AWS CLI v2 đã cấu hình profile (Section 5).</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/terraform_ecs_stack/</code> và <code>sourcecode/section_9_code_pipeline/lab6_pipeline_ecs_rolling/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu Terraform stack</strong>
+        <p>Stack <code>terraform_ecs_stack</code> được dùng chung cho Lab 6 → Lab 9, gồm 4 module:</p>
+        <table class="compare-table">
+          <thead><tr><th>Module</th><th>Resource</th></tr></thead>
+          <tbody>
+            <tr><td><code>networking</code></td><td>VPC <code>10.20.0.0/16</code>, 2 public subnet ở 2 AZ (module <code>terraform-aws-modules/vpc/aws</code>), không NAT Gateway</td></tr>
+            <tr><td><code>security</code></td><td>SG cho ALB (mở 80, 81), SG cho ECS task (chỉ nhận port 3000 từ SG của ALB)</td></tr>
+            <tr><td><code>load_balancer</code></td><td>ALB, Target Group <code>nodejs-tg-blue</code> &amp; <code>nodejs-tg-green</code>, listener 80 → Blue, listener 81 → Green</td></tr>
+            <tr><td><code>ecs</code></td><td>Cluster <code>codepipeline-lab-cluster</code>, task definition <code>nodejs-task-definition</code>, service <code>nodejs-service</code> (2 task Fargate), log group, task execution role</td></tr>
+          </tbody>
+        </table>
+        <p class="code-note">💡 Biến <code>deployment_controller_type</code> = <code>ECS</code> cho lab này. Service có <code>lifecycle { ignore_changes = [task_definition, load_balancer] }</code> để <code>terraform apply</code> sau này không ghi đè version do pipeline deploy.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cấu hình biến &amp; apply Terraform</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_9_code_pipeline/terraform_ecs_stack
+cp terraform.tfvars.example terraform.tfvars</code></pre>
+        <p>Mở file <code>terraform.tfvars</code>, sửa <code>ecr_image_uri</code> thành Image URI tag <code>latest</code> của bạn (Lab 4 – Bước 5) và giữ <code>deployment_controller_type = "ECS"</code>:</p>
+        <pre class="code-block"><code class="language-hcl">ecr_image_uri = "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:latest"
+
+desired_count = 2
+
+# Lab 6: ECS (rolling update) | Lab 7, Lab 8: CODE_DEPLOY (Blue/Green, Canary)
+deployment_controller_type = "ECS"</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform init
+terraform plan
+terraform apply
+terraform output alb_dns_name</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Truy cập website qua ALB</strong>
+        <p>Chờ khoảng 1–2 phút để task <strong>RUNNING</strong> và Target Group <code>nodejs-tg-blue</code> báo <strong>healthy</strong>, sau đó truy cập <code>http://&lt;alb-dns-name&gt;</code>. Trang <strong>Welcome to My Website</strong> hiển thị – mỗi task tô tiêu đề một màu ngẫu nhiên, tải lại trang vài lần sẽ thấy màu thay đổi giữa 2 task.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cập nhật buildspec.yml để sinh imagedefinitions.json</strong>
+        <p>Copy nội dung <code>lab6_pipeline_ecs_rolling/buildspec.yml</code> đè lên <code>buildspec.yml</code> trong repository <code>nodejs-random-color</code>. Phần thay đổi so với Lab 4:</p>
+        <pre class="code-block"><code class="language-yaml">env:
+  variables:
+    IMAGE_REPO_NAME: nodejs-random-color
+    CONTAINER_NAME: nodejs-container
+...
+  post_build:
+    commands:
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$COMMIT_HASH
+      - echo Writing imagedefinitions.json...
+      - printf '[{"name":"%s","imageUri":"%s"}]' $CONTAINER_NAME $REPOSITORY_URI:$COMMIT_HASH > imagedefinitions.json
+      - cat imagedefinitions.json
+      - echo Build completed on `date`
+
+artifacts:
+  files:
+    - imagedefinitions.json</code></pre>
+        <p class="code-note">💡 Action deploy <strong>Amazon ECS</strong> đọc <code>imagedefinitions.json</code> để biết container nào (<code>nodejs-container</code> – phải trùng tên container trong task definition) cần đổi sang image nào, sau đó tạo task definition revision mới và cập nhật service.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/nodejs-random-color
+git add buildspec.yml
+git commit -m "ci: generate imagedefinitions.json for ECS deploy"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo pipeline</strong>
+        <p>Vào <strong>CodePipeline → Create pipeline → Build custom pipeline</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Pipeline name: <code>nodejs-ecs-rolling-pipeline</code>; Execution mode: <strong>Superseded</strong>; Service role: <strong>New service role</strong></li>
+          <li>Source: <strong>GitHub (via GitHub App)</strong>, connection <code>github-connection</code>, repository <code>&lt;your-github-username&gt;/nodejs-random-color</code>, branch <code>master</code>, trigger khi push</li>
+          <li>Build: <strong>AWS CodeBuild</strong>, project <code>nodejs-docker-build</code>, Single build</li>
+          <li>Test: <strong>Skip</strong></li>
+          <li>Deploy provider: <strong>Amazon ECS</strong>; Cluster name: <code>codepipeline-lab-cluster</code>; Service name: <code>nodejs-service</code>; Image definitions file: <code>imagedefinitions.json</code></li>
+        </ul>
+        <p>Tạo pipeline – lần chạy đầu tiên deploy commit vừa push ở Bước 4.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Sửa code &amp; push để trigger pipeline</strong>
+        <p>Mở <code>public/index.html</code>, sửa <strong>phần text</strong> của thẻ <code>&lt;h1 id="welcome" ...&gt;</code>, ví dụ <code>Welcome to My Website – v2 Rolling update</code>. Giữ nguyên thuộc tính <code>id</code> và <code>style</code> – <code>index.js</code> dựa vào chúng để đổi màu ngẫu nhiên khi container khởi động.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add public/index.html
+git commit -m "feat: update welcome message v2"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Quan sát rolling update</strong>
+        <p>Trong lúc stage Deploy đang chạy, mở <strong>ECS → nodejs-service → tab Deployments</strong>: có 2 deployment (<em>Primary</em> – revision mới, <em>Active</em> – revision cũ), task mới được khởi động trước, task cũ bị dừng sau khi task mới healthy. Gọi ALB liên tục để thấy giai đoạn 2 version cùng phục vụ (thay <code>&lt;alb-dns-name&gt;</code>, nhấn <code>Ctrl + C</code> để dừng):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">while true; do curl -s http://&lt;alb-dns-name&gt;/ | grep -o "&lt;h1[^&gt;]*&gt;[^&lt;]*"; sleep 1; done</code></pre>
+        <p>Vào <strong>ECS → Task definitions → nodejs-task-definition</strong>: có revision mới với image tag là commit SHA vừa push.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Pipeline <code>nodejs-ecs-rolling-pipeline</code> chạy <strong>Succeeded</strong> cả 3 stage sau khi push code.</li>
+      <li>ECR có image tag commit SHA mới; task definition có revision mới dùng đúng image đó.</li>
+      <li>Truy cập <code>http://&lt;alb-dns-name&gt;</code> hiển thị nội dung version 2, không bị gián đoạn trong lúc deploy.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Deploy lỗi <code>Exception while trying to read the image artifact file. Please check the image artifact file and retry.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> BuildArtifact không có file <code>imagedefinitions.json</code> (buildspec chưa cập nhật, hoặc thiếu mục <code>artifacts</code>).<br/><strong>Giải pháp:</strong> Kiểm tra buildspec trên GitHub đã là bản của Lab 6, log build có dòng <code>cat imagedefinitions.json</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Deploy lỗi <code>Invalid action configuration: The AWS ECS container nodejs-container does not exist</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tên container trong <code>imagedefinitions.json</code> khác tên container trong task definition.<br/><strong>Giải pháp:</strong> Giữ <code>CONTAINER_NAME: nodejs-container</code> trong buildspec trùng với Terraform.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Task mới liên tục bị dừng, deployment bị <strong>rollback</strong> bởi circuit breaker</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Container lỗi khi khởi động hoặc health check của Target Group thất bại.<br/><strong>Giải pháp:</strong> Xem tab <strong>Logs</strong> của task (log group <code>/ecs/nodejs-random-color</code>) và lý do dừng trong tab <strong>Tasks → Stopped</strong>; chạy thử image trên máy local như Lab 4 – Bước 6.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>CannotPullContainerError</code> khi task khởi động</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai <code>ecr_image_uri</code> trong <code>terraform.tfvars</code> (sai Account ID, region, tag).<br/><strong>Giải pháp:</strong> Copy lại Image URI từ ECR Console, chạy <code>terraform apply</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Truy cập ALB trả về <code>503 Service Temporarily Unavailable</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Target Group chưa có target healthy (task đang khởi động hoặc bị lỗi).<br/><strong>Giải pháp:</strong> Chờ 1–2 phút, kiểm tra tab <strong>Targets</strong> của <code>nodejs-tg-blue</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>ALB, task Fargate và Public IPv4 tính phí theo giờ.</strong> Nếu học tiếp Lab 7 ngay, giữ lại Terraform stack; nếu không, chạy <code>terraform destroy</code>.</div>
+  <ol class="step-list">
+    <li><div><p>Xoá pipeline <code>nodejs-ecs-rolling-pipeline</code> – <strong>bắt buộc trước khi làm Lab 7</strong>, vì Lab 7 đổi deployment controller sang <code>CODE_DEPLOY</code> và tạo pipeline mới trên cùng repository.</p></div></li>
+    <li><div><p>Nếu dừng lại ở lab này, xoá toàn bộ stack:</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_9_code_pipeline/terraform_ecs_stack
+terraform destroy</code></pre></div></li>
+    <li><div><p>Xoá bớt image cũ trên ECR repository <code>nodejs-random-color</code> (giữ lại tag <code>latest</code> cho các lab sau).</p></div></li>
+  </ol>
+
+</body>
+</html>

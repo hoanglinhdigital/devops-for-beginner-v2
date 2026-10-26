@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blue/Green deployment – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">11. Chiến lược deployment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Blue/Green deployment</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Blue/Green deployment</strong> là hình thức tạo ra <strong>2 cụm tài nguyên song song</strong>: <strong>Blue</strong> chạy version hiện tại
+    (đang phục vụ người dùng) và <strong>Green</strong> chạy version mới. Version mới được kiểm thử kỹ trên Green – hạ tầng giống hệt production –
+    trong khi người dùng vẫn dùng Blue bình thường. Khi kiểm thử thành công, traffic được <strong>switch đồng loạt 100%</strong> sang Green.
+    Nếu có sự cố, chỉ cần switch ngược lại Blue – rollback trong vài giây.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>2 môi trường độc lập:</strong> Blue và Green có cấu hình giống nhau, chỉ khác version ứng dụng; tại một thời điểm chỉ một môi trường nhận traffic production.</li>
+    <li><strong>Kiểm thử trước khi release:</strong> QA/automation test truy cập Green qua một đường riêng (test listener, test domain) trước khi người dùng thấy.</li>
+    <li><strong>Switch tức thì:</strong> đổi đích của Load Balancer / DNS một lần – không có giai đoạn 2 version cùng phục vụ người dùng như Rolling.</li>
+    <li><strong>Rollback cực nhanh:</strong> môi trường cũ vẫn còn chạy sau khi switch → switch lại là xong, không cần build/deploy lại.</li>
+    <li><strong>Cần công cụ routing:</strong> ALB listener/rule, Route 53, Elastic Beanstalk swap URL, CodeDeploy... đảm nhận việc chuyển traffic.</li>
+    <li><strong>Vai trò luân phiên:</strong> sau khi switch, Green trở thành production, Blue trở thành môi trường idle để nhận version tiếp theo.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">3 giai đoạn của Blue/Green</h3>
+  <div class="mermaid">
+  flowchart LR
+      subgraph S1["Stage 1 · Triển khai"]
+          direction TB
+          U1["👥 Users"] --> LB1["⚖️ LB"]
+          LB1 -->|"100%"| B1["🟦 Blue v1"]
+          G1["🟩 Green v2<br/>(vừa deploy)"]
+      end
+      subgraph S2["Stage 2 · Kiểm thử"]
+          direction TB
+          U2["👥 Users"] --> LB2["⚖️ LB"]
+          LB2 -->|"100%"| B2["🟦 Blue v1"]
+          QA["🧪 QA / Test tự động"] --> G2["🟩 Green v2"]
+      end
+      subgraph S3["Stage 3 · Switch traffic"]
+          direction TB
+          U3["👥 Users"] --> LB3["⚖️ LB"]
+          LB3 -->|"100%"| G3["🟩 Green v2"]
+          B3["🟦 Blue v1<br/>(giữ để rollback)"]
+      end
+      S1 --> S2 --> S3
+  </div>
+
+  <h3 class="section-subheading">Blue/Green trên ECS với ALB – kiến trúc dùng trong Lab 1 → Lab 4</h3>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>End-users"]
+      QA["🧪 QA"]
+      subgraph ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:26px;height:26px;'/> ALB bluegreen-lab-alb"]
+          L80["Listener :80<br/>PRODUCTION"]
+          L81["Listener :81<br/>TEST"]
+      end
+      subgraph Blue["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:24px;height:24px;'/> cluster-blue"]
+          TGB["🟦 tg-blue"] --> B1["Task v2.0.0"]
+          TGB --> B2["Task v2.0.0"]
+      end
+      subgraph Green["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:24px;height:24px;'/> cluster-green"]
+          TGG["🟩 tg-green"] --> G1["Task v2.1.0"]
+          TGG --> G2["Task v2.1.0"]
+      end
+      Jenkins["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:34px;height:34px;'/><br/>Job Switch traffic"]
+      User --> L80
+      QA --> L81
+      L80 --> TGB
+      L81 --> TGG
+      Jenkins -.->|"hoán đổi Target Group<br/>của :80 và :81"| ALB
+  </div>
+  <p class="arch-caption">Switch traffic = đổi Target Group của 2 listener cho nhau. Chạy lại lần nữa = rollback.</p>
+
+  <h3 class="section-subheading">Các cách chuyển traffic trên AWS</h3>
+  <table class="compare-table">
+    <thead><tr><th>Cách</th><th>Cơ chế</th><th>Ưu điểm</th><th>Hạn chế</th></tr></thead>
+    <tbody>
+      <tr><td><strong>ALB listener / rule</strong></td><td>Đổi Target Group mà listener forward tới</td><td>Gần như tức thì, không phụ thuộc DNS cache</td><td>Blue &amp; Green phải nằm sau cùng một ALB</td></tr>
+      <tr><td><strong>Route 53</strong></td><td>Đổi record DNS (hoặc weighted record) từ LB Blue sang LB Green</td><td>Blue/Green có thể ở 2 stack, 2 region khác nhau</td><td>Phụ thuộc TTL &amp; DNS cache của client – switch không đồng loạt</td></tr>
+      <tr><td><strong>Elastic Beanstalk</strong></td><td><em>Swap environment URLs</em> (đổi CNAME giữa 2 environment)</td><td>1 thao tác trên Console</td><td>Vẫn là thay đổi DNS</td></tr>
+      <tr><td><strong>CodeDeploy (ECS)</strong></td><td>2 task set trong cùng 1 ECS service, CodeDeploy đổi Target Group của listener</td><td>Tự động, có test listener, auto rollback theo alarm</td><td>Service phải dùng deployment controller <code>CODE_DEPLOY</code> (Section 9 – Lab 7)</td></tr>
+      <tr><td><strong>ECS native Blue/Green</strong></td><td>Deployment controller <code>ECS</code> với strategy <code>BLUE_GREEN</code>, có bake time &amp; lifecycle hook</td><td>Không cần CodeDeploy</td><td>Tính năng mới (2025), cần cập nhật Terraform provider/CLI</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Rủi ro thấp, độ an toàn cao nhờ kiểm thử kỹ trên hạ tầng thật trước khi switch.</li>
+        <li>No-downtime: môi trường mới đã sẵn sàng hoàn toàn trước khi nhận traffic.</li>
+        <li>Rollback tức thì – chỉ cần switch traffic ngược lại.</li>
+        <li>Không có giai đoạn 2 version cùng phục vụ người dùng (khác Rolling).</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Tốn chi phí do phải duy trì cùng lúc 2 môi trường (ít nhất trong thời gian deploy + theo dõi).</li>
+        <li>Đòi hỏi quy trình rõ ràng và tuân thủ chặt chẽ: deploy đúng môi trường idle, không “lỡ tay” deploy lên production.</li>
+        <li>Cần sự hỗ trợ của công cụ routing (Load Balancer, DNS).</li>
+        <li>Khó với dữ liệu: nếu 2 môi trường dùng 2 database độc lập phải đồng bộ dữ liệu; nếu dùng chung database thì schema phải tương thích cả 2 version.</li>
+      </ul>
+    </div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Nên dùng</strong> khi cần zero-downtime, rollback tức thì và muốn QA kiểm thử version mới trên môi trường giống production.</li>
+    <li><strong>Không nên dùng</strong> khi ngân sách rất hạn chế, hệ thống có trạng thái (stateful) khó nhân đôi, hoặc thay đổi database không tương thích ngược.</li>
+  </ul>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Release trước sự kiện lớn</h4>
+      <p>Sàn thương mại điện tử deploy version mới lên Green từ chiều, QA kiểm thử qua test listener, đúng 22h switch traffic; sự cố → switch về Blue trong 5 giây.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Nâng cấp runtime / hạ tầng</h4>
+      <p>Đổi base image Node.js 20 → 22, đổi CPU/RAM của task: dựng Green với cấu hình mới, chạy load test, ổn mới switch.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Nâng cấp database engine</h4>
+      <p>MySQL 8.0 → 8.4 với <strong>RDS Blue/Green Deployments</strong>: AWS tự tạo bản sao Green đồng bộ dữ liệu, switchover dưới 1 phút (chương tiếp theo).</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Blue/Green mức cluster vs mức service:</strong> Lab của section này dựng 2 ECS cluster riêng để thấy rõ “2 môi trường”; Section 9 – Lab 7 (CodeDeploy) làm Blue/Green ở mức 2 task set trong cùng 1 service – ít tài nguyên quản lý hơn.</li>
+    <li><strong>Tiết kiệm chi phí:</strong> sau thời gian theo dõi (vd 1 giờ – 1 ngày), scale môi trường cũ về 0 task (Lab 4). Đổi lại, rollback sau thời điểm đó sẽ chậm hơn vì phải scale lên lại.</li>
+    <li><strong>Database dùng chung:</strong> áp dụng mô hình <em>expand – contract</em>: release 1 thêm cột mới (cả 2 version đều chạy được), release 2 mới xoá cột cũ.</li>
+    <li><strong>Session:</strong> lưu session ở ElastiCache/DynamoDB thay vì trong bộ nhớ task để người dùng không bị đăng xuất khi switch.</li>
+    <li><strong>Long-lived connection</strong> (WebSocket): kết nối cũ vẫn ở Blue sau khi switch – cần cơ chế reconnect phía client.</li>
+  </ul>
+
+</body>
+</html>

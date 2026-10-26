@@ -1,0 +1,47 @@
+# buildspec.yml: build Docker image (frontend/backend) rồi push lên ECR.
+# Dùng cho AWS CodePipeline (Stage Build) — tham khảo Section 9 – CodePipeline.
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: "ap-southeast-1"
+    # COMPONENT được truyền từ biến môi trường của CodeBuild project: frontend | backend
+    COMPONENT: "frontend"
+    IMAGE_TAG: "latest"
+
+phases:
+  pre_build:
+    commands:
+      - echo "Đăng nhập vào ECR..."
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+  build:
+    commands:
+      - echo "Build Docker image ${COMPONENT}..."
+      - |
+        if [ "${COMPONENT}" = "backend" ]; then
+          docker build -f docker/Dockerfile.backend -t final-assignment-${COMPONENT} .
+        else
+          docker build -f docker/Dockerfile.frontend -t final-assignment-${COMPONENT} .
+        fi
+      - docker tag final-assignment-${COMPONENT}:latest ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/final-assignment-${COMPONENT}:${IMAGE_TAG}
+
+  post_build:
+    commands:
+      - echo "Push image lên ECR..."
+      - docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/final-assignment-${COMPONENT}:${IMAGE_TAG}
+      - echo "Ghi file imagedefinitions.json cho Stage Deploy (ECS)..."
+      - |
+        cat > imagedefinitions.json <<EOF
+        [
+          {
+            "name": "${COMPONENT}",
+            "imageUri": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/final-assignment-${COMPONENT}:${IMAGE_TAG}"
+          }
+        ]
+        EOF
+
+artifacts:
+  files:
+    - imagedefinitions.json

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 6: Build Docker image &amp; push lên Amazon ECR – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 6: Build Docker image &amp; push lên Amazon ECR</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài <strong>Docker Engine</strong> (kèm Buildx, Compose plugin) trên Jenkins server, cho phép user <code>jenkins</code> sử dụng Docker.</li>
+    <li>Tạo (hoặc dùng lại) ECR repository <code>nodejs-random-color</code>.</li>
+    <li>Tạo Pipeline job: checkout code → <code>docker build</code> → đăng nhập ECR → tag &amp; push image với tag <code>ver-&lt;BUILD_NUMBER&gt;</code>.</li>
+    <li>Không hard-code AWS Account ID: lấy động bằng <code>aws sts get-caller-identity</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>nodejs-random-color"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server"]
+              direction TB
+              J1["① Checkout"] --> J2["<img src='../../assets/svg-icon/docker.svg' style='width:30px;height:30px;'/><br/>② docker build"]
+              J2 --> J3["③ docker login<br/>tag · push"]
+          end
+          PUB["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:34px;height:34px;'/><br/>ECR Public<br/>node:22-alpine"]
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:38px;height:38px;'/><br/>ECR<br/>nodejs-random-color:ver-N"]
+      end
+      GH --> J1
+      PUB -.->|"pull base image"| J2
+      J3 -->|"docker push (IAM Role)"| ECR
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1: IAM Role có <code>AmazonEC2ContainerRegistryPowerUser</code>.</li>
+    <li>Kiến thức Docker cơ bản: Dockerfile, build, tag, push ECR (Section 8 – Lab 9).</li>
+    <li>Fork repository <a href="https://github.com/hoanglinhdigital/nodejs-random-color" target="_blank" rel="noopener"><code>hoanglinhdigital/nodejs-random-color</code></a> (branch <code>master</code>) về GitHub account của bạn, clone về máy local (bỏ qua nếu đã làm ở Section 9).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab6_docker_ecr/</code> (<code>commands.sh</code>, <code>Dockerfile</code>, <code>Jenkinsfile</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài Docker Engine trên Jenkins server</strong>
+        <p>SSH vào Jenkins server, cài Docker từ repository chính thức theo <a href="https://docs.docker.com/engine/install/ubuntu/" target="_blank" rel="noopener">hướng dẫn của Docker</a>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release &amp;&amp; echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list &gt; /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cho phép user jenkins dùng Docker</strong>
+        <p>Thêm user <code>jenkins</code> (và <code>ubuntu</code>) vào group <code>docker</code>, sau đó <strong>restart Jenkins</strong> để process Jenkins nhận group mới:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo usermod -aG docker jenkins
+sudo usermod -aG docker ubuntu
+sudo systemctl restart jenkins
+sudo -u jenkins docker version
+docker compose version</code></pre>
+        <div class="alert alert-warning">User thuộc group <code>docker</code> có quyền tương đương <strong>root</strong> trên máy (có thể mount mọi thư mục vào container). Chấp nhận được cho lab; production nên build trên agent riêng / container tạm thời, hoặc dùng công cụ build không cần daemon (Kaniko, Buildah).</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo ECR repository</strong>
+        <p>Nếu đã có repository <code>nodejs-random-color</code> từ Section 9 thì dùng lại. Nếu chưa, vào <strong>ECR → Private registry → Create repository</strong>:</p>
+        <ul class="feature-list">
+          <li>Repository name: <code>nodejs-random-color</code></li>
+          <li>Image tag mutability: <strong>Mutable</strong>; Encryption: mặc định (AES-256)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cập nhật Dockerfile trong repository</strong>
+        <p>Dockerfile gốc của repository dùng <code>node:14</code> (đã hết hỗ trợ) từ Docker Hub. Trên máy local, mở repository <code>nodejs-random-color</code>, thay toàn bộ nội dung file <code>Dockerfile</code> bằng nội dung <code>lab6_docker_ecr/Dockerfile</code>:</p>
+        <pre class="code-block"><code class="language-docker"># Dùng base image Node.js 22 từ Amazon ECR Public Gallery (mirror Docker Official Image)
+# để tránh lỗi rate limit khi Jenkins pull image ẩn danh từ Docker Hub
+FROM public.ecr.aws/docker/library/node:22-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --omit=dev
+
+COPY . .
+
+EXPOSE 3000
+
+CMD [ "npm", "start" ]</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/jenkins-labs/nodejs-random-color
+git add Dockerfile
+git commit -m "build: use node 22 alpine base image from ECR Public"
+git push origin master</code></pre>
+        <p class="code-note">💡 Nếu đã clone repository ở Section 9 (thư mục <code>~/codepipeline-labs/nodejs-random-color</code>), bạn có thể dùng luôn thư mục đó – thay đường dẫn <code>cd</code> trong các lệnh của section này cho phù hợp.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo Pipeline job</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab06-docker-ecr</code>, Definition <strong>Pipeline script</strong>, dán nội dung <code>lab6_docker_ecr/Jenkinsfile</code> và sửa <code>GIT_REPO</code>:</p>
+        <pre class="code-block"><code class="language-groovy">pipeline {
+    agent any
+
+    environment {
+        // Thay &lt;your-github-username&gt; bằng GitHub username của bạn
+        GIT_REPO   = 'https://github.com/&lt;your-github-username&gt;/nodejs-random-color.git'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REPO   = 'nodejs-random-color'
+        IMAGE_TAG  = "ver-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}"
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                // Lấy Account ID từ IAM Role của Jenkins server -&gt; không hard-code Account ID
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    echo "Pushed image: ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            // Xoá image không còn dùng để tránh đầy ổ đĩa Jenkins server
+            sh 'docker image prune -f'
+        }
+    }
+}</code></pre>
+        <p class="code-note">💡 Các lệnh <code>login</code>, <code>tag</code>, <code>push</code> nằm chung một khối <code>sh '''...'''</code> vì biến shell <code>ACCOUNT_ID</code>, <code>ECR_REGISTRY</code> chỉ tồn tại trong process của khối đó (chương Jenkins Pipeline – Thông tin bổ sung).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Build &amp; xem log</strong>
+        <p><strong>Build Now</strong> 2 lần để có 2 image <code>ver-1</code>, <code>ver-2</code>. Log stage Push có dạng:</p>
+        <pre class="output-box"><code>Login Succeeded
++ docker push 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:ver-1
+The push refers to repository [123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color]
+...
+ver-1: digest: sha256:... size: 1993
+Pushed image: 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:ver-1</code></pre>
+        <p class="code-note">💡 Log có dòng cảnh báo <code>WARNING! Your password will be stored unencrypted in /var/lib/jenkins/.docker/config.json</code> – token ECR chỉ có hiệu lực 12 giờ nên rủi ro thấp; có thể dùng <em>amazon-ecr-credential-helper</em> để không lưu token xuống đĩa.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kiểm tra image trên ECR</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr list-images --repository-name nodejs-random-color --region ap-southeast-1</code></pre>
+        <p>Hoặc vào <strong>ECR → nodejs-random-color</strong>: thấy các tag <code>ver-1</code>, <code>ver-2</code>. Ghi lại <strong>Image URI</strong> của <code>ver-1</code> để dùng ở Lab 7.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>sudo -u jenkins docker version</code> hiển thị cả Client và Server.</li>
+      <li>Job <code>lab06-docker-ecr</code> build <strong>SUCCESS</strong>.</li>
+      <li>ECR repository <code>nodejs-random-color</code> có image tag <code>ver-1</code>, <code>ver-2</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> User <code>jenkins</code> chưa thuộc group <code>docker</code>, hoặc chưa restart Jenkins sau khi thêm group.<br/><strong>Giải pháp:</strong>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">groups jenkins
+sudo usermod -aG docker jenkins
+sudo systemctl restart jenkins</code></pre></div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>denied: User: arn:aws:sts::...:assumed-role/jenkins-server-role/... is not authorized to perform: ecr:InitiateLayerUpload</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> IAM Role thiếu quyền push ECR.<br/><strong>Giải pháp:</strong> Gắn thêm <code>AmazonEC2ContainerRegistryPowerUser</code> vào <code>jenkins-server-role</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>name unknown: The repository with name 'nodejs-random-color' does not exist in the registry</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa tạo ECR repository hoặc tạo ở region khác.<br/><strong>Giải pháp:</strong> Tạo repository ở <code>ap-southeast-1</code> (Bước 3).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>toomanyrequests: You have reached your pull rate limit</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Dockerfile vẫn pull base image từ Docker Hub ẩn danh.<br/><strong>Giải pháp:</strong> Dùng base image từ ECR Public như Bước 4.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>no space left on device</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Image và build cache tích tụ sau nhiều lần build.<br/><strong>Giải pháp:</strong>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">df -h /
+sudo docker system df
+sudo docker system prune -af</code></pre></div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại ECR repository và các image cho Lab 7 → Lab 12. ECR tính phí theo dung lượng lưu trữ (rất nhỏ với vài image ~60 MB). Nhớ <strong>Stop</strong> Jenkins server nếu nghỉ học.</div>
+
+</body>
+</html>

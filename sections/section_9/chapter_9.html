@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các chiến lược deployment: Rolling, Blue/Green, Canary, Linear – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các chiến lược deployment</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Chiến lược deployment</strong> (deployment strategy) là cách bạn thay thế version cũ của ứng dụng bằng version mới trên môi trường đang phục vụ người dùng.
+    Chiến lược quyết định hệ thống có bị <strong>downtime</strong> hay không, bao nhiêu người dùng bị ảnh hưởng nếu version mới có lỗi, rollback nhanh hay chậm,
+    và tốn thêm bao nhiêu tài nguyên trong lúc deploy. Không có chiến lược nào tốt nhất cho mọi trường hợp – cần cân bằng giữa <em>rủi ro, tốc độ và chi phí</em>.
+  </p>
+
+  <h2 class="section-heading">Các chiến lược phổ biến</h2>
+  <ul class="feature-list">
+    <li><strong>All at once (In-place):</strong> dừng toàn bộ version cũ, deploy version mới lên tất cả server cùng lúc. Nhanh, đơn giản nhưng có downtime và rủi ro cao nhất.</li>
+    <li><strong>Rolling update:</strong> thay thế lần lượt từng nhóm (batch) server/task. Không downtime, nhưng trong lúc deploy version cũ và mới cùng phục vụ; rollback phải “roll” ngược lại.</li>
+    <li><strong>Immutable / Rolling with additional batch:</strong> tạo thêm server mới chạy version mới rồi mới huỷ server cũ – giữ nguyên năng lực phục vụ trong lúc deploy.</li>
+    <li><strong>Blue/Green:</strong> dựng môi trường mới (Green) song song môi trường hiện tại (Blue), kiểm thử Green, sau đó chuyển <strong>100% traffic</strong> sang Green trong một lần. Rollback = chuyển traffic về Blue.</li>
+    <li><strong>Canary:</strong> chuyển một phần nhỏ traffic (ví dụ 10%) sang version mới, theo dõi một khoảng thời gian, nếu ổn thì chuyển nốt phần còn lại.</li>
+    <li><strong>Linear:</strong> chuyển traffic theo từng nấc đều nhau (ví dụ 10% mỗi phút) cho đến 100%.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">Rolling update trên ECS (Lab 6)</h3>
+  <div class="mermaid">
+  flowchart LR
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>ALB :80"]
+      subgraph TG["Target Group (1 TG duy nhất)"]
+          direction TB
+          V1A["🟦 Task v1"]
+          V1B["🟦 Task v1"]
+          V2A["🟩 Task v2 (mới)"]
+      end
+      ALB --> TG
+      V2A -.->|"healthy → stop 1 task v1 → lặp lại"| V1A
+  </div>
+  <p class="arch-caption">ECS khởi động task mới, chờ healthy rồi dừng task cũ, lặp lại tới khi toàn bộ task chạy v2. Trong lúc deploy, người dùng có thể gặp cả v1 và v2.</p>
+
+  <h3 class="section-subheading">Blue/Green trên ECS với CodeDeploy (Lab 7)</h3>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Users"]
+      Tester["🧪 Tester"]
+      subgraph ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:26px;height:26px;'/> ALB"]
+          L80["Listener :80<br/>production"]
+          L81["Listener :81<br/>test"]
+      end
+      subgraph ECS["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:26px;height:26px;'/> ECS service (deployment controller: CODE_DEPLOY)"]
+          direction TB
+          subgraph Blue["TG Blue – task set v1 (original)"]
+              B1["🟦 Task v1"]
+              B2["🟦 Task v1"]
+          end
+          subgraph Green["TG Green – task set v2 (replacement)"]
+              G1["🟩 Task v2"]
+              G2["🟩 Task v2"]
+          end
+      end
+      CD["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:34px;height:34px;'/><br/>CodeDeploy<br/>reroute traffic"]
+      User --> L80
+      Tester --> L81
+      L80 -->|"100%"| Blue
+      L81 --> Green
+      CD -.->|"đổi TG của listener 80 sang Green"| L80
+  </div>
+  <p class="arch-caption">Lưu ý: Blue/Green ở đây là ở mức <strong>service</strong> (2 task set trong cùng ECS service), không phải dựng 2 cluster riêng.</p>
+
+  <h3 class="section-subheading">Canary (Lab 8)</h3>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Users"]
+      L80["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:34px;height:34px;'/><br/>ALB :80<br/>weighted forward"]
+      Blue["🟦 TG Blue – v1"]
+      Green["🟩 TG Green – v2"]
+      User --> L80
+      L80 -->|"Bước 1: 75% → sau 5 phút: 0%"| Blue
+      L80 -->|"Bước 1: 25% → sau 5 phút: 100%"| Green
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="compare-table">
+    <thead><tr><th>Chiến lược</th><th>Downtime</th><th>Ảnh hưởng khi lỗi</th><th>Tốc độ rollback</th><th>Tài nguyên thêm</th><th>Độ phức tạp</th></tr></thead>
+    <tbody>
+      <tr><td>All at once</td><td>Có</td><td>100% người dùng</td><td>Chậm (deploy lại bản cũ)</td><td>Không</td><td>Thấp</td></tr>
+      <tr><td>Rolling</td><td>Không</td><td>Một phần, tăng dần</td><td>Chậm (roll ngược)</td><td>Không / ít</td><td>Thấp</td></tr>
+      <tr><td>Immutable</td><td>Không</td><td>Một phần</td><td>Nhanh (huỷ server mới)</td><td>Gấp đôi trong lúc deploy</td><td>Trung bình</td></tr>
+      <tr><td>Blue/Green</td><td>Không</td><td>100% sau khi switch (nhưng đã test trước)</td><td>Rất nhanh (switch lại)</td><td>Gấp đôi trong lúc deploy</td><td>Trung bình – cao</td></tr>
+      <tr><td>Canary</td><td>Không</td><td>Chỉ % nhỏ người dùng</td><td>Rất nhanh</td><td>Gấp đôi trong lúc deploy</td><td>Cao (cần monitoring tốt)</td></tr>
+      <tr><td>Linear</td><td>Không</td><td>Tăng dần theo nấc</td><td>Nhanh</td><td>Gấp đôi trong lúc deploy</td><td>Cao</td></tr>
+    </tbody>
+  </table>
+  <ul class="feature-list">
+    <li><strong>Nên dùng All at once / Rolling</strong> cho môi trường Dev/Test, ứng dụng nội bộ, khi chi phí quan trọng hơn rủi ro.</li>
+    <li><strong>Nên dùng Blue/Green</strong> khi cần kiểm thử version mới trên hạ tầng thật trước khi mở cho người dùng và cần rollback tức thì.</li>
+    <li><strong>Nên dùng Canary / Linear</strong> cho hệ thống lớn, nhiều người dùng, đã có <strong>monitoring &amp; alarm</strong> để tự động rollback khi chỉ số lỗi tăng.</li>
+    <li><strong>Không nên dùng Canary/Blue-Green</strong> khi version mới thay đổi database không tương thích ngược (breaking schema change) – 2 version không thể cùng chạy trên một database.</li>
+  </ul>
+
+  <h3 class="section-subheading">Hỗ trợ trên các dịch vụ AWS</h3>
+  <table class="compare-table">
+    <thead><tr><th>Dịch vụ</th><th>Chiến lược hỗ trợ</th></tr></thead>
+    <tbody>
+      <tr><td>Elastic Beanstalk</td><td>All at once, Rolling, Rolling with additional batch, Immutable, Traffic splitting (canary); Blue/Green bằng <em>Swap environment URLs</em></td></tr>
+      <tr><td>ECS (controller <code>ECS</code>)</td><td>Rolling update (<code>minimumHealthyPercent</code>/<code>maximumPercent</code>), circuit breaker; từ 2025 có thêm Blue/Green, Canary, Linear native</td></tr>
+      <tr><td>ECS + CodeDeploy (controller <code>CODE_DEPLOY</code>)</td><td><code>ECSAllAtOnce</code> (Blue/Green), <code>ECSCanary10Percent5Minutes</code>, <code>ECSLinear10PercentEvery1Minutes</code>... hoặc custom</td></tr>
+      <tr><td>Lambda + CodeDeploy</td><td>AllAtOnce, Canary, Linear qua Lambda alias</td></tr>
+      <tr><td>EC2 + CodeDeploy</td><td>In-place (OneAtATime, HalfAtATime, AllAtOnce), Blue/Green với Auto Scaling group</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Website thương mại điện tử mùa sale</h4>
+      <p>Không được phép downtime, cần rollback trong vài giây: Blue/Green, kiểm thử qua test listener trước khi reroute traffic.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Ứng dụng có hàng triệu người dùng</h4>
+      <p>Thay đổi thuật toán gợi ý: Canary 5–10% người dùng trong 30 phút, theo dõi tỷ lệ lỗi và độ trễ, alarm kích hoạt thì tự rollback.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Môi trường Dev/Test của team</h4>
+      <p>Ưu tiên nhanh và rẻ: Rolling update hoặc All at once, chấp nhận vài giây gián đoạn.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Backward compatibility:</strong> với mọi chiến lược không downtime, version cũ và mới chạy cùng lúc – API và database schema cần tương thích ngược (thêm cột trước, xoá cột sau).</li>
+    <li><strong>Session &amp; sticky:</strong> ứng dụng nên stateless (session lưu ở Redis/DynamoDB) để người dùng không bị mất phiên khi bị chuyển giữa 2 version.</li>
+    <li><strong>Chi phí:</strong> Blue/Green, Canary chạy gấp đôi số task trong lúc deploy – nên giới hạn thời gian chờ và terminate task set cũ ngay khi ổn định.</li>
+    <li><strong>Tự động rollback:</strong> kết hợp CloudWatch Alarm (5xx của ALB, error rate) với deployment group của CodeDeploy để rollback không cần con người.</li>
+    <li><strong>Thi chứng chỉ:</strong> đề DVA/DOP thường hỏi chọn chiến lược theo yêu cầu “không downtime”, “rollback nhanh nhất”, “ít tốn chi phí nhất”, “ảnh hưởng ít người dùng nhất”.</li>
+  </ul>
+
+</body>
+</html>

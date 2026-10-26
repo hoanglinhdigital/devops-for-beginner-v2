@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terraform State &amp; các phương án quản lý State – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Terraform State &amp; các phương án quản lý State</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>State</strong> (mặc định là file <code>terraform.tfstate</code>) là "bộ nhớ" của Terraform: nó ánh xạ mỗi resource trong code (ví dụ <code>aws_instance.demo_instance</code>) với resource thật trên AWS (ví dụ <code>i-0abc123...</code>), kèm toàn bộ thuộc tính.
+    Nhờ state, Terraform biết resource nào đã tồn tại để <strong>tính toán plan</strong>: cái gì cần tạo mới, sửa hay xoá. Mất state đồng nghĩa với việc Terraform "quên" toàn bộ hạ tầng nó đã tạo.
+    Ở các lab trước, state được lưu ngay trên máy local — phù hợp khi học, nhưng không phù hợp khi làm việc nhóm.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính của State</h2>
+  <ul class="feature-list">
+    <li><strong>Mapping code ↔ hạ tầng thật:</strong> lưu ID, ARN, IP và mọi thuộc tính của resource đã tạo.</li>
+    <li><strong>Hiệu năng:</strong> Terraform dùng state làm cache, không cần quét toàn bộ tài khoản AWS mỗi lần plan.</li>
+    <li><strong>Dependency &amp; output:</strong> lưu thứ tự phụ thuộc giữa resource và giá trị output (<code>terraform output</code> đọc từ state).</li>
+    <li><strong>Chứa thông tin nhạy cảm:</strong> state lưu dạng text thuần, có thể chứa password DB, private key, user_data... → phải bảo vệ như secret.</li>
+    <li><strong>Locking:</strong> khi 2 người cùng chạy <code>apply</code>, state phải được khoá để tránh ghi đè lẫn nhau và làm hỏng state.</li>
+    <li><strong>Backend:</strong> nơi lưu state có thể cấu hình: local (mặc định), S3, HCP Terraform (Terraform Cloud), Azure Blob, GCS...</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc: Remote state với S3 backend</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Team["👥 Team DevOps"]
+          direction TB
+          A["<img src='../../assets/svg-icon/developer.svg' style='width:36px;height:36px;'/><br/>Engineer A<br/>terraform apply"]
+          B["<img src='../../assets/svg-icon/developer.svg' style='width:36px;height:36px;'/><br/>Engineer B<br/>terraform plan"]
+          CI["⚙️ CI/CD Pipeline"]
+      end
+      Git["<img src='../../assets/svg-icon/github.svg' style='width:36px;height:36px;'/><br/><b>Git</b><br/>code .tf (không có state)"]
+      subgraph Backend["☁️ S3 Backend"]
+          direction TB
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:44px;height:44px;'/><br/><b>S3 bucket</b><br/>versioning · encryption<br/>dev/terraform.tfstate<br/>test/terraform.tfstate"]
+          Lock["🔒 <b>Lock file</b><br/>terraform.tfstate.tflock"]
+      end
+      AWS["<img src='../../assets/svg-icon/aws-logo.png' style='width:56px;height:34px;'/><br/><b>AWS Resources</b>"]
+      A --> Git
+      B --> Git
+      CI --> Git
+      A -->|"1. lock<br/>2. đọc/ghi state<br/>3. unlock"| S3
+      B -->|"đọc state"| S3
+      CI --> S3
+      S3 --- Lock
+      A -->|"create/update"| AWS
+  </div>
+  <p class="arch-caption">Code lưu trên Git, state lưu tập trung trên S3. Khi một người đang apply, lock file ngăn người khác ghi state cùng lúc.</p>
+
+  <h2 class="section-heading">Các phương án quản lý State</h2>
+  <table class="compare-table">
+    <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th><th>Khi nào dùng</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Local</strong> (mặc định)</td><td>Đơn giản, không cần cấu hình</td><td>Mất máy là mất state; không chia sẻ được; không lock giữa nhiều người</td><td>Học tập, thử nghiệm cá nhân</td></tr>
+      <tr><td><strong>Commit state lên Git</strong> (Github)</td><td>Chia sẻ được, có lịch sử version</td><td>Lộ secret trong repo; dễ conflict khi merge; không có lock; dễ quên pull/push → ghi đè state</td><td><strong>Không khuyến khích</strong>; chỉ nên biết để tránh</td></tr>
+      <tr><td><strong>S3 backend</strong></td><td>Tập trung, có lock, versioning để khôi phục, mã hoá, phân quyền bằng IAM; chi phí gần như bằng 0</td><td>Phải tạo bucket trước (bài toán "con gà – quả trứng")</td><td><strong>Lựa chọn phổ biến nhất</strong> cho dự án trên AWS</td></tr>
+      <tr><td><strong>HCP Terraform</strong> (Terraform Cloud)</td><td>Quản lý state, lock, chạy plan/apply trên cloud, UI, policy</td><td>Tính phí theo số resource khi vượt free tier; phụ thuộc dịch vụ bên ngoài</td><td>Team lớn cần quy trình, phân quyền chi tiết</td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-info">
+    <strong>Thay đổi quan trọng:</strong> trước đây S3 backend cần thêm một <strong>DynamoDB table</strong> để lock state (tham số <code>dynamodb_table</code>).
+    Từ <strong>Terraform 1.10</strong>, S3 backend hỗ trợ lock trực tiếp bằng file <code>.tflock</code> trên S3 với tham số <code>use_lockfile = true</code>; tham số <code>dynamodb_table</code> đã bị đánh dấu <em>deprecated</em>. Khoá học sử dụng cách mới.
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="two-col">
+    <div class="card">
+      <h4>✅ Nên dùng remote state khi</h4>
+      <ul class="feature-list">
+        <li>Có từ 2 người trở lên cùng thao tác hạ tầng.</li>
+        <li>Chạy Terraform trong CI/CD pipeline.</li>
+        <li>Hạ tầng là môi trường thật (staging, production).</li>
+        <li>Cần chia sẻ output giữa các project (data source <code>terraform_remote_state</code>).</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>⚠️ Lưu ý</h4>
+      <ul class="feature-list">
+        <li>Bật <strong>versioning</strong> và <strong>encryption</strong> cho bucket chứa state; chặn public access.</li>
+        <li>Mỗi môi trường/stack một <code>key</code> (file state) riêng để giảm phạm vi ảnh hưởng.</li>
+        <li>Không xoá/sửa tay file state; dùng lệnh <code>terraform state ...</code>.</li>
+        <li>Bucket chứa state nên được tạo thủ công hoặc bằng một stack riêng.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Các lệnh làm việc với State</h2>
+  <table class="compare-table">
+    <thead><tr><th>Lệnh</th><th>Mục đích</th></tr></thead>
+    <tbody>
+      <tr><td><code>terraform state list</code></td><td>Liệt kê resource đang được quản lý</td></tr>
+      <tr><td><code>terraform state show &lt;address&gt;</code></td><td>Xem chi tiết thuộc tính của một resource</td></tr>
+      <tr><td><code>terraform state mv &lt;cũ&gt; &lt;mới&gt;</code></td><td>Đổi tên/di chuyển resource trong state (ví dụ khi refactor sang module) mà không xoá resource thật. Có thể dùng block <code>moved</code> trong code thay thế.</td></tr>
+      <tr><td><code>terraform state rm &lt;address&gt;</code></td><td>Bỏ quản lý một resource (resource thật vẫn còn trên AWS)</td></tr>
+      <tr><td><code>terraform import</code> / block <code>import</code></td><td>Đưa resource đã tạo tay trên Console vào state để Terraform quản lý</td></tr>
+      <tr><td><code>terraform plan -refresh-only</code></td><td>Phát hiện <strong>drift</strong>: hạ tầng thật bị sửa tay khác với state</td></tr>
+      <tr><td><code>terraform force-unlock &lt;LOCK_ID&gt;</code></td><td>Gỡ lock bị "kẹt" khi lệnh trước bị ngắt giữa chừng (chỉ dùng khi chắc chắn không ai đang chạy)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>👥 Làm việc nhóm</h4>
+      <p>3 DevOps engineer cùng quản lý hạ tầng của một dự án; state trên S3 giúp mọi người luôn làm việc trên cùng một phiên bản và không ghi đè lẫn nhau.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>🔁 CI/CD cho hạ tầng</h4>
+      <p>Github Actions/Jenkins chạy <code>terraform apply</code> sau khi merge Pull Request; runner là máy tạm thời nên bắt buộc state phải nằm ở remote backend.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>⏪ Khôi phục sự cố</h4>
+      <p>State bị hỏng sau một lần apply lỗi — nhờ S3 versioning, có thể khôi phục lại phiên bản state trước đó.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Tài liệu S3 backend: <a href="https://developer.hashicorp.com/terraform/language/backend/s3" target="_blank" rel="noopener">developer.hashicorp.com/terraform/language/backend/s3</a>.</li>
+    <li>Khối <code>backend</code> <strong>không dùng được biến</strong> (<code>var.xxx</code>). Nếu muốn linh hoạt, dùng <em>partial configuration</em>: <code>terraform init -backend-config="bucket=..."</code>.</li>
+    <li>Chuyển state từ local lên S3: thêm khối backend rồi chạy <code>terraform init -migrate-state</code>.</li>
+    <li>Chi phí lưu state trên S3 gần như bằng 0 (vài KB tới vài MB, vài request mỗi lần chạy).</li>
+  </ul>
+
+</body>
+</html>

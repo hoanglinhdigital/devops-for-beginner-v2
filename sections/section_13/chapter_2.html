@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cấu trúc template SAM &amp; các lệnh SAM CLI – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Cấu trúc template SAM &amp; các lệnh SAM CLI</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Mọi ứng dụng SAM xoay quanh một file <code>template.yaml</code> mô tả resource, cùng thư mục chứa source code của các function. Hiểu rõ các phần của template và nắm các lệnh SAM CLI cơ bản là đủ để làm việc với hầu hết dự án serverless.
+    Bài này giải thích cấu trúc template, <code>samconfig.toml</code> và vai trò của từng lệnh trước khi bạn thực hành ở các lab sau.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong><code>Transform</code>:</strong> dòng <code>Transform: AWS::Serverless-2016-10-31</code> bắt buộc – báo cho CloudFormation biết đây là template SAM cần được mở rộng.</li>
+    <li><strong><code>Globals</code>:</strong> cấu hình mặc định dùng chung cho mọi function / API (runtime, timeout, memory, biến môi trường...), tránh lặp lại.</li>
+    <li><strong><code>Resources</code>:</strong> phần chính, khai báo function, API, bảng DynamoDB... Mỗi function có <code>CodeUri</code>, <code>Handler</code>, <code>Events</code>, <code>Policies</code>.</li>
+    <li><strong><code>Events</code>:</strong> nguồn kích hoạt function – <code>Api</code>, <code>HttpApi</code>, <code>S3</code>, <code>SQS</code>, <code>SNS</code>, <code>Schedule</code>, <code>DynamoDB</code>... SAM tự tạo permission và kết nối.</li>
+    <li><strong><code>Parameters</code> / <code>Outputs</code>:</strong> tham số đầu vào theo môi trường và giá trị xuất ra (URL của API, tên table...) sau khi deploy.</li>
+    <li><strong><code>samconfig.toml</code>:</strong> lưu các lựa chọn của <code>sam deploy --guided</code> (stack name, region, capabilities...) để lần sau chỉ cần <code>sam deploy</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">Cấu trúc thư mục dự án</h3>
+  <pre class="code-block"><code class="language-bash">url-shorten-app/
+├── template.yaml            # Định nghĩa resource (IaC)
+├── samconfig.toml           # Cấu hình deploy (sinh ra bởi sam deploy --guided)
+├── generate_short_url/      # CodeUri của function 1
+│   └── app.py               # Handler: app.lambda_handler
+├── get_url/                 # CodeUri của function 2
+│   └── app.py
+├── events/                  # Event JSON mẫu để test local
+└── tests/                   # Unit test / integration test</code></pre>
+
+  <h3 class="section-subheading">Các phần của template</h3>
+  <pre class="code-block"><code class="language-yaml">AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31      # bắt buộc với SAM
+
+Globals:                                    # mặc định cho mọi function
+  Function:
+    Runtime: python3.13
+    Timeout: 10
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref UrlShortenTable
+
+Resources:
+  GetUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: get_url/                     # thư mục chứa code
+      Handler: app.lambda_handler           # file app.py, hàm lambda_handler
+      Policies:                             # policy template (least privilege)
+        - DynamoDBReadPolicy:
+            TableName: !Ref UrlShortenTable
+      Events:
+        GetUrl:
+          Type: Api                         # tạo route API Gateway
+          Properties:
+            Path: /link/{short_url}
+            Method: get
+
+Outputs:
+  TableName:
+    Value: !Ref UrlShortenTable</code></pre>
+
+  <h3 class="section-subheading">Vòng đời phát triển với SAM CLI</h3>
+  <div class="mermaid">
+  flowchart LR
+      INIT["sam init<br/>tạo project"] --> VAL["sam validate<br/>kiểm tra template"]
+      VAL --> BUILD["sam build<br/>.aws-sam/build"]
+      BUILD --> LOCAL["sam local invoke<br/>sam local start-api<br/>test trên máy"]
+      LOCAL --> DEPLOY["sam deploy<br/>CloudFormation stack"]
+      DEPLOY --> LOGS["sam logs<br/>sam list<br/>quan sát"]
+      LOGS -->|"sửa code"| SYNC["sam sync --watch<br/>cập nhật nhanh (dev)"]
+      SYNC --> LOGS
+      LOGS --> DEL["sam delete<br/>xoá stack"]
+  </div>
+  <p class="arch-caption">Chuỗi lệnh quen thuộc: sửa code → <code>sam build</code> → <code>sam deploy</code>. Trong lúc phát triển có thể dùng <code>sam sync</code> để cập nhật nhanh hơn.</p>
+
+  <h3 class="section-subheading">Các lệnh SAM CLI thường dùng</h3>
+  <table class="compare-table">
+    <thead><tr><th>Lệnh</th><th>Công dụng</th></tr></thead>
+    <tbody>
+      <tr><td><code>sam init</code></td><td>Tạo project mới từ template mẫu (chọn runtime, loại ứng dụng)</td></tr>
+      <tr><td><code>sam validate --lint</code></td><td>Kiểm tra cú pháp và best practice của template</td></tr>
+      <tr><td><code>sam build</code></td><td>Cài dependency, đóng gói code từng function vào <code>.aws-sam/build</code>. Thêm <code>--use-container</code> để build trong container Docker</td></tr>
+      <tr><td><code>sam local invoke</code></td><td>Chạy 1 function ở local với event JSON</td></tr>
+      <tr><td><code>sam local start-api</code></td><td>Giả lập API Gateway ở <code>http://127.0.0.1:3000</code></td></tr>
+      <tr><td><code>sam deploy --guided</code></td><td>Deploy lần đầu, hỏi từng thông số và lưu vào <code>samconfig.toml</code></td></tr>
+      <tr><td><code>sam deploy</code></td><td>Deploy các lần sau theo <code>samconfig.toml</code></td></tr>
+      <tr><td><code>sam list endpoints / stack-outputs</code></td><td>Liệt kê endpoint API và Outputs của stack đã deploy</td></tr>
+      <tr><td><code>sam logs --tail</code></td><td>Xem log CloudWatch của function ngay trên terminal</td></tr>
+      <tr><td><code>sam sync --watch</code></td><td>Đồng bộ thay đổi code lên AWS gần như tức thì (chỉ dùng cho dev)</td></tr>
+      <tr><td><code>sam delete</code></td><td>Xoá stack và các resource đã tạo</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Nên dùng khi</h4>
+      <ul class="feature-list-sm">
+        <li>Dùng <strong>policy templates</strong> thay cho <code>dynamodb:*</code> trên <code>Resource: "*"</code> để giữ least privilege.</li>
+        <li>Đặt cấu hình chung vào <code>Globals</code>, khác biệt giữa môi trường vào <code>Parameters</code>.</li>
+        <li>Để CloudFormation tự đặt tên resource (không hard-code <code>TableName</code>) nhằm deploy được nhiều stack cùng account.</li>
+        <li>Truyền tên resource cho Lambda qua <strong>biến môi trường</strong> thay vì viết cứng trong code.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Cần lưu ý</h4>
+      <ul class="feature-list-sm">
+        <li><code>sam sync</code> bỏ qua change set → <strong>không dùng cho production</strong>.</li>
+        <li><code>sam local</code> gọi AWS thật (DynamoDB, S3...) nếu code dùng boto3; cần credential và có thể phát sinh chi phí/ghi dữ liệu thật.</li>
+        <li>Không commit <code>.aws-sam/</code> và <code>samconfig.toml</code> chứa thông tin môi trường cá nhân.</li>
+        <li>Đổi <em>logical ID</em> của resource trong template sẽ khiến CloudFormation xoá và tạo lại resource đó.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Nhiều môi trường dev / staging / prod</h4>
+      <p>Một template, nhiều section trong <code>samconfig.toml</code> (<code>--config-env prod</code>) hoặc <code>Parameters</code> khác nhau cho mỗi môi trường.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Chạy trong CI/CD pipeline</h4>
+      <p>Pipeline chạy <code>sam validate</code> → <code>sam build</code> → <code>sam deploy --no-confirm-changeset --no-fail-on-empty-changeset</code> với IAM Role của pipeline.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Debug nhanh tại máy dev</h4>
+      <p><code>sam local invoke</code> với event mẫu và <code>sam logs --tail</code> giúp tìm lỗi mà không phải mở Console.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Hàm nội tại thường gặp:</strong> <code>!Ref</code> (trả về tên/ID resource), <code>!GetAtt</code> (lấy thuộc tính, ví dụ ARN), <code>!Sub</code> (nội suy chuỗi, ví dụ <code>${AWS::Region}</code>).</li>
+    <li><strong>Resource ngầm định:</strong> nếu Function có event <code>Api</code> mà không khai báo <code>RestApiId</code>, SAM tự tạo API tên <code>ServerlessRestApi</code> với stage <code>Prod</code> (và <code>Stage</code>). Khai báo <code>AWS::Serverless::Api</code> riêng giúp kiểm soát tên stage, CORS, auth.</li>
+    <li><strong>Capabilities:</strong> template tạo IAM Role cần <code>CAPABILITY_IAM</code> khi deploy; <code>sam deploy --guided</code> hỏi bạn câu này ("Allow SAM CLI IAM role creation").</li>
+    <li><strong>Bucket deploy:</strong> <code>resolve_s3 = true</code> trong <code>samconfig.toml</code> để SAM tự tạo / dùng bucket managed <code>aws-sam-cli-managed-default-*</code> chứa package code.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: ECS Cluster – Run Service với ALB – AWS Cloud for beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">22. Container service – ECS, ECR</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: ECS Cluster – Run Service với ALB</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo Target Group (type IP) và Application Load Balancer (listener 80).</li>
+    <li>Tạo ECS Service chạy nhiều task Fargate, kết nối với ALB.</li>
+    <li>Truy cập ứng dụng qua DNS của ALB.</li>
+    <li>Thử thay đổi số lượng task (scale) và quan sát service tự thay thế task bị dừng.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:48px;height:48px;'/><br/><b>Users</b><br/>Browser"]
+      subgraph VPC["Default VPC"]
+          direction LR
+          ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:48px;height:48px;'/><br/><b>ALB</b><br/>Listener :80"]
+          TG["🎯 Target Group<br/>type IP"]
+          subgraph SVC["ECS Service (Fargate)"]
+              direction TB
+              T1["<img src='../../assets/aws-svg/Fargate.svg' style='width:40px;height:40px;'/><br/>Task 1"]
+              T2["<img src='../../assets/aws-svg/Fargate.svg' style='width:40px;height:40px;'/><br/>Task 2"]
+          end
+          ALB --> TG
+          TG --> T1
+          TG --> T2
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:48px;height:48px;'/><br/><b>ECR</b>"]
+      User -->|"HTTP :80"| ALB
+      ECR -->|"pull image"| SVC
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3 và Lab 4: có cluster <code>ecs-demo-cluster</code>, task definition <code>my-httpd-task</code> và image trên ECR.</li>
+    <li>Đã hiểu về Application Load Balancer và Target Group (xem section Load Balancer).</li>
+    <li>Region <code>ap-southeast-1</code>, Default VPC có ít nhất 2 public subnet ở 2 AZ khác nhau.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo Security Group cho ALB và cho Service</strong>
+        <p>Vào <strong>EC2 → Security Groups</strong> tạo 2 Security Group trong Default VPC:</p>
+        <ul class="feature-list">
+          <li><code>alb-sg</code>: Inbound HTTP (TCP 80) từ <code>0.0.0.0/0</code></li>
+          <li><code>ecs-service-sg</code>: Inbound HTTP (TCP 80) với Source là Security Group <code>alb-sg</code> (chỉ cho phép traffic đi qua ALB)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo Target Group</strong>
+        <p>Vào <strong>EC2 → Target Groups</strong> → Create target group với các thông số:</p>
+        <ul class="feature-list">
+          <li>Target type: <strong>IP addresses</strong> (bắt buộc với Fargate vì task dùng network mode awsvpc)</li>
+          <li>Name: <code>ecs-httpd-tg</code></li>
+          <li>Protocol : Port: <strong>HTTP : 80</strong></li>
+          <li>VPC: Default VPC</li>
+          <li>Health check path: <code>/</code></li>
+          <li>Register targets: <strong>không thêm gì</strong>, ECS Service sẽ tự đăng ký task vào target group</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo Application Load Balancer</strong>
+        <p>Vào <strong>EC2 → Load Balancers</strong> → Create Application Load Balancer với các thông số:</p>
+        <ul class="feature-list">
+          <li>Name: <code>ecs-demo-alb</code></li>
+          <li>Scheme: <strong>Internet-facing</strong>, IP address type: IPv4</li>
+          <li>Network mapping: Default VPC, chọn ít nhất 2 AZ (public subnet)</li>
+          <li>Security group: <code>alb-sg</code> (bỏ Security Group default)</li>
+          <li>Listener: <strong>HTTP : 80</strong> → Forward to <code>ecs-httpd-tg</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo ECS Service</strong>
+        <p>Vào cluster <code>ecs-demo-cluster</code> → tab <strong>Services</strong> → Create với các thông số:</p>
+        <ul class="feature-list">
+          <li>Task definition family: <code>my-httpd-task</code> (revision mới nhất)</li>
+          <li>Service name: <code>my-httpd-service</code></li>
+          <li>Compute options: Launch type = <strong>FARGATE</strong></li>
+          <li>Service type: <strong>Replica</strong>, Desired tasks: <code>2</code></li>
+          <li>Networking: Default VPC, các public subnet, Security group: <code>ecs-service-sg</code> (bỏ Security Group default), Public IP: <strong>Turned on</strong> (vì không dùng NAT Gateway)</li>
+          <li>Load balancing: type <strong>Application Load Balancer</strong>, chọn <strong>Use an existing load balancer</strong> = <code>ecs-demo-alb</code>, Container to load balance = <code>httpd 80:80</code>, Listener = <code>80:HTTP</code> (existing), Target group = <code>ecs-httpd-tg</code></li>
+          <li>Health check grace period: <code>30</code> giây</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Chờ service ổn định và test qua ALB</strong>
+        <p>Đợi các task chuyển sang <code>RUNNING</code> (khoảng 2–3 phút). Vào <strong>Target Groups → ecs-httpd-tg → Targets</strong>, đợi 2 target có <strong>Health status = healthy</strong>.</p>
+        <p>Vào <strong>Load Balancers</strong>, copy <strong>DNS name</strong> của <code>ecs-demo-alb</code> và truy cập <code>http://&lt;alb-dns-name&gt;</code> trên trình duyệt. Bạn sẽ thấy trang Version 1.0.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Scale số lượng task</strong>
+        <p>Trong Service <code>my-httpd-service</code> chọn <strong>Update</strong>, đổi <strong>Desired tasks</strong> từ <code>2</code> lên <code>4</code> rồi cập nhật. Quan sát danh sách task tăng lên 4 và Target Group có thêm 2 target. Sau đó giảm xuống <code>1</code> để quan sát các task bị dừng và được gỡ khỏi Target Group.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Quan sát khả năng tự phục hồi</strong>
+        <p>Trong tab <strong>Tasks</strong>, chọn một task đang chạy → <strong>Stop</strong>. Quan sát service tự tạo task mới để quay về số lượng desired count, trong khi ALB vẫn phục vụ qua các task còn lại.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+        <li>Service <code>my-httpd-service</code> có số task Running bằng Desired count.</li>
+        <li>Target Group <code>ecs-httpd-tg</code> có các target <strong>healthy</strong>.</li>
+        <li>Truy cập DNS của ALB hiển thị trang Version 1.0.</li>
+        <li>Khi thay đổi Desired tasks hoặc dừng một task, service tự điều chỉnh về số lượng mong muốn.</li>
+      </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">ALB trả về <code>503 Service Temporarily Unavailable</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa có target healthy trong Target Group (task chưa chạy xong hoặc health check thất bại).<br/><strong>Giải pháp:</strong> Đợi task <code>RUNNING</code>; kiểm tra tab Targets của Target Group xem lý do unhealthy.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Target <code>unhealthy</code> / health check timeout</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group <code>ecs-service-sg</code> chưa cho phép traffic từ <code>alb-sg</code> ở cổng 80, hoặc health check path sai.<br/><strong>Giải pháp:</strong> Sửa inbound rule của <code>ecs-service-sg</code> (HTTP 80 từ <code>alb-sg</code>) và đặt health check path là <code>/</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Service liên tục tạo rồi dừng task</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> ALB health check thất bại trước khi hết health check grace period nên ECS coi task lỗi.<br/><strong>Giải pháp:</strong> Tăng health check grace period, kiểm tra container port đúng <code>80</code>; xem tab Events của Service để biết lý do.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không chọn được target group khi tạo service</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Target group tạo với type <em>Instance</em> thay vì <em>IP</em>.<br/><strong>Giải pháp:</strong> Xoá và tạo lại target group với type <strong>IP addresses</strong>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>CannotPullContainerError</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Task không có Public IP và subnet không có NAT Gateway nên không kéo được image từ ECR.<br/><strong>Giải pháp:</strong> Cập nhật service bật Public IP (hoặc dùng NAT Gateway/VPC endpoint cho ECR - có phí) rồi force new deployment.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>ALB và task Fargate tính phí theo giờ</strong> kể cả khi không có traffic. Hãy dọn dẹp ngay sau khi học xong theo bài <strong>Lab: Dọn dẹp resource</strong>.</div>
+
+</body>
+</html>

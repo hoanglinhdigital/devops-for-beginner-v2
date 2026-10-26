@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Thao tác cơ bản với Image &amp; Container – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Thao tác cơ bản với Image &amp; Container</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Pull image từ Docker Hub, liệt kê và xem thông tin image.</li>
+    <li>Chạy container ở chế độ nền (<code>-d</code>), mapping port (<code>-p</code>) và truy cập ứng dụng qua browser.</li>
+    <li>Liệt kê container theo trạng thái, xem log, Start/Stop/Restart container.</li>
+    <li>Truy cập vào bên trong container đang chạy bằng <code>docker exec</code>, chạy container ở chế độ interactive (<code>-it</code>).</li>
+    <li>Xoá container, xoá image và dọn dẹp tài nguyên Docker.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Hub["<img src='../../assets/svg-icon/docker.svg' style='width:40px;height:40px;'/><br/><b>Docker Hub</b><br/>nginx · ubuntu"]
+      subgraph Host["Docker Host (PC Local / EC2)"]
+          direction LR
+          Img["🗂️ Image<br/>nginx:latest"]
+          C["📦 Container<br/>my-nginx<br/>port 80"]
+          Img -->|"docker run"| C
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/>Browser"]
+      Hub -->|"docker pull"| Img
+      User -->|"http://localhost:8080"| C
+  </div>
+  <p class="arch-caption">Port 8080 của máy host được map tới port 80 của container nginx.</p>
+
+  <h2 class="section-heading">Vòng đời của container</h2>
+  <div class="mermaid">
+  flowchart LR
+      Image["🗂️ Image"] -->|"docker create / run"| Created["🆕 created"]
+      Created -->|"docker start"| Running["🟢 running"]
+      Running -->|"docker stop"| Exited["⏸️ exited"]
+      Exited -->|"docker start"| Running
+      Running -->|"docker restart"| Running
+      Running -->|"docker pause"| Paused["⏯️ paused"]
+      Paused -->|"docker unpause"| Running
+      Exited -->|"docker rm"| Deleted["⚫ deleted"]
+      Running -->|"docker rm -f"| Deleted
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1: Docker đã cài đặt và chạy được <code>hello-world</code>.</li>
+    <li>Nếu dùng EC2: Security Group mở port <code>8080</code> cho My IP; thay <code>localhost</code> bằng <code>&lt;EC2_PUBLIC_IP&gt;</code> khi truy cập từ browser.</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab2_basic_commands/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Pull image từ Docker Hub</strong>
+        <p>Cú pháp: <code>docker pull &lt;image&gt;:&lt;tag&gt;</code>. Không chỉ định tag thì Docker dùng tag <code>latest</code>.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker pull nginx:latest
+docker pull ubuntu:24.04</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Liệt kê &amp; xem thông tin image</strong>
+        <pre class="command-line" data-prompt="$" data-output="2-4"><code class="language-bash">docker images
+REPOSITORY   TAG       IMAGE ID       CREATED       SIZE
+nginx        latest    a830707172e8   2 weeks ago   192MB
+ubuntu       24.04     59ab366372d5   3 weeks ago   78.1MB</code></pre>
+        <p>Xem metadata (port, biến môi trường, lệnh khởi động...) và các layer của image:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker image inspect nginx:latest
+docker image history nginx:latest</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Chạy container nginx</strong>
+        <p>Chạy container ở chế độ nền và map port <code>8080</code> (host) → <code>80</code> (container):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker run -d -p 8080:80 --name my-nginx nginx:latest</code></pre>
+        <table class="req-table">
+          <thead><tr><th>Tham số</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>-d</code></td><td>Detached – chạy nền, trả lại terminal cho bạn</td></tr>
+            <tr><td><code>-p 8080:80</code></td><td>Mapping <code>&lt;host port&gt;:&lt;container port&gt;</code></td></tr>
+            <tr><td><code>--name my-nginx</code></td><td>Đặt tên container (nếu không, Docker tự sinh tên ngẫu nhiên)</td></tr>
+            <tr><td><code>nginx:latest</code></td><td>Image dùng để chạy container (tự động pull nếu chưa có)</td></tr>
+          </tbody>
+        </table>
+        <p>Mở browser truy cập <code>http://localhost:8080</code> (hoặc <code>http://&lt;EC2_PUBLIC_IP&gt;:8080</code>), bạn sẽ thấy trang <strong>Welcome to nginx!</strong></p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl http://localhost:8080</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Liệt kê container &amp; xem log</strong>
+        <p><code>docker ps</code> chỉ hiển thị container đang chạy, thêm <code>-a</code> để hiển thị container ở mọi trạng thái:</p>
+        <pre class="command-line" data-prompt="$" data-output="2-3"><code class="language-bash">docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                  NAMES
+3c1f0e8a9b2d   nginx:latest   "/docker-entrypoint.…"   1 minute ago    Up 1 minute    0.0.0.0:8080->80/tcp   my-nginx</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker ps -a
+docker logs my-nginx
+docker logs -f my-nginx</code></pre>
+        <p><code>-f</code> (follow) theo dõi log liên tục: refresh browser vài lần để thấy access log mới, nhấn <code>Ctrl + C</code> để thoát.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Stop / Start / Restart container</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker stop my-nginx
+docker ps -a
+docker start my-nginx
+docker restart my-nginx</code></pre>
+        <p>Sau khi <code>stop</code>, STATUS chuyển thành <code>Exited (0)</code> và browser không truy cập được nữa. Có thể dùng tên hoặc <strong>Container ID</strong> (chỉ cần vài ký tự đầu, ví dụ <code>docker stop 3c1f</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Truy cập vào container đang chạy</strong>
+        <p><code>docker exec -it</code> mở một shell bên trong container (tương tự SSH vào server):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker exec -it my-nginx /bin/bash</code></pre>
+        <p>Bên trong container, xem hệ điều hành và sửa trang chủ của nginx:</p>
+        <pre class="command-line" data-prompt="root@3c1f0e8a9b2d:/#"><code class="language-bash">cat /etc/os-release
+ls /usr/share/nginx/html
+echo "&lt;h1&gt;Hello from container&lt;/h1&gt;" &gt; /usr/share/nginx/html/index.html
+exit</code></pre>
+        <p>Refresh browser để thấy trang chủ đã thay đổi. Lưu ý thay đổi này chỉ nằm trong <strong>container layer</strong> – sẽ mất khi container bị xoá.</p>
+        <p class="code-note">💡 Một số image tối giản (alpine) không có <code>bash</code>, hãy dùng <code>/bin/sh</code> thay thế.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Chạy container ở chế độ interactive</strong>
+        <p><code>-it</code> = <code>-i</code> (giữ STDIN) + <code>-t</code> (cấp terminal). Container chạy Ubuntu và mở shell cho bạn thao tác:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker run -it --name my-ubuntu ubuntu:24.04</code></pre>
+        <pre class="command-line" data-prompt="root@a1b2c3d4e5f6:/#"><code class="language-bash">cat /etc/os-release
+exit</code></pre>
+        <p>Khi bạn <code>exit</code>, process chính (bash) kết thúc nên container chuyển sang <code>Exited</code>. Container chỉ sống khi process chính còn chạy.</p>
+        <p>Chạy nền nhưng vẫn giữ terminal (<code>-dit</code>) để container không bị exit, sau đó exec vào:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker run -dit --name my-ubuntu-bg ubuntu:24.04
+docker exec -it my-ubuntu-bg bash</code></pre>
+        <p>Container tự xoá sau khi chạy xong với <code>--rm</code> (hữu ích khi chỉ cần chạy 1 lệnh):</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">docker run --rm ubuntu:24.04 echo "Hello Docker"
+Hello Docker</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Theo dõi tài nguyên container</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker stats --no-stream
+docker inspect my-nginx</code></pre>
+        <p><code>docker stats</code> hiển thị CPU, RAM, network I/O của từng container; <code>docker inspect</code> hiển thị IP, mount, biến môi trường... dạng JSON.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Xoá container &amp; image</strong>
+        <p>Container phải ở trạng thái dừng mới xoá được, hoặc dùng <code>-f</code> để xoá cưỡng bức (cẩn thận khi dùng):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker stop my-nginx
+docker rm my-nginx
+docker rm -f my-ubuntu-bg
+docker rm my-ubuntu</code></pre>
+        <p>Xoá image theo <code>&lt;image&gt;:&lt;tag&gt;</code> hoặc <strong>Image ID</strong>. Image đang được container sử dụng sẽ không xoá được:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker rmi nginx:latest
+docker rmi ubuntu:24.04
+docker images</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Truy cập <code>http://localhost:8080</code> hiển thị trang nginx, sau Bước 6 hiển thị <strong>Hello from container</strong>.</li>
+      <li>Phân biệt được kết quả của <code>docker ps</code> và <code>docker ps -a</code>.</li>
+      <li>Hiểu vì sao container Ubuntu chuyển sang <code>Exited</code> khi gõ <code>exit</code>.</li>
+      <li>Sau Bước 9, <code>docker ps -a</code> không còn container nào của lab, <code>docker images</code> không còn image <code>nginx</code>, <code>ubuntu</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Bind for 0.0.0.0:8080 failed: port is already allocated</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Port 8080 trên host đang được một container hoặc ứng dụng khác sử dụng.<br/><strong>Giải pháp:</strong> Xoá container cũ (<code>docker ps</code> để tìm) hoặc dùng port khác, ví dụ <code>-p 8081:80</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Conflict. The container name "/my-nginx" is already in use</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Đã tồn tại container cùng tên (kể cả đang ở trạng thái Exited).<br/><strong>Giải pháp:</strong> <code>docker rm -f my-nginx</code> rồi chạy lại, hoặc đặt tên khác.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>conflict: unable to remove repository reference "nginx:latest" (must force) - container ... is using its referenced image</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Vẫn còn container (kể cả đã dừng) được tạo từ image này.<br/><strong>Giải pháp:</strong> Xoá container trước (<code>docker ps -a</code>, <code>docker rm</code>), sau đó xoá image.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">EC2: browser không truy cập được <code>http://&lt;EC2_PUBLIC_IP&gt;:8080</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group chưa mở port 8080, hoặc IP của bạn đã thay đổi so với rule My IP.<br/><strong>Giải pháp:</strong> Kiểm tra inbound rule của <code>docker-lab-sg</code>; thử <code>curl http://localhost:8080</code> ngay trên EC2 để xác định lỗi nằm ở container hay ở network.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <p class="body-text">Kiểm tra dung lượng Docker đang dùng và xoá toàn bộ container đã dừng, network không dùng, image không có tag (dangling) và build cache:</p>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker system df
+docker system prune</code></pre>
+  <div class="alert alert-info">Nếu làm lab trên EC2, hãy <strong>Stop</strong> instance <code>docker-lab-server</code> khi nghỉ học để tiết kiệm chi phí.</div>
+
+</body>
+</html>

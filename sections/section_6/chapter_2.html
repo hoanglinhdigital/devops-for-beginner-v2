@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Tạo EC2 Linux, kết nối SSH &amp; các lệnh cơ bản – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Tạo EC2 Linux, kết nối SSH &amp; các lệnh cơ bản</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo một EC2 instance chạy <strong>Amazon Linux 2023</strong> dùng chung cho toàn bộ lab trong section.</li>
+    <li>Kết nối tới server bằng <strong>SSH</strong> với private key.</li>
+    <li>Làm quen với cấu trúc thư mục của Linux và các lệnh cơ bản: <code>hostname</code>, <code>whoami</code>, <code>pwd</code>, <code>cd</code>, <code>ls</code>, <code>cat</code>, <code>mkdir</code>, <code>cp</code>, <code>mv</code>, <code>rm</code>...</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b><br/>Git Bash / Terminal"]
+      subgraph AWS["☁️ AWS – ap-southeast-1"]
+          subgraph VPC["Default VPC · Public subnet"]
+              SG["🛡️ <b>linux-lab-sg</b><br/>22 (My IP) · 80"]
+              EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:44px;height:44px;'/><br/><b>linux-lab-server</b><br/>t3.micro · Amazon Linux 2023"]
+              SG --- EC2
+          end
+      end
+      PC -->|"SSH :22<br/>ec2-user + linux-lab-key.pem"| EC2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Tài khoản AWS đã setup ở Section 2, đăng nhập bằng IAM user có quyền quản lý EC2.</li>
+    <li>Region <code>ap-southeast-1</code> (Singapore) có <strong>Default VPC</strong>.</li>
+    <li>Windows: đã cài <strong>Git Bash</strong> (đi kèm Git for Windows). Mac/Linux: dùng Terminal có sẵn. Kiểm tra lệnh <code>ssh</code> đã có:</li>
+  </ul>
+  <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">ssh -V
+OpenSSH_9.x ...</code></pre>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo Key pair</strong>
+        <p>Vào <strong>EC2 → Key Pairs</strong>, tạo key pair với các thông số:</p>
+        <ul class="feature-list">
+          <li>Name: <code>linux-lab-key</code></li>
+          <li>Key pair type: <strong>ED25519</strong> (hoặc RSA)</li>
+          <li>Private key file format: <strong>.pem</strong> (dùng cho OpenSSH / Git Bash)</li>
+        </ul>
+        <p>Trình duyệt sẽ tự tải file <code>linux-lab-key.pem</code> về. AWS chỉ cho tải <strong>một lần duy nhất</strong>, hãy lưu file cẩn thận (ví dụ thư mục <code>~/Downloads</code>).</p>
+        <div class="alert alert-warning">Private key giống như chìa khoá nhà: không gửi qua chat, không commit lên Git.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo Security Group</strong>
+        <p>Vào <strong>EC2 → Security Groups</strong>, tạo Security Group trong Default VPC:</p>
+        <ul class="feature-list">
+          <li>Name: <code>linux-lab-sg</code>, Description: <code>SSH and HTTP for Linux lab</code></li>
+          <li>Inbound rule 1: <strong>SSH (TCP 22)</strong>, Source: <strong>My IP</strong></li>
+          <li>Inbound rule 2: <strong>HTTP (TCP 80)</strong>, Source: <code>0.0.0.0/0</code> (dùng cho Lab 6 – web server)</li>
+          <li>Outbound: giữ mặc định (All traffic)</li>
+        </ul>
+        <p class="code-note">💡 Chỉ mở SSH cho IP của bạn để tránh bị dò mật khẩu/brute-force từ Internet. Nếu IP nhà mạng thay đổi, cập nhật lại rule này.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo EC2 instance</strong>
+        <p>Vào <strong>EC2 → Instances</strong>, launch instance với các thông số:</p>
+        <ul class="feature-list">
+          <li>Name: <code>linux-lab-server</code></li>
+          <li>AMI: <strong>Amazon Linux 2023 AMI</strong> (64-bit x86)</li>
+          <li>Instance type: <code>t3.micro</code> (Free Tier eligible)</li>
+          <li>Key pair: <code>linux-lab-key</code></li>
+          <li>Network: Default VPC, subnet bất kỳ, <strong>Auto-assign public IP: Enable</strong></li>
+          <li>Security Group: chọn existing <code>linux-lab-sg</code></li>
+          <li>Storage: <strong>8 GiB gp3</strong> (mặc định, sẽ mở rộng ở Lab 7)</li>
+        </ul>
+        <p>Đợi instance chuyển sang <strong>Running</strong> và <strong>Status check: 3/3 checks passed</strong>. Copy <strong>Public IPv4 address</strong> của instance.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: SSH vào server</strong>
+        <p>Mở Git Bash/Terminal trên PC Local, di chuyển tới thư mục chứa private key và giới hạn quyền file key:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/Downloads
+chmod 400 linux-lab-key.pem</code></pre>
+        <p>SSH vào server (thay <code>&lt;PUBLIC_IP&gt;</code> bằng IP vừa copy). Lần đầu kết nối, gõ <code>yes</code> để xác nhận fingerprint của server:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh -i linux-lab-key.pem ec2-user@&lt;PUBLIC_IP&gt;</code></pre>
+        <p>Kết nối thành công, dấu nhắc lệnh chuyển thành dạng <code>[ec2-user@ip-172-31-xx-xx ~]$</code>: user <code>ec2-user</code>, hostname <code>ip-172-31-xx-xx</code>, thư mục hiện tại <code>~</code> (home), ký tự <code>$</code> = user thường (<code>#</code> = root).</p>
+        <p class="code-note">💡 Cách khác không cần key: chọn instance → <strong>Connect → EC2 Instance Connect</strong> để mở terminal ngay trên trình duyệt.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Xem thông tin hệ thống</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">hostname
+whoami
+id
+date
+uptime
+uname -r
+cat /etc/os-release</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>hostname</code></td><td>Tên máy chủ</td></tr>
+            <tr><td><code>whoami</code> / <code>id</code></td><td>User đang đăng nhập / UID, GID và các group của user</td></tr>
+            <tr><td><code>date</code> / <code>uptime</code></td><td>Ngày giờ hệ thống (mặc định UTC) / thời gian server đã chạy và tải trung bình</td></tr>
+            <tr><td><code>uname -r</code></td><td>Phiên bản Linux kernel</td></tr>
+            <tr><td><code>cat /etc/os-release</code></td><td>Tên và phiên bản distro (<code>Amazon Linux 2023...</code>). AL2023 không có lệnh <code>lsb_release</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Tìm hiểu cấu trúc thư mục của Linux</strong>
+        <p>Linux không có ổ <code>C:</code>, <code>D:</code> như Windows. Mọi thứ nằm trong một cây thư mục bắt đầu từ gốc <code>/</code> (root directory):</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">ls /</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Thư mục</th><th>Chứa gì</th></tr></thead>
+          <tbody>
+            <tr><td><code>/etc</code></td><td>File cấu hình hệ thống và ứng dụng (<code>/etc/ssh/sshd_config</code>, <code>/etc/passwd</code>...)</td></tr>
+            <tr><td><code>/home</code></td><td>Thư mục cá nhân của từng user, ví dụ <code>/home/ec2-user</code> (viết tắt là <code>~</code>)</td></tr>
+            <tr><td><code>/root</code></td><td>Thư mục cá nhân của user <code>root</code></td></tr>
+            <tr><td><code>/var</code></td><td>Dữ liệu thay đổi liên tục: log (<code>/var/log</code>), web (<code>/var/www</code>)</td></tr>
+            <tr><td><code>/usr/bin</code>, <code>/usr/local/bin</code></td><td>Các chương trình/lệnh (<code>ls</code>, <code>cp</code>, <code>python3</code>...)</td></tr>
+            <tr><td><code>/opt</code></td><td>Phần mềm cài thêm từ bên thứ ba</td></tr>
+            <tr><td><code>/tmp</code></td><td>File tạm, có thể bị xoá khi khởi động lại</td></tr>
+            <tr><td><code>/dev</code>, <code>/proc</code></td><td>Thiết bị (ổ đĩa <code>/dev/nvme0n1</code>...) và thông tin process/kernel</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Di chuyển giữa các thư mục</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">pwd
+cd /etc
+pwd
+cd ~
+cd ..
+pwd
+cd -</code></pre>
+        <ul class="feature-list">
+          <li><code>pwd</code> (print working directory): in ra thư mục hiện tại.</li>
+          <li><code>cd /etc</code>: đường dẫn tuyệt đối (bắt đầu bằng <code>/</code>). <code>cd linux-lab</code>: đường dẫn tương đối so với thư mục hiện tại.</li>
+          <li><code>~</code> = home của user, <code>..</code> = thư mục cha, <code>.</code> = thư mục hiện tại, <code>cd -</code> = quay lại thư mục trước đó.</li>
+        </ul>
+        <p class="code-note">💡 Nhấn phím <strong>Tab</strong> để tự động hoàn thành tên lệnh/đường dẫn, nhấn <strong>↑ / ↓</strong> để gọi lại lệnh đã gõ.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Liệt kê file và xem danh sách user</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">ls
+ls -l
+ls -la
+ls -lh /var/log</code></pre>
+        <p><code>-l</code>: hiển thị chi tiết (quyền, owner, size, ngày sửa); <code>-a</code>: hiện cả file ẩn (tên bắt đầu bằng dấu <code>.</code> như <code>.bashrc</code>, <code>.ssh</code>); <code>-h</code>: size dễ đọc (K, M, G).</p>
+        <p>Xem danh sách user trên hệ thống, sắp xếp theo tên. Ký tự <code>|</code> (pipe) chuyển output của lệnh trước làm input cho lệnh sau:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">cat /etc/passwd | sort</code></pre>
+        <p>Mỗi dòng có dạng <code>ec2-user:x:1000:1000:EC2 Default User:/home/ec2-user:/bin/bash</code> = <em>tên : x : UID : GID : mô tả : home : shell</em>. Phần lớn user là <strong>system user</strong> do các phần mềm tạo ra.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Tạo, copy, đổi tên, xoá file/folder</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">cd ~
+mkdir linux-lab
+cd linux-lab
+touch hello.txt
+echo "Hello Linux from EC2" &gt; hello.txt
+echo "Dòng thứ 2" &gt;&gt; hello.txt
+cat hello.txt
+cp hello.txt hello-copy.txt
+mv hello-copy.txt hello-backup.txt
+mkdir -p demo/sub1/sub2
+ls -R demo
+rm hello-backup.txt
+rm -r demo
+ls -l</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>mkdir</code> / <code>mkdir -p</code></td><td>Tạo thư mục / tạo cả thư mục cha nếu chưa có</td></tr>
+            <tr><td><code>touch</code></td><td>Tạo file rỗng (hoặc cập nhật thời gian sửa đổi)</td></tr>
+            <tr><td><code>echo "..." &gt; file</code> / <code>&gt;&gt; file</code></td><td>Ghi đè nội dung vào file / ghi thêm vào cuối file</td></tr>
+            <tr><td><code>cat</code></td><td>In nội dung file ra màn hình</td></tr>
+            <tr><td><code>cp</code> / <code>mv</code></td><td>Copy / di chuyển hoặc đổi tên file</td></tr>
+            <tr><td><code>rm</code> / <code>rm -r</code></td><td>Xoá file / xoá thư mục và toàn bộ nội dung bên trong</td></tr>
+          </tbody>
+        </table>
+        <div class="alert alert-danger">Linux <strong>không có thùng rác</strong> khi dùng <code>rm</code>. Đặc biệt cẩn thận với <code>rm -rf</code> và <code>sudo</code>: xoá nhầm thư mục hệ thống có thể làm hỏng server.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 10: Tra cứu cách dùng lệnh &amp; thoát</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">ls --help
+man ls
+history
+clear
+exit</code></pre>
+        <p><code>man</code> mở trang hướng dẫn (manual) của lệnh, nhấn <code>q</code> để thoát. <code>exit</code> đóng phiên SSH và quay về PC Local.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Instance <code>linux-lab-server</code> ở trạng thái <strong>Running</strong>, 3/3 status checks passed.</li>
+      <li>SSH thành công bằng <code>ec2-user</code>, lệnh <code>cat /etc/os-release</code> hiển thị <code>Amazon Linux 2023</code>.</li>
+      <li>File <code>~/linux-lab/hello.txt</code> tồn tại với 2 dòng nội dung.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>WARNING: UNPROTECTED PRIVATE KEY FILE!</code> / <code>Permissions 0644 ... are too open</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File private key cho phép user khác đọc, SSH từ chối sử dụng.<br/><strong>Giải pháp:</strong> Chạy <code>chmod 400 linux-lab-key.pem</code>. Trên Windows, nếu file nằm trên ổ NTFS mà vẫn lỗi, copy key vào <code>~/.ssh/</code> trong Git Bash rồi chmod lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>ssh: connect to host ... port 22: Connection timed out</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group không cho phép IP hiện tại của bạn ở cổng 22, instance không có Public IP, hoặc mạng công ty chặn cổng 22.<br/><strong>Giải pháp:</strong> Sửa inbound rule SSH → Source <strong>My IP</strong>; kiểm tra instance có Public IPv4; thử mạng khác (4G) hoặc dùng EC2 Instance Connect.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Permission denied (publickey,gssapi-keyex,gssapi-with-mic)</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai username (ví dụ dùng <code>ubuntu</code> hoặc <code>root</code> với Amazon Linux) hoặc sai file key.<br/><strong>Giải pháp:</strong> Dùng đúng <code>ec2-user@&lt;PUBLIC_IP&gt;</code> và đúng file <code>linux-lab-key.pem</code> đã chọn khi tạo instance.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Public IP thay đổi sau khi Stop/Start instance</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Public IP tự động cấp sẽ được thu hồi khi Stop instance.<br/><strong>Giải pháp:</strong> Lấy lại Public IP mới trên Console mỗi lần Start. Không cần Elastic IP cho bài lab (Elastic IP và Public IPv4 đều tính phí theo giờ).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại instance <code>linux-lab-server</code>, Security Group và Key pair để dùng cho các lab tiếp theo. Nếu nghỉ giữa chừng, hãy <strong>Stop</strong> instance để không tính phí compute (vẫn tính phí lưu trữ EBS, khoảng 0.8 USD/tháng cho 8 GiB gp3 ở Singapore). Toàn bộ resource sẽ được xoá ở chương cuối section.</div>
+
+</body>
+</html>

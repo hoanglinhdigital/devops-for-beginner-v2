@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Tổng kết section</h2>
+  <p class="body-text">Qua section này, bạn đã nắm được toàn bộ quy trình làm việc với Amazon EKS:</p>
+  <ul class="feature-list">
+    <li><strong>EKS là gì:</strong> dịch vụ Kubernetes managed của AWS, AWS lo control plane, bạn lo workload.</li>
+    <li><strong>Tạo cluster:</strong> dùng <code>eksctl create cluster</code> và kết nối bằng <code>kubectl</code>.</li>
+    <li><strong>LoadBalancer:</strong> dùng AWS Load Balancer Controller để tạo ALB/NLB từ Ingress/Service.</li>
+    <li><strong>Storage:</strong> dùng EBS CSI Driver + StorageClass để cấp EBS volume cho Pod.</li>
+    <li><strong>Autoscaling:</strong> Cluster Autoscaler (ASG) hoặc Karpenter để scale node.</li>
+    <li><strong>Security:</strong> IAM/IRSA, Secret Management, Pod Security, RBAC (Access Entry).</li>
+  </ul>
+
+  <h2 class="section-heading">Lộ trình 4 lab</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Lab</th><th>Nội dung</th><th>Kỹ năng chính</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Lab 1</td><td>Tạo EKS Cluster</td><td><code>eksctl</code>, <code>kubectl</code>, kubeconfig</td></tr>
+      <tr><td>Lab 2</td><td>LoadBalancer (ALB)</td><td>AWS Load Balancer Controller, Ingress ALB</td></tr>
+      <tr><td>Lab 3</td><td>Volume (EBS)</td><td>EBS CSI Driver, StorageClass, PVC/PV</td></tr>
+      <tr><td>Lab 4</td><td>Add IAM User (RBAC)</td><td>Access Entry, IAM profile, phân quyền</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Cheat sheet lệnh thường dùng</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash"># Cluster
+eksctl create cluster -f cluster-config.yaml
+aws eks update-kubeconfig --region ap-southeast-1 --name devops-test-cluster
+kubectl cluster-info
+
+# Resource
+kubectl get nodes / pods / deployment / service / ingress
+kubectl apply -f file.yaml
+kubectl delete -f file.yaml
+
+# Storage
+kubectl get storageclass / pvc / pv
+
+# Xoá cluster
+eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">
+    <strong>Chi phí:</strong> EKS Cluster (control plane), node EC2, ALB/NLB và EBS volume đều tính phí theo giờ. Hãy xoá toàn bộ ngay khi hoàn thành để tránh phát sinh chi phí.
+  </div>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Xoá EKS Cluster</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+        <p>Nếu gặp lỗi <em>"pods are unevictable"</em>, xoá các PodDisruptionBudget (PDB) trong <code>kube-system</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pdb -A
+kubectl delete pdb coredns -n kube-system
+kubectl delete pdb metrics-server -n kube-system</code></pre>
+        <p>Nếu vẫn không xoá được:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1 --disable-nodegroup-eviction</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Kiểm tra và xoá các resource còn sót</strong>
+        <ul class="feature-list">
+          <li><strong>Load Balancer</strong> (ALB/NLB) do Controller tạo (EC2 → Load Balancers).</li>
+          <li><strong>EBS volume</strong> còn sót (EC2 → Volumes).</li>
+          <li><strong>IAM user</strong> <code>developer01</code> (nếu đã tạo ở Lab 4).</li>
+          <li><strong>IAM policy</strong> <code>AWSLoadBalancerControllerIAMPolicy</code> (nếu không dùng nữa).</li>
+          <li><strong>ECR repository</strong> nếu không sử dụng.</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Tài liệu chính thức:</strong> <a href="https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html" target="_blank" rel="noopener">Amazon EKS User Guide</a>.</li>
+    <li><strong>Chủ đề nên học thêm:</strong> GitOps với ArgoCD, service mesh (Istio/App Mesh), observability (Prometheus/Grafana), Monitoring EKS (sẽ học ở Section 15).</li>
+    <li><strong>Bài tập:</strong> vận dụng kiến thức đã học để triển khai stack voteapp (React + Go + MongoDB) lên EKS — xem <code>sourcecode/section_14_eks_basic/</code>.</li>
+  </ul>
+
+</body>
+</html>

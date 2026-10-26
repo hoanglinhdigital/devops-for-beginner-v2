@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Final Assignment: Đáp án mẫu phần thiết kế – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">18. Final Assignment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Final assignment: Đáp án mẫu phần thiết kế</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Chương này trình bày <strong>đáp án mẫu phần thiết kế</strong> cho Final Assignment. Đây là một trong nhiều cách thiết kế
+    hợp lý — mục tiêu là giúp bạn thấy được <strong>tư duy thiết kế</strong> của một hệ thống 3 tầng (React + Spring Boot + MongoDB)
+    chạy trên container, và <strong>lý do</strong> đằng sau mỗi lựa chọn.
+  </p>
+  <p class="body-text">
+    Tổng quan kiến trúc: <strong>VPC 3 tầng multi-AZ</strong> → <strong>ECS Fargate</strong> chạy container frontend (public subnet)
+    và backend (private subnet) đứng sau <strong>ALB</strong> → <strong>MongoDB</strong> trên EC2 ở private subnet. Image được lưu trên
+    <strong>ECR</strong>, CI/CD dùng <strong>Jenkins</strong> hoặc <strong>CodePipeline</strong>.
+  </p>
+
+  <h2 class="section-heading">1. Thiết kế hệ thống – Networking</h2>
+  <div class="figure-centered">
+    <img src="../../images/section18/networking-architecture.png" alt="Thiết kế hệ thống Networking" />
+    <div class="figure-title">Sơ đồ thiết kế Networking (đáp án mẫu)</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Multi-AZ:</strong> trải tài nguyên qua 2 Availability Zone (<code>ap-southeast-1a</code>, <code>ap-southeast-1b</code>) để tăng khả năng chịu lỗi.</li>
+    <li><strong>Public subnet:</strong> chứa ALB (Internet-facing) và frontend service — nơi duy nhất tiếp xúc với Internet.</li>
+    <li><strong>Private subnet:</strong> chứa backend service và MongoDB — không có route ra Internet trực tiếp, chỉ truy cập ra ngoài qua NAT Gateway.</li>
+    <li><strong>NAT Gateway:</strong> cho phép các resource ở private subnet (ECS task backend, MongoDB) tải package/image khi cần.</li>
+    <li><strong>Internet Gateway:</strong> gắn vào VPC để cho phép traffic Internet vào public subnet.</li>
+  </ul>
+
+  <h2 class="section-heading">2. Thiết kế hệ thống – Security</h2>
+  <div class="figure-centered">
+    <img src="../../images/section18/security-architecture.png" alt="Thiết kế hệ thống Security" />
+    <div class="figure-title">Sơ đồ thiết kế Security (đáp án mẫu)</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Security Group chaining:</strong> mỗi tầng chỉ cho phép traffic đến từ tầng ngay phía trên nó — SG của ALB là source của SG frontend, SG frontend là source của SG backend, SG backend là source của SG MongoDB.</li>
+    <li><strong>Chỉ mở đúng port:</strong> ALB mở <code>80/443</code> ra Internet; frontend mở <code>80</code> từ ALB; backend mở <code>8080</code> từ frontend; MongoDB mở <code>27017</code> từ backend.</li>
+    <li><strong>Least privilege IAM:</strong> ECS task execution role chỉ có quyền pull image từ ECR và ghi log CloudWatch.</li>
+    <li><strong>Bastion host (tuỳ chọn):</strong> là lối vào SSH duy nhất để quản trị MongoDB, chỉ mở SSH từ IP của bạn.</li>
+  </ul>
+
+  <h2 class="section-heading">3. Thiết kế – Services and Resources</h2>
+  <div class="figure-centered">
+    <img src="../../images/section18/services-resources.png" alt="Thiết kế Services and Resources" />
+    <div class="figure-title">Sơ đồ Services and Resources (đáp án mẫu)</div>
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Dịch vụ</th><th>Vai trò</th><th>Lý do chọn</th></tr></thead>
+    <tbody>
+      <tr><td><strong>VPC</strong></td><td>Cô lập hạ tầng, chia public/private subnet</td><td>Kiểm soát mạng, bảo mật theo tầng</td></tr>
+      <tr><td><strong>ALB</strong></td><td>Cân bằng tải, định tuyến theo path <code>/api/*</code></td><td>Layer 7, hỗ trợ path-based routing, health check</td></tr>
+      <tr><td><strong>ECS (Fargate)</strong></td><td>Chạy container frontend &amp; backend</td><td>Serverless container, không cần quản lý EC2</td></tr>
+      <tr><td><strong>ECR</strong></td><td>Lưu Docker image</td><td>Registry riêng, tích hợp sẵn với ECS</td></tr>
+      <tr><td><strong>EC2</strong></td><td>Chạy MongoDB (self-managed)</td><td>Để học cách tự vận hành DB; thực tế có thể dùng DocumentDB</td></tr>
+      <tr><td><strong>CloudWatch</strong></td><td>Log, metric của container</td><td>Theo dõi hoạt động và troubleshoot</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">4. Thiết kế CI/CD – Jenkins</h2>
+  <div class="figure-centered">
+    <img src="../../images/section18/cicd-jenkins.png" alt="Thiết kế CI/CD Jenkins" />
+    <div class="figure-title">Sơ đồ CI/CD sử dụng Jenkins (đáp án mẫu)</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Source:</strong> Jenkins pull source từ GitHub (kích hoạt bằng webhook khi push).</li>
+    <li><strong>Build:</strong> Jenkins build Docker image cho frontend &amp; backend từ Dockerfile.</li>
+    <li><strong>Push:</strong> đẩy image lên ECR với tag (ví dụ <code>latest</code> hoặc theo build number).</li>
+    <li><strong>Deploy:</strong> Jenkins gọi AWS CLI để cập nhật ECS service (<code>update-service --force-new-deployment</code>).</li>
+    <li>Jenkins chạy trên EC2 (Ubuntu) có IAM Role đủ quyền ECR + ECS.</li>
+  </ul>
+
+  <h2 class="section-heading">5. Thiết kế CI/CD – CodePipeline</h2>
+  <div class="figure-centered">
+    <img src="../../images/section18/cicd-codepipeline.png" alt="Thiết kế CI/CD CodePipeline" />
+    <div class="figure-title">Sơ đồ CI/CD sử dụng CodePipeline (đáp án mẫu)</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Source stage:</strong> CodePipeline nhận source từ GitHub (qua CodeConnections).</li>
+    <li><strong>Build stage:</strong> CodeBuild chạy <code>buildspec.yml</code> để build Docker image &amp; push lên ECR, tạo artifact <code>imagedefinitions.json</code>.</li>
+    <li><strong>Deploy stage:</strong> CodeDeploy (hoặc action ECS) cập nhật task definition &amp; service trên ECS.</li>
+    <li>Có thể thêm stage <strong>Manual approval</strong> trước khi deploy để kiểm soát release.</li>
+  </ul>
+
+  <h2 class="section-heading">6. Terraform structure</h2>
+  <div class="figure-centered">
+    <img src="../../images/section18/terraform-structure.png" alt="Terraform structure" />
+    <div class="figure-title">Cấu trúc thư mục Terraform (đáp án mẫu)</div>
+  </div>
+  <p class="body-text">
+    Đáp án mẫu chia Terraform thành các <strong>module</strong> theo đúng từng lớp kiến trúc, giúp dễ đọc, dễ tái sử dụng và dễ
+    mở rộng. Bộ source code tham khảo nằm tại <code>sourcecode/section_18_final_assignment/terraform/</code>:
+  </p>
+  <ul class="feature-list">
+    <li><strong>network:</strong> VPC, public/private subnet, IGW, NAT Gateway.</li>
+    <li><strong>security:</strong> các Security Group (ALB, frontend, backend, MongoDB, bastion).</li>
+    <li><strong>storage:</strong> ECR repositories cho frontend &amp; backend.</li>
+    <li><strong>database:</strong> EC2 chạy MongoDB (private subnet) + EBS volume.</li>
+    <li><strong>application:</strong> ALB + ECS cluster + 2 service (frontend/backend).</li>
+  </ul>
+
+</body>
+</html>

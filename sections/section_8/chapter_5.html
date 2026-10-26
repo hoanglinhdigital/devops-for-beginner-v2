@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dockerfile &amp; các chỉ thị cơ bản – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Dockerfile &amp; các chỉ thị cơ bản</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Dockerfile</strong> là một file text chứa danh sách các chỉ thị (instruction) mô tả cách build một Docker image: dùng base image nào, copy những file gì, cài đặt thư viện gì và chạy lệnh gì khi container khởi động.
+    Dockerfile biến quy trình chuẩn bị môi trường vốn làm thủ công trên server thành <strong>code</strong> – có thể lưu trên Git, review và build lặp lại cho ra kết quả giống nhau.
+  </p>
+
+  <h2 class="section-heading">Các chỉ thị chính</h2>
+  <ul class="feature-list">
+    <li><strong><code>FROM</code> – khai báo base image:</strong> Dockerfile thường bắt đầu bằng <code>FROM</code> để chỉ định image nền. Ví dụ: <code>FROM ubuntu:24.04</code>, <code>FROM httpd:2.4</code>, <code>FROM node:20-alpine</code>.</li>
+    <li><strong><code>WORKDIR</code> – thư mục làm việc:</strong> đặt thư mục hiện tại cho các chỉ thị phía sau (tự tạo nếu chưa có). Ví dụ: <code>WORKDIR /app</code>.</li>
+    <li><strong><code>COPY</code> / <code>ADD</code> – sao chép file &amp; thư mục:</strong> từ máy build (build context) vào trong image. Ví dụ: <code>COPY app.py /app/</code>, <code>COPY . /usr/local/apache2/htdocs/</code>.</li>
+    <li><strong><code>RUN</code> – thực thi lệnh lúc build image:</strong> cài phần mềm, update package... Ví dụ: <code>RUN apt-get update &amp;&amp; apt-get install -y python3</code>.</li>
+    <li><strong><code>ENV</code> – biến môi trường:</strong> có hiệu lực cả lúc build và lúc container chạy. Ví dụ: <code>ENV LOGLEVEL=DEBUG</code>.</li>
+    <li><strong><code>EXPOSE</code> – khai báo port:</strong> port mà ứng dụng trong container lắng nghe. Ví dụ: <code>EXPOSE 80</code>. Đây chỉ là <em>tài liệu</em>, muốn truy cập từ ngoài vẫn cần <code>-p</code> khi <code>docker run</code>.</li>
+    <li><strong><code>CMD</code> / <code>ENTRYPOINT</code> – lệnh chạy khi container start:</strong> ví dụ <code>CMD ["python3", "/app/app.py"]</code>.</li>
+  </ul>
+
+  <h3 class="section-subheading">Ví dụ Dockerfile hoàn chỉnh</h3>
+  <pre class="code-block"><code class="language-docker"># Base image
+FROM node:20-alpine
+
+# Thư mục làm việc trong container
+WORKDIR /app
+
+# Copy file khai báo thư viện trước để tận dụng cache
+COPY package*.json ./
+RUN npm install --omit=dev
+
+# Copy source code
+COPY . .
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+# Lệnh chạy khi container start
+CMD ["node", "index.js"]</code></pre>
+
+  <h2 class="section-heading">Mô hình: từ Dockerfile tới Container</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Ctx["📁 Build context (thư mục hiện tại)"]
+          DF["📄 Dockerfile"]
+          SRC["📄 source code"]
+          IGN["🚫 .dockerignore"]
+      end
+      Ctx -->|"docker build -t my-app:1.0 ."| Builder["⚙️ Docker daemon<br/>(BuildKit)"]
+      Base["🐳 Base image<br/>node:20-alpine"] -->|"FROM"| Builder
+      Builder --> IMG["🗂️ Image my-app:1.0<br/>(nhiều layer)"]
+      IMG -->|"docker run"| C["📦 Container<br/>CMD / ENTRYPOINT"]
+  </div>
+  <p class="arch-caption">Toàn bộ thư mục build context (trừ file khai báo trong <code>.dockerignore</code>) được gửi tới daemon; mỗi chỉ thị tạo ra một layer của image.</p>
+
+  <h2 class="section-heading">Phân biệt COPY và ADD</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tính năng</th><th>COPY</th><th>ADD</th></tr></thead>
+    <tbody>
+      <tr><td>Copy file/folder từ build context</td><td>✅</td><td>✅</td></tr>
+      <tr><td>Tự động giải nén file <code>.tar</code>, <code>.tar.gz</code></td><td>❌</td><td>✅</td></tr>
+      <tr><td>Tải file từ URL trên Internet</td><td>❌</td><td>✅</td></tr>
+      <tr><td>Khuyến nghị</td><td><strong>Dùng mặc định</strong> – rõ ràng, dễ đoán</td><td>Chỉ dùng khi cần giải nén tự động</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Phân biệt CMD và ENTRYPOINT</h2>
+  <p class="body-text">Ngoài <code>CMD</code>, chỉ thị <code>ENTRYPOINT</code> cũng định nghĩa lệnh chạy khi container start, nhưng có sự khác biệt:</p>
+  <ul class="feature-list">
+    <li><strong><code>ENTRYPOINT</code></strong> định nghĩa <strong>process</strong> sẽ được thực thi bên trong container (khó ghi đè, cần <code>--entrypoint</code>).</li>
+    <li><strong><code>CMD</code></strong> định nghĩa <strong>tham số mặc định</strong> cung cấp cho entrypoint process – bị ghi đè bởi bất kỳ tham số nào truyền sau tên image trong <code>docker run</code>.</li>
+    <li>Thông thường <code>ENTRYPOINT</code> định nghĩa đường dẫn tới chương trình, <code>CMD</code> định nghĩa tham số (nếu có).</li>
+    <li>Nếu không khai báo <code>ENTRYPOINT</code>, toàn bộ <code>CMD</code> được coi là lệnh cần chạy.</li>
+  </ul>
+  <div class="mermaid">
+  flowchart LR
+      E["ENTRYPOINT #91;#quot;ls#quot;#93;"] --> R1["Lệnh thực tế"]
+      C["CMD #91;#quot;-alh#quot;#93;<br/><i>(bị thay bởi tham số của docker run)</i>"] --> R1
+      R1 --> O1["docker run img → <b>ls -alh</b>"]
+      R1 --> O2["docker run img -p → <b>ls -p</b>"]
+  </div>
+  <div class="alert alert-tip">
+    <strong>Exec form vs Shell form:</strong> nên viết <code>CMD ["npm", "start"]</code> (exec form – JSON array) thay vì <code>CMD npm start</code> (shell form, chạy qua <code>/bin/sh -c</code>).
+    Với exec form, ứng dụng là process PID 1 và nhận được tín hiệu <code>SIGTERM</code> khi <code>docker stop</code>, giúp tắt ứng dụng an toàn. Bạn sẽ thực hành chi tiết ở <strong>Lab 4</strong>.
+  </div>
+
+  <h2 class="section-heading">Multi-stage Dockerfile</h2>
+  <p class="body-text">Một Dockerfile có thể chứa nhiều <code>FROM</code>, mỗi <code>FROM</code> bắt đầu một <strong>stage</strong>. Stage sau có thể copy kết quả từ stage trước bằng <code>COPY --from=&lt;stage&gt;</code>; image cuối cùng chỉ chứa stage cuối.</p>
+  <ul class="feature-list">
+    <li><strong>Giảm kích thước image:</strong> quá trình build cần nhiều công cụ (compiler, npm, Maven...) – nếu giữ lại sẽ làm image cuối rất lớn.</li>
+    <li><strong>Tăng hiệu suất &amp; bảo mật:</strong> dùng base image có sẵn cho từng giai đoạn thay vì tự cài tools; image cuối ít phần mềm hơn → ít lỗ hổng hơn.</li>
+    <li><strong>Tách biệt các giai đoạn</strong> build, test, runtime trong cùng một file.</li>
+  </ul>
+  <pre class="code-block"><code class="language-docker"># Stage #1: dùng image Node.js để build project thành static file
+FROM node:20 AS buildstep
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+# Stage #2: dùng image nginx, chỉ copy static file từ stage #1
+FROM nginx:1.27-alpine
+COPY --from=buildstep /app/build /usr/share/nginx/html</code></pre>
+
+  <h2 class="section-heading">Best practice khi viết Dockerfile</h2>
+  <ul class="feature-list">
+    <li><strong>Dùng base image chính thức, version cụ thể</strong> (<code>node:20-alpine</code> thay vì <code>node</code> hay <code>node:latest</code>) để build lặp lại được.</li>
+    <li><strong>Sắp xếp chỉ thị theo tần suất thay đổi:</strong> copy <code>package.json</code> + cài thư viện trước, copy source code sau – sửa code không làm cài lại thư viện (tận dụng layer cache).</li>
+    <li><strong>Gộp lệnh <code>RUN</code> liên quan</strong> và dọn cache trong cùng lệnh: <code>RUN apt-get update &amp;&amp; apt-get install -y curl &amp;&amp; rm -rf /var/lib/apt/lists/*</code>.</li>
+    <li><strong>Dùng <code>.dockerignore</code></strong> để loại <code>node_modules</code>, <code>.git</code>, <code>.env</code> khỏi build context: build nhanh hơn và không lộ secret.</li>
+    <li><strong>Không đưa secret vào image</strong> (password, access key) qua <code>ENV</code> hay <code>COPY</code> – ai pull được image đều đọc được.</li>
+    <li><strong>Chạy bằng user không phải root</strong> khi có thể (<code>USER node</code>), và dùng multi-stage để image cuối nhỏ gọn.</li>
+  </ul>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Đóng gói web tĩnh</h4>
+      <p><code>FROM httpd</code> hoặc <code>nginx</code>, <code>COPY</code> file HTML/CSS/JS vào web root – image vài chục MB, chạy ở đâu cũng giống nhau.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Ứng dụng backend</h4>
+      <p>Node.js/Java/Python: cài thư viện bằng <code>RUN</code>, khai báo <code>EXPOSE</code> và <code>CMD</code> khởi động server.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Công cụ CLI đóng gói</h4>
+      <p>Dùng <code>ENTRYPOINT</code> để image hoạt động như một câu lệnh, người dùng chỉ cần truyền tham số: <code>docker run my-tool --help</code>.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Các chỉ thị khác thường gặp: <code>ARG</code> (biến chỉ dùng lúc build), <code>USER</code>, <code>VOLUME</code>, <code>HEALTHCHECK</code>, <code>LABEL</code>.</li>
+    <li>Tài liệu đầy đủ: <a href="https://docs.docker.com/reference/dockerfile/" target="_blank" rel="noopener">docs.docker.com/reference/dockerfile</a>.</li>
+    <li>Tham khảo thêm về ENTRYPOINT vs CMD: <a href="https://spacelift.io/blog/docker-entrypoint-vs-cmd" target="_blank" rel="noopener">spacelift.io/blog/docker-entrypoint-vs-cmd</a>.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng quan flow CI-CD cho Kubernetes/EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CICD for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng quan flow CI-CD cho Kubernetes/EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Ở các chương trước bạn đã học cách <strong>tạo EKS cluster</strong> và <strong>deploy ứng dụng thủ công</strong> bằng <code>kubectl</code>/<code>helm</code>.
+    Nhưng trong một dự án thật, code thay đổi <em>hàng ngày</em> — việc build và deploy bằng tay vừa chậm vừa dễ sai.
+    <strong>CI/CD cho Kubernetes/EKS</strong> là cách <strong>tự động hoá</strong> toàn bộ chuỗi: từ lúc developer <em>push code</em> cho tới lúc ứng dụng mới <em>chạy trên cluster</em>.
+  </p>
+  <p class="body-text">
+    Điểm khác biệt lớn nhất so với deploy lên EC2 truyền thống: với Kubernetes, "sản phẩm" bạn deploy không phải là file war/jar hay thư mục, mà là
+    <strong>Docker image</strong> được đóng gói rồi đẩy lên <strong>registry (ECR)</strong>, sau đó Kubernetes cập nhật <strong>manifest (YAML)</strong> để chạy image đó.
+  </p>
+
+  <h2 class="section-heading">Luồng CI/CD điển hình cho Kubernetes</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/developer.svg' style='width:40px;height:40px;'/><br/><b>Developer</b>"]
+      Git["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>Source</b><br/>CodeCommit / GitHub"]
+      Build["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:40px;height:40px;'/><br/><b>CI - Build</b><br/>Build image"]
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:40px;height:40px;'/><br/><b>Registry</b><br/>Amazon ECR"]
+      Deploy["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:40px;height:40px;'/><br/><b>CD - Deploy</b><br/>kubectl apply"]
+      EKS["<img src='../../assets/aws-svg/EKS.svg' style='width:44px;height:44px;'/><br/><b>EKS Cluster</b>"]
+      Dev -->|"push code"| Git
+      Git -->|"trigger pipeline"| Build
+      Build -->|"docker push"| ECR
+      Build -->|"cập nhật manifest"| Deploy
+      ECR -.->|"pull image"| EKS
+      Deploy -->|"kubectl apply -f"| EKS
+  </div>
+  <p class="arch-caption">Luồng CI/CD cho K8s: code đẩy lên Git → CI build Docker image → push lên ECR → CD cập nhật manifest và deploy lên EKS.</p>
+
+  <h2 class="section-heading">Các giai đoạn chính</h2>
+  <ul class="feature-list">
+    <li><strong>Source (Quản lý mã nguồn):</strong> code nằm trong CodeCommit/GitHub/GitLab. Khi có <em>commit/push</em>, pipeline được kích hoạt (webhook/trigger).</li>
+    <li><strong>Build (CI - Tích hợp liên tục):</strong> chạy test, <em>build Docker image</em> cho từng service (frontend, backend...), gắn <em>tag</em> cho image rồi đẩy lên registry (ECR).</li>
+    <li><strong>Registry:</strong> nơi lưu trữ Docker image — thường là <strong>Amazon ECR</strong>. Kubernetes sẽ <em>pull</em> image từ đây khi deploy.</li>
+    <li><strong>Deploy (CD - Triển khai liên tục):</strong> cập nhật <em>image tag</em> trong manifest YAML, rồi <code>kubectl apply</code> (hoặc <code>helm upgrade</code>) để Kubernetes triển khai phiên bản mới.</li>
+    <li><strong>Verify:</strong> kiểm tra pod/deployment đã chạy, truy cập ứng dụng qua Load Balancer/Ingress để xác nhận bản mới hoạt động.</li>
+  </ul>
+
+  <h2 class="section-heading">Vì sao CI/CD cho Kubernetes khác với truyền thống?</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>Deploy truyền thống (EC2/VM)</th><th>Deploy Kubernetes/EKS</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Đơn vị deploy</td><td>File artifact (jar, war, zip) hoặc thư mục</td><td><strong>Docker image</strong> (immutable)</td></tr>
+      <tr><td>Nơi lưu trữ</td><td>S3, máy chủ build</td><td><strong>Container registry</strong> (ECR)</td></tr>
+      <tr><td>Cách cập nhật</td><td>Copy file, restart service</td><td><code>kubectl apply</code> manifest mới / <code>helm upgrade</code></td></tr>
+      <tr><td>Rollback</td><td>Khôi phục file cũ</td><td>Trỏ image tag cũ rồi apply lại (gần như tức thì)</td></tr>
+      <tr><td>Cấu hình môi trường</td><td>File cấu hình trên server</td><td>ConfigMap/Secret/Helm values</td></tr>
+      <tr><td>Khả năng scale</td><td>Thêm máy, cấu hình LB thủ công</td><td>Tăng <code>replicas</code>, HPA tự động</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Nguyên tắc quan trọng khi CI/CD cho Kubernetes</h2>
+  <ul class="feature-list">
+    <li><strong>Image là bất biến (immutable):</strong> không sửa vào container đang chạy, mà build image mới và deploy lại.</li>
+    <li><strong>Manifest phải được version:</strong> manifest YAML nên nằm trong Git (kèm code hoặc tách repo riêng), giúp rollback dễ dàng.</li>
+    <li><strong>Tag image rõ ràng:</strong> không nên chỉ dùng tag <code>latest</code> — dùng commit hash hoặc version để biết chính xác bản nào đang chạy.</li>
+    <li><strong>Phân quyền tối thiểu:</strong> pipeline chỉ nên có quyền vừa đủ để push ECR và deploy lên namespace cần thiết.</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Tự động hoá hoàn toàn: push code là xong, không cần thao tác tay.</li>
+        <li>Nhất quán giữa môi trường (image giống nhau ở dev/staging/prod).</li>
+        <li>Rollback nhanh nhờ image tag và manifest lưu trong Git.</li>
+        <li>Tận dụng sức mạnh của K8s (rolling update, tự phục hồi, scale).</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Độ phức tạp cao hơn: cần hiểu Docker, K8s, manifest, registry.</li>
+        <li>Nhiều thành phần cần cấu hình và bảo mật (credential, IAM, secret).</li>
+        <li>Khó debug hơn khi lỗi nằm ở nhiều tầng (build, image, manifest, cluster).</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Ứng dụng microservices trên EKS</h4>
+      <p>Mỗi service là một image riêng, CI/CD tự build và deploy từng service khi code của nó thay đổi.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Monorepo frontend + backend</h4>
+      <p>Một repo chứa cả FE/BE, pipeline phát hiện thư mục nào thay đổi để chỉ build đúng service cần thiết (tiết kiệm thời gian).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Release nhiều môi trường</h4>
+      <p>Cùng một image deploy lên dev → staging → production bằng cách thay đổi manifest/config theo môi trường.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Lưu ý:</strong> trong khoá học này chúng ta đi theo lộ trình: Lab 1 tạo cluster → Lab 2 CI/CD bằng <em>CodePipeline</em> → Lab 3 bằng <em>GitHub Actions</em> → Lab 4 nâng cấp lên <em>GitOps với ArgoCD</em>.
+  </div>
+  <p class="body-text">
+    Ứng dụng mẫu được dùng xuyên suốt các lab là monorepo <strong>React (frontend) + Express (backend) + MongoDB</strong> tại
+    <a href="https://github.com/hoanglinhdigital/react-express-mongodb" target="_blank" rel="noopener">github.com/hoanglinhdigital/react-express-mongodb</a>.
+  </p>
+
+</body>
+</html>

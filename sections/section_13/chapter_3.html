@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Cài đặt SAM CLI &amp; ứng dụng Hello World – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Cài đặt SAM CLI &amp; ứng dụng Hello World</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt và kiểm tra <strong>AWS SAM CLI</strong> trên máy local.</li>
+    <li>Tạo project mẫu bằng <code>sam init</code>, đọc hiểu <code>template.yaml</code>.</li>
+    <li>Build, chạy thử ở local, rồi deploy ứng dụng Hello World lên AWS bằng <code>sam deploy --guided</code>.</li>
+    <li>Quan sát stack CloudFormation, Lambda, API Gateway được SAM tạo ra; sửa code và deploy lại; xoá stack.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/developer.svg' style='width:36px;height:36px;'/><br/>Local PC<br/>SAM CLI"]
+      CFN["<img src='../../assets/aws-svg/CloudFormation.svg' style='width:34px;height:34px;'/><br/>CloudFormation<br/>stack sam-app"]
+      APIGW["<img src='../../assets/aws-svg/API-Gateway.svg' style='width:34px;height:34px;'/><br/>API Gateway<br/>GET /hello"]
+      FN["<img src='../../assets/aws-svg/Lambda.svg' style='width:34px;height:34px;'/><br/>Lambda<br/>HelloWorldFunction"]
+      PC -->|"sam deploy"| CFN
+      CFN --> APIGW
+      CFN --> FN
+      PC -->|"curl /hello"| APIGW
+      APIGW --> FN
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>AWS CLI v2 đã cấu hình profile có quyền tạo CloudFormation, Lambda, API Gateway, IAM, S3 (Section 5 – Lab cài AWS CLI).</li>
+    <li><strong>Python 3.13</strong> cài trên máy (nếu không có Python này, thêm <code>--use-container</code> khi <code>sam build</code>).</li>
+    <li><strong>Docker</strong> đang chạy (Section 8) – cần cho <code>sam local</code> và <code>--use-container</code>.</li>
+    <li>Source code tham khảo: <code>sourcecode/section_12_serverless_application_model/lab1_hello_world/commands.sh</code>.</li>
+  </ul>
+  <div class="alert alert-info"><strong>Chi phí:</strong> Hello World nằm trong free tier của Lambda / API Gateway. Vẫn nên xoá stack ở cuối lab.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt AWS SAM CLI</strong>
+        <p>Cài SAM CLI theo hướng dẫn chính thức cho hệ điều hành của bạn (Windows – file MSI, macOS – Homebrew <code>brew install aws-sam-cli</code>, Linux – file zip): <a href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html" target="_blank" rel="noopener">Install the AWS SAM CLI</a>. Mở terminal mới và kiểm tra các công cụ:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">python --version
+aws --version
+sam --version
+docker --version</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Kiểm tra credential của AWS CLI</strong>
+        <p>SAM CLI dùng chung credential với AWS CLI. Kết quả phải hiển thị Account ID và ARN của user bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws sts get-caller-identity</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Khởi tạo project bằng sam init</strong>
+        <p>Tạo project <code>sam-app</code> từ template <em>Hello World Example</em>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam init --name sam-app --runtime python3.13 --app-template hello-world --package-type Zip --dependency-manager pip</code></pre>
+        <p>Nếu SAM CLI hỏi thêm, chọn các giá trị sau:</p>
+        <ul class="feature-list">
+          <li>Enable X-Ray tracing: <strong>N</strong></li>
+          <li>Enable CloudWatch Application Insights: <strong>N</strong></li>
+          <li>Set Structured Logging in JSON format: <strong>N</strong></li>
+        </ul>
+        <p>Xem cấu trúc project vừa tạo (<code>hello_world/app.py</code> là code Lambda, <code>events/event.json</code> là event mẫu, <code>template.yaml</code> là định nghĩa resource):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sam-app
+ls</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Đọc hiểu template.yaml</strong>
+        <p>Mở <code>template.yaml</code> bằng VS Code. Nội dung chính (đã lược bỏ chú thích):</p>
+        <pre class="code-block"><code class="language-yaml">AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: sam-app
+
+Globals:
+  Function:
+    Timeout: 3
+
+Resources:
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hello_world/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Architectures:
+        - x86_64
+      Events:
+        HelloWorld:
+          Type: Api
+          Properties:
+            Path: /hello
+            Method: get
+
+Outputs:
+  HelloWorldApi:
+    Description: API Gateway endpoint URL for Prod stage
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"</code></pre>
+        <p>Chỉ ~20 dòng nhưng khi deploy SAM sẽ tạo: Lambda function, IAM Role, API Gateway REST API (<code>ServerlessRestApi</code>), stage <code>Prod</code> và permission cho API Gateway gọi Lambda.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Validate và Build</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam validate --lint
+sam build</code></pre>
+        <p>Kết quả build nằm trong thư mục <code>.aws-sam/build/</code>. Nếu máy không có Python 3.13, dùng <code>sam build --use-container</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Chạy thử ở local</strong>
+        <p>Invoke trực tiếp function với event mẫu (lần đầu SAM tải container image nên hơi lâu):</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">sam local invoke HelloWorldFunction --event events/event.json
+{"statusCode": 200, "body": "{\"message\": \"hello world\"}"}</code></pre>
+        <p>Giả lập API Gateway ở local, mở terminal thứ hai để gọi API (dừng bằng <code>Ctrl + C</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam local start-api</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl http://127.0.0.1:3000/hello</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Deploy lên AWS</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam deploy --guided</code></pre>
+        <p>Trả lời các câu hỏi như sau:</p>
+        <ul class="feature-list">
+          <li>Stack Name: <code>sam-app</code></li>
+          <li>AWS Region: <code>ap-southeast-1</code></li>
+          <li>Confirm changes before deploy: <strong>y</strong> (để xem change set trước khi áp dụng)</li>
+          <li>Allow SAM CLI IAM role creation: <strong>y</strong></li>
+          <li>Disable rollback: <strong>n</strong></li>
+          <li>HelloWorldFunction has no authentication. Is this okay: <strong>y</strong></li>
+          <li>Save arguments to configuration file: <strong>y</strong> (file <code>samconfig.toml</code>, config file environment <code>default</code>)</li>
+        </ul>
+        <p>SAM upload code lên S3, tạo change set và hiển thị danh sách resource sắp tạo. Nhập <strong>y</strong> để triển khai. Khi xong, phần <code>Outputs</code> hiển thị URL của API.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Kiểm tra trên AWS và gọi API</strong>
+        <p>Gọi API bằng URL ở mục <code>Outputs</code> (thay <code>&lt;ApiUrl&gt;</code> bằng giá trị thật):</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">curl &lt;ApiUrl&gt;
+{"message": "hello world"}</code></pre>
+        <p>Trên AWS Console, kiểm tra các nơi sau:</p>
+        <ul class="feature-list">
+          <li><strong>CloudFormation</strong>: stack <code>sam-app</code> – tab <em>Resources</em> liệt kê Lambda, IAM Role, API Gateway, Permission... do SAM sinh ra. Tab <em>Template</em> có thể chọn <em>View processed template</em> để xem template sau khi Transform.</li>
+          <li><strong>Lambda</strong>: function có tên dạng <code>sam-app-HelloWorldFunction-xxxx</code>, trigger là API Gateway.</li>
+          <li><strong>API Gateway</strong>: API <code>sam-app</code>, stage <code>Prod</code>, resource <code>/hello</code> method GET.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Sửa code và deploy lại</strong>
+        <p>Mở <code>hello_world/app.py</code>, đổi nội dung <code>"message": "hello world"</code> thành <code>"message": "hello SAM"</code>, sau đó build và deploy lại (lần này không cần <code>--guided</code> vì đã có <code>samconfig.toml</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam build
+sam deploy</code></pre>
+        <p>Chỉ Lambda thay đổi nên change set chỉ có 1 dòng <em>Modify</em> cho function. Gọi lại API để thấy kết quả mới.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>sam --version</code> hiển thị phiên bản SAM CLI.</li>
+      <li><code>sam local invoke</code> trả về <code>statusCode</code> 200 và message.</li>
+      <li>Stack <code>sam-app</code> ở trạng thái <strong>CREATE_COMPLETE</strong> và API trả về <code>{"message": "hello world"}</code>.</li>
+      <li>Sau khi sửa code và deploy lại, API trả về nội dung mới.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error: Docker is not reachable. Is Docker installed? Running Lambda functions locally requires Docker.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Docker chưa chạy.<br/><strong>Giải pháp:</strong> Mở Docker Desktop (hoặc khởi động dịch vụ docker) và chạy lại lệnh.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error: PythonPipBuilder:Validation - Binary validation failed for python, searched for python in following locations ... which did not satisfy constraints for runtime: python3.13</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Máy không có Python 3.13 trong PATH.<br/><strong>Giải pháp:</strong> Cài Python 3.13 hoặc chạy <code>sam build --use-container</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unable to locate credentials</code> / <code>ExpiredToken</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cấu hình hoặc credential hết hạn.<br/><strong>Giải pháp:</strong> Chạy <code>aws configure</code> hoặc đăng nhập lại; kiểm tra bằng <code>aws sts get-caller-identity</code>. Nếu dùng nhiều profile, thêm <code>--profile &lt;tên&gt;</code> cho lệnh <code>sam</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error: Failed to create/update the stack ... is in ROLLBACK_COMPLETE state and can not be updated</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Lần deploy đầu bị lỗi và rollback, stack không thể cập nhật.<br/><strong>Giải pháp:</strong> Xoá stack bằng <code>sam delete --stack-name sam-app</code> (hoặc trên CloudFormation Console) rồi deploy lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Có thể giữ stack <code>sam-app</code> để thử nghiệm thêm; nếu không cần nữa hãy xoá để tránh phát sinh chi phí.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">sam delete --stack-name sam-app</code></pre>
+  <p class="code-note">💡 Trả lời <strong>y</strong> khi được hỏi xoá stack và các file đã upload trên S3. Bucket <code>aws-sam-cli-managed-default-*</code> do SAM quản lý có thể giữ lại để dùng cho các lab sau.</p>
+
+</body>
+</html>

@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab: Sử dụng GitHub Actions để implement Blue-Green deployment – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CI/CD sử dụng GitHub Actions</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab: Sử dụng GitHub Actions để implement Blue-Green deployment</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <p class="body-text">Chuỗi Lab 1 → Lab 6 hướng dẫn xây dựng quy trình <strong>Blue/Green deployment cho ECS</strong> hoàn toàn bằng GitHub Actions. Mỗi lab thêm một workflow mới, lab sau tái sử dụng thành quả của lab trước:</p>
+  <ul class="feature-list">
+    <li><strong>Lab 1:</strong> Tạo workflow build Docker image từ source code và push lên Amazon ECR (tự động khi push và thủ công theo Git tag).</li>
+    <li><strong>Lab 2:</strong> Tạo hạ tầng Blue/Green bằng Terraform và workflow deploy version mới lên ECS Cluster đang không nhận traffic.</li>
+    <li><strong>Lab 3:</strong> Tạo workflow switch traffic giữa 2 môi trường Blue/Green trên ALB.</li>
+    <li><strong>Lab 4:</strong> Tạo workflow clear old resources (scale service cũ về 0 task).</li>
+    <li><strong>Lab 5:</strong> Kết hợp cả 4 workflow trên thành một pipeline Blue/Green hoàn chỉnh có manual approval.</li>
+    <li><strong>Lab 6:</strong> Thêm workflow chạy test tự động khi code được push / tạo PR vào nhánh <code>develop</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="figure-centered">
+    <img src="../../images/section17/blue-green-deployment-architecture.png" alt="Sơ đồ hệ thống của bài lab: GitHub Actions build image lên ECR, deploy lên 2 ECS Cluster Blue/Green sau ALB" />
+    <div class="figure-title">Sơ đồ hệ thống của bài lab</div>
+  </div>
+  <p class="body-text">Luồng tổng thể khi chạy pipeline Blue/Green (Lab 5):</p>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/developer.svg' style='width:34px;height:34px;'/><br/>Local PC<br/>git push / tag"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:34px;height:34px;'/><br/>GitHub<br/>nodejs-random-color"]
+      subgraph Actions["GitHub Actions"]
+          B["Build<br/>&amp; push ECR"] --> D["Deploy<br/>idle cluster"]
+          D --> A["Manual<br/>approval"]
+          A --> S["Switch<br/>traffic"]
+          S --> C["Clear<br/>old resource"]
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:30px;height:30px;'/><br/>ECR"]
+      subgraph AWS["AWS ap-southeast-1"]
+          ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:30px;height:30px;'/><br/>ALB :80/:81"]
+          Blue["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:26px;height:26px;'/><br/>cluster-blue"]
+          Green["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:26px;height:26px;'/><br/>cluster-green"]
+      end
+      Dev -->|"push tag"| GH
+      GH -->|"trigger"| Actions
+      B -->|"docker push"| ECR
+      ECR -.->|"pull image"| Blue
+      ECR -.->|"pull image"| Green
+      ALB --> Blue
+      ALB --> Green
+  </div>
+  <p class="arch-caption">GitHub Actions build image lên ECR, deploy vào cluster idle (không nhận traffic), sau đó hoán đổi listener của ALB để switch traffic và cuối cùng scale cluster cũ về 0.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Tài khoản <strong>GitHub</strong> và tài khoản <strong>AWS</strong> (region <code>ap-southeast-1</code>).</li>
+    <li><strong>Fork</strong> repository mẫu: <a href="https://github.com/hoanglinhdigital/nodejs-random-color" target="_blank" rel="noopener">github.com/hoanglinhdigital/nodejs-random-color</a> (ứng dụng Node.js/Express chạy ở port 3000).</li>
+    <li>Máy local: <strong>Git</strong> (Section 7), <strong>Terraform &gt;= 1.5</strong> và <strong>AWS CLI v2</strong> đã cấu hình profile (Section 5).</li>
+    <li>IAM User có quyền cần thiết (bài lab dùng <code>PowerUserAccess</code>), có <strong>Access Key</strong> để cấu hình cho GitHub Actions.</li>
+    <li>Source code: <code>sourcecode/section_17_cicd_using_github_action/</code>.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> stack chạy 1 ALB + 4 task Fargate (0.25 vCPU / 0.5 GB) + Public IPv4, tính phí theo giờ. Nên làm liên tục Lab 1 → Lab 6 rồi <code>terraform destroy</code> ở chương Tổng kết.</div>
+
+  <!-- ═══════════════════════════ LAB 1 ═══════════════════════════ -->
+  <h2 class="section-heading">Lab 1: Build Docker image &amp; push lên ECR</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo ECR repository</strong>
+        <p>Trên AWS Console, vào <strong>ECR → Create repository</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Visibility: <strong>Private</strong></li>
+          <li>Repository name: <code>nodejs-random-color</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo IAM User và lấy Access Key</strong>
+        <p>Tạo IAM User có quyền thao tác AWS (bài lab dùng policy <code>PowerUserAccess</code>), sau đó tạo <strong>Access Key</strong> và tải về (lưu ý không commit key lên GitHub).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình GitHub Secrets</strong>
+        <p>Mở repository đã fork trên GitHub → <strong>Settings → Secrets and variables → Actions → New repository secret</strong>, tạo 2 secret:</p>
+        <ul class="feature-list">
+          <li><code>AWS_ACCESS_KEY_ID</code></li>
+          <li><code>AWS_SECRET_ACCESS_KEY</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo thư mục workflow</strong>
+        <p>Clone repository về máy, tạo thư mục <code>.github/workflows</code> ở thư mục gốc của project:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git clone git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git
+cd nodejs-random-color
+mkdir -p .github/workflows</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo workflow build tự động (tag latest)</strong>
+        <p>Copy nội dung file <code>sourcecode/section_17_cicd_using_github_action/lab1_build_docker_ecr/build-docker-v1.yml</code> vào file <code>.github/workflows/build-docker.yml</code>. Workflow kích hoạt khi push lên nhánh <code>master</code> và push image tag <code>latest</code>:</p>
+        <pre class="code-block"><code class="language-yaml">name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: nodejs-random-color
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag and push image to ECR
+      run: |
+        docker build -t ${{ env.ECR_REPOSITORY }}:latest .
+        docker tag ${{ env.ECR_REPOSITORY }}:latest ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest</code></pre>
+        <p class="code-note">💡 Action <code>amazon-ecr-login</code> vừa đăng nhập Docker vào ECR, vừa xuất ra output <code>registry</code> là URI của ECR registry — không cần khai báo Account ID thủ công.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Commit &amp; push để kích hoạt workflow</strong>
+        <p>Sửa nội dung trang <code>public/index.html</code> (ví dụ đổi text trong thẻ <code>&lt;h1&gt;</code>), rồi commit và push:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "modify index.html, test CICD"
+git push origin master</code></pre>
+        <p>Mở repository trên GitHub → tab <strong>Actions</strong>, bạn sẽ thấy workflow <code>Build and Push Docker Image</code> tự chạy.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kiểm tra kết quả</strong>
+        <p>Đợi workflow hoàn thành (dấu ✓ xanh). Vào <strong>ECR → repository <code>nodejs-random-color</code></strong>, kiểm tra image có tag <code>latest</code> đã được push lên.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Chuyển sang build thủ công theo Git tag</strong>
+        <p>Copy nội dung file <code>build-docker-v2.yml</code> đè lên <code>.github/workflows/build-docker.yml</code>. Workflow này chỉ chạy <strong>thủ công</strong> (<code>workflow_dispatch</code>) hoặc được workflow khác gọi (<code>workflow_call</code>), và <strong>checkout source theo tag</strong>:</p>
+        <pre class="code-block"><code class="language-yaml">name: Build and Push Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to build'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version tag to build'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: nodejs-random-color
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code (theo tag)
+      uses: actions/checkout@v4
+      with:
+        ref: refs/tags/${{ inputs.version }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag and push image to ECR
+      run: |
+        docker build -t ${{ env.ECR_REPOSITORY }}:${{ inputs.version }} .
+        docker tag ${{ env.ECR_REPOSITORY }}:${{ inputs.version }} ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ inputs.version }}
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ inputs.version }}</code></pre>
+        <p>Tạo tag <code>v1.0.0</code> và push lên GitHub:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add public/index.html
+git commit -m "modify index.html, test CICD"
+git tag -a v1.0.0 -m "Test v1.0.0 by Github Action"
+git push origin master
+git push origin v1.0.0</code></pre>
+        <p>Mở tab <strong>Actions → Build and Push Docker Image → Run workflow</strong>, nhập <code>version = v1.0.0</code> và chạy. Kiểm tra ECR có image tag <code>v1.0.0</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <!-- ═══════════════════════════ LAB 2 ═══════════════════════════ -->
+  <h2 class="section-heading">Lab 2: Deploy lên ECS Cluster</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Triển khai hạ tầng Blue/Green bằng Terraform</strong>
+        <p>Sử dụng code trong thư mục <code>sourcecode/section_17_cicd_using_github_action/terraform/</code> (xem <code>terraform/command.sh</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_17_cicd_using_github_action/terraform
+cp terraform.tfvars.example terraform.tfvars
+# Sửa ecr_image_uri thành image v1.0.0 vừa build: 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:v1.0.0
+terraform init
+terraform plan --var-file "terraform.tfvars"
+terraform apply --var-file "terraform.tfvars"</code></pre>
+        <p>Stack tạo ra: VPC, ALB (<code>udemy-devops-alb</code>, listener <code>:80</code> → Blue, <code>:81</code> → Green), 2 Target Group, 2 ECS Cluster (<code>udemy-devops-cluster-blue</code> / <code>udemy-devops-cluster-green</code>), mỗi cluster 1 service <code>nodejs-service</code> chạy 2 task.</p>
+        <p>Kiểm tra truy cập ALB bình thường (port 80 và 81 đều hiển thị v1.0.0):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform output</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo workflow deploy lên ECS</strong>
+        <p>Copy nội dung file <code>sourcecode/section_17_cicd_using_github_action/lab2_deploy_ecs/deploy-ecs.yml</code> vào <code>.github/workflows/deploy-ecs.yml</code>. Workflow nhận 2 tham số <code>version</code> và <code>cluster_name</code>, lấy task definition hiện tại, đổi image thành version mới rồi cập nhật service:</p>
+        <pre class="code-block"><code class="language-yaml">name: Deploy to ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      cluster_name:
+        description: 'ECS Cluster name'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      cluster_name:
+        description: 'ECS Cluster name'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: nodejs-random-color
+  TASK_FAMILY: nodejs-task-definition
+  SERVICE_NAME: nodejs-service
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update ECS task definition and deploy
+      run: |
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        FULL_IMAGE="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ inputs.version }}"
+
+        TASK_DEFINITION=$(aws ecs describe-task-definition \
+          --task-definition ${{ env.TASK_FAMILY }} \
+          --region ${{ env.AWS_REGION }})
+
+        NEW_TASK_DEFINITION=$(echo "$TASK_DEFINITION" | jq --arg IMAGE "$FULL_IMAGE" '
+          .taskDefinition |
+          .containerDefinitions[0].image = $IMAGE |
+          del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+              .compatibilities, .registeredAt, .registeredBy)')
+
+        NEW_TASK_INFO=$(aws ecs register-task-definition \
+          --region ${{ env.AWS_REGION }} \
+          --cli-input-json "$NEW_TASK_DEFINITION")
+
+        NEW_REVISION=$(echo "$NEW_TASK_INFO" | jq -r '.taskDefinition.revision')
+
+        aws ecs update-service \
+          --cluster ${{ inputs.cluster_name }} \
+          --service ${{ env.SERVICE_NAME }} \
+          --task-definition ${{ env.TASK_FAMILY }}:${NEW_REVISION} \
+          --region ${{ env.AWS_REGION }} \
+          --force-new-deployment \
+          --desired-count 2
+
+        echo "Deployed version ${{ inputs.version }} to cluster ${{ inputs.cluster_name }}"
+        echo "New task definition revision: ${NEW_REVISION}"</code></pre>
+        <p class="code-note">💡 Deploy lên cluster <strong>đang không nhận traffic</strong> (xem Resource map của ALB để biết cluster nào đang idle).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Commit, push và chạy deploy</strong>
+        <p>Sửa <code>public/index.html</code> thành nội dung version mới, commit, tạo tag <code>v1.0.1</code> và push:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Add Deploy ECS Workflow"
+git tag -a v1.0.1 -m "Test v1.0.1 by Github Action"
+git push origin master
+git push origin v1.0.1</code></pre>
+        <p>Mở tab <strong>Actions</strong> chạy workflow <code>Build and Push Docker Image</code> với <code>version = v1.0.1</code> (build image mới), sau đó chạy workflow <code>Deploy to ECS</code> với <code>version = v1.0.1</code> và <code>cluster_name</code> là cluster đang idle.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Kiểm tra</strong>
+        <p>Truy cập ALB qua cổng <strong>81</strong> (test listener) để thấy version mới <code>v1.0.1</code>, trong khi cổng 80 vẫn hiển thị version cũ <code>v1.0.0</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <!-- ═══════════════════════════ LAB 3 ═══════════════════════════ -->
+  <h2 class="section-heading">Lab 3: Switch traffic trên ALB</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo workflow switch traffic</strong>
+        <p>Copy nội dung file <code>sourcecode/section_17_cicd_using_github_action/lab3_switch_traffic/switch-traffic.yml</code> vào <code>.github/workflows/switch-traffic.yml</code>. Workflow tìm ALB theo tên, lấy 2 listener theo port rồi <strong>hoán đổi Target Group</strong> của listener <code>:80</code> và <code>:81</code>:</p>
+        <pre class="code-block"><code class="language-yaml">name: Switch ALB Traffic
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+env:
+  AWS_REGION: ap-southeast-1
+  ALB_NAME: udemy-devops-alb
+
+jobs:
+  switch-traffic:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Switch traffic between blue and green environments
+      run: |
+        ALB_ARN=$(aws elbv2 describe-load-balancers \
+          --names ${{ env.ALB_NAME }} \
+          --query 'LoadBalancers[0].LoadBalancerArn' \
+          --output text)
+
+        LISTENERS=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN")
+
+        L80_ARN=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 80) | .ListenerArn')
+        L80_TG=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 80) | .DefaultActions[0].TargetGroupArn')
+        L81_ARN=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 81) | .ListenerArn')
+        L81_TG=$(echo "$LISTENERS" | jq -r '.Listeners[] | select(.Port == 81) | .DefaultActions[0].TargetGroupArn')
+
+        echo "Before switch: :80 -> $L80_TG | :81 -> $L81_TG"
+
+        aws elbv2 modify-listener \
+          --listener-arn "$L80_ARN" \
+          --default-actions Type=forward,TargetGroupArn="$L81_TG"
+
+        aws elbv2 modify-listener \
+          --listener-arn "$L81_ARN" \
+          --default-actions Type=forward,TargetGroupArn="$L80_TG"
+
+        echo "After switch:  :80 -> $L81_TG | :81 -> $L80_TG"
+        echo "Traffic switch completed successfully!"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Commit &amp; push</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Add Switch Traffic Workflow"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Chạy và kiểm tra</strong>
+        <p>Chạy workflow <code>Switch ALB Traffic</code> thủ công. Sau khi xong, truy cập ALB qua cổng <strong>80</strong> sẽ thấy version mới <code>v1.0.1</code>. Kiểm tra trên <strong>EC2 → Load Balancers → <code>udemy-devops-alb</code> → Resource map</strong> thấy 2 listener đã đổi Target Group cho nhau.</p>
+        <p class="code-note">💡 Chạy lại workflow một lần nữa sẽ hoán đổi ngược lại = <strong>rollback</strong>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <!-- ═══════════════════════════ LAB 4 ═══════════════════════════ -->
+  <h2 class="section-heading">Lab 4: Clear old resources</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo workflow clear old resources</strong>
+        <p>Copy nội dung file <code>sourcecode/section_17_cicd_using_github_action/lab4_clear_old_resource/clear-resources.yml</code> vào <code>.github/workflows/clear-resources.yml</code>. Workflow scale service về 0 task:</p>
+        <pre class="code-block"><code class="language-yaml">name: Clear ECS Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'ECS Cluster name to clear resources from'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      cluster_name:
+        description: 'ECS Cluster name to clear resources from'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ap-southeast-1
+  SERVICE_NAME: nodejs-service
+
+jobs:
+  clear-resources:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Scale service down to 0
+      run: |
+        echo "Clearing resources from cluster: ${{ inputs.cluster_name }}"
+
+        aws ecs update-service \
+          --cluster ${{ inputs.cluster_name }} \
+          --service ${{ env.SERVICE_NAME }} \
+          --desired-count 0 \
+          --region ${{ env.AWS_REGION }}
+
+        echo "Service ${{ env.SERVICE_NAME }} scaled to 0 desired count in cluster ${{ inputs.cluster_name }}"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Commit &amp; push</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Add clear old ECS workflow"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Chạy và kiểm tra</strong>
+        <p>Chạy workflow <code>Clear ECS Resources</code> với <code>cluster_name</code> là cluster đang <strong>không nhận traffic</strong> (cluster cũ). Kiểm tra số task của cluster đó về 0.</p>
+      </div>
+    </li>
+  </ol>
+
+  <!-- ═══════════════════════════ LAB 5 ═══════════════════════════ -->
+  <h2 class="section-heading">Lab 5: Kết hợp tất cả trong một workflow</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo Environment cho manual approval</strong>
+        <p>Trên GitHub → <strong>Settings → Environments → New environment</strong>, tạo environment tên <code>production-approval</code>, bật <strong>Required reviewers</strong> (thêm chính bạn hoặc người review) để bước switch traffic cần được duyệt.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo workflow tổng thể</strong>
+        <p>Copy nội dung file <code>sourcecode/section_17_cicd_using_github_action/lab5_combine_all_actions/blue-green-deployment.yml</code> vào <code>.github/workflows/blue-green-deployment.yml</code>. Workflow này dùng <code>workflow_call</code> để gọi lại 4 workflow của Lab 1–4, kèm bước manual approval:</p>
+        <pre class="code-block"><code class="language-yaml">name: Complete Blue-Green Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      target_cluster:
+        description: 'Target cluster for deployment'
+        required: true
+        type: choice
+        options:
+        - blue
+        - green
+      switch_traffic:
+        description: 'Switch traffic after deployment'
+        required: false
+        type: boolean
+        default: false
+      cleanup_old_cluster:
+        description: 'Clean up old cluster after traffic switch'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-and-push:
+    uses: ./.github/workflows/build-docker.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit
+
+  deploy-to-target:
+    needs: build-and-push
+    uses: ./.github/workflows/deploy-ecs.yml
+    with:
+      version: ${{ inputs.version }}
+      cluster_name: ${{ inputs.target_cluster == 'blue' && 'udemy-devops-cluster-blue' || 'udemy-devops-cluster-green' }}
+    secrets: inherit
+
+  manual-approval:
+    if: ${{ inputs.switch_traffic }}
+    needs: deploy-to-target
+    runs-on: ubuntu-latest
+    environment: production-approval
+    steps:
+    - name: Manual Approval Required
+      run: |
+        echo "## Ready to Switch Traffic" >> $GITHUB_STEP_SUMMARY
+        echo "Deployment to **${{ inputs.target_cluster }}** cluster completed." >> $GITHUB_STEP_SUMMARY
+        echo "- Version: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Target cluster: ${{ inputs.target_cluster }}" >> $GITHUB_STEP_SUMMARY
+        echo "Approve this deployment to switch traffic to the new version." >> $GITHUB_STEP_SUMMARY
+
+  switch-traffic:
+    if: ${{ inputs.switch_traffic }}
+    needs: manual-approval
+    uses: ./.github/workflows/switch-traffic.yml
+    secrets: inherit
+
+  cleanup-old-cluster:
+    if: ${{ inputs.cleanup_old_cluster && inputs.switch_traffic }}
+    needs: switch-traffic
+    uses: ./.github/workflows/clear-resources.yml
+    with:
+      cluster_name: ${{ inputs.target_cluster == 'blue' && 'udemy-devops-cluster-green' || 'udemy-devops-cluster-blue' }}
+    secrets: inherit
+
+  deployment-summary:
+    needs: [build-and-push, deploy-to-target]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deployment Summary
+      run: |
+        echo "## Blue-Green Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- Version: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Target cluster: ${{ inputs.target_cluster }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Switch traffic: ${{ inputs.switch_traffic }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Cleanup old cluster: ${{ inputs.cleanup_old_cluster }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Build status: ${{ needs.build-and-push.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Deploy status: ${{ needs.deploy-to-target.result }}" >> $GITHUB_STEP_SUMMARY</code></pre>
+        <p class="code-note">💡 <code>needs</code> ràng buộc thứ tự job; <code>if</code> quyết định job có chạy hay không tuỳ tham số đầu vào; <code>environment</code> tạo điểm dừng chờ người duyệt.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Commit, push và chạy pipeline hoàn chỉnh</strong>
+        <p>Sửa <code>public/index.html</code> thành nội dung mới (ví dụ <code>Version 1.0.2</code>), commit, tạo tag và push:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Add Blue-Green full workflow"
+git tag -a v1.0.2 -m "Test v1.0.2 by Github Action"
+git push origin master
+git push origin v1.0.2</code></pre>
+        <p>Mở <strong>Actions → Complete Blue-Green Deployment → Run workflow</strong>, nhập:</p>
+        <ul class="feature-list">
+          <li><code>version</code>: <code>v1.0.2</code></li>
+          <li><code>target_cluster</code>: cluster đang <strong>không nhận traffic</strong> (vd <code>green</code>)</li>
+          <li><code>switch_traffic</code>: <code>true</code></li>
+          <li><code>cleanup_old_cluster</code>: <code>true</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Kiểm tra toàn bộ quy trình</strong>
+        <p>Theo dõi trên tab Actions: job <code>build-and-push</code> → <code>deploy-to-target</code> → <code>manual-approval</code> (chờ bạn bấm Approve) → <code>switch-traffic</code> → <code>cleanup-old-cluster</code>. Sau cùng, truy cập ALB port 80 thấy <code>v1.0.2</code>, và cluster cũ đã được scale về 0 task.</p>
+      </div>
+    </li>
+  </ol>
+
+  <!-- ═══════════════════════════ LAB 6 ═══════════════════════════ -->
+  <h2 class="section-heading">Lab 6: Thêm bước testing khi push lên nhánh develop</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị nhánh develop</strong>
+        <p>Tạo nhánh <code>develop</code> từ <code>master</code> và push lên GitHub:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout -b develop
+git push -u origin develop</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo workflow test trên nhánh develop</strong>
+        <p>Copy nội dung file <code>sourcecode/section_17_cicd_using_github_action/lab6_add_test_step/test-on-develop.yml</code> vào <code>.github/workflows/test-on-develop.yml</code> (lưu ý push workflow này lên nhánh <code>develop</code>). Workflow chạy khi có push hoặc PR vào <code>develop</code>: cài dependency, khởi động server, chờ server sẵn sàng và kiểm tra HTTP 200:</p>
+        <pre class="code-block"><code class="language-yaml">name: Unit test on Develop
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Start development server
+      run: |
+        npm run dev &
+        echo $! > server.pid
+
+    - name: Wait for server to start
+      run: |
+        echo "Waiting for server to start..."
+        timeout=60
+        counter=0
+        while [ $counter -lt $timeout ]; do
+          if curl -f -s http://localhost:3000 > /dev/null 2>&1; then
+            echo "Server is up and running!"
+            break
+          fi
+          echo "Waiting for server... ($counter/$timeout)"
+          sleep 2
+          counter=$((counter + 2))
+        done
+        if [ $counter -ge $timeout ]; then
+          echo "Server failed to start within $timeout seconds"
+          exit 1
+        fi
+
+    - name: Test website availability
+      run: |
+        response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000)
+        if [ "$response" = "200" ]; then
+          echo "Website is accessible - HTTP status: $response"
+        else
+          echo "Website test failed - HTTP status: $response"
+          exit 1
+        fi
+
+    - name: Additional health check
+      run: |
+        content=$(curl -s http://localhost:3000)
+        if echo "$content" | grep -q "&lt;!DOCTYPE html\|&lt;html"; then
+          echo "Website returned valid HTML content"
+        else
+          echo "Website did not return valid HTML content"
+          exit 1
+        fi
+
+    - name: Cleanup
+      if: always()
+      run: |
+        if [ -f server.pid ]; then
+          kill $(cat server.pid) || true
+          rm server.pid
+        fi
+        pkill -f "npm run dev" || true
+        pkill -f "node.*dev" || true</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kiểm tra</strong>
+        <p>Push code lên nhánh <code>develop</code> (hoặc tạo PR vào <code>develop</code>). Mở tab <strong>Actions</strong> thấy workflow <code>Unit test on Develop</code> tự chạy và các bước test đều ✓ xanh.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Chuỗi lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Lab 1: push lên <code>master</code> tự kích hoạt workflow build; ECR có image tag <code>latest</code> và <code>v1.0.0</code>.</li>
+      <li>Lab 2: <code>terraform apply</code> tạo đủ VPC, ALB, 2 Target Group, 2 ECS Cluster; deploy <code>v1.0.1</code> lên cluster idle, port 81 hiển thị version mới.</li>
+      <li>Lab 3: chạy <code>Switch ALB Traffic</code> xong, port 80 hiển thị version mới (và chạy lại = rollback).</li>
+      <li>Lab 4: chạy <code>Clear ECS Resources</code> xong, cluster cũ còn 0 task.</li>
+      <li>Lab 5: pipeline hoàn chỉnh chạy tuần tự, có bước chờ duyệt (approval) trước khi switch traffic.</li>
+      <li>Lab 6: push/PR vào <code>develop</code> kích hoạt workflow test và trả HTTP 200.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Workflow không tự chạy sau khi push</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File workflow không nằm đúng thư mục <code>.github/workflows/</code>, hoặc push sai nhánh khác với nhánh khai báo trong <code>on:</code>.<br/><strong>Giải pháp:</strong> Kiểm tra đường dẫn file và tên nhánh (bài lab dùng <code>master</code> cho build, <code>develop</code> cho test).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Credentials could not be loaded</code> / <code>AccessDenied</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Secret <code>AWS_ACCESS_KEY_ID</code>/<code>AWS_SECRET_ACCESS_KEY</code> chưa tạo hoặc sai tên; IAM User thiếu quyền.<br/><strong>Giải pháp:</strong> Kiểm tra Settings → Secrets → Actions; kiểm tra quyền của IAM User (bài lab dùng <code>PowerUserAccess</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Build lỗi <code>pull access denied</code> hoặc không push được lên ECR</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thiếu bước <code>amazon-ecr-login</code> hoặc tên ECR repository không đúng.<br/><strong>Giải pháp:</strong> Đảm bảo workflow có step <code>Login to Amazon ECR</code>; kiểm tra <code>ECR_REPOSITORY</code> trùng tên repository đã tạo.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Deploy thành công nhưng truy cập ALB nhận <code>503 Service Temporarily Unavailable</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Task chưa healthy hoặc không pull được image.<br/><strong>Giải pháp:</strong> Đợi 1–2 phút; kiểm tra ECS Console → cluster → service → tab Tasks (stopped) xem <em>Stopped reason</em>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>CannotPullContainerError: ... not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Image tag chưa tồn tại trên ECR, hoặc <code>ecr_image_uri</code> trong <code>terraform.tfvars</code> sai Account ID/tag.<br/><strong>Giải pháp:</strong> Chạy lại workflow build để push image; sửa lại <code>ecr_image_uri</code> rồi <code>terraform apply</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Job <code>manual-approval</code> bị kẹt mãi ở trạng thái chờ</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Environment <code>production-approval</code> có <em>Required reviewers</em> — cần người duyệt bấm Approve.<br/><strong>Giải pháp:</strong> Vào workflow run đang chờ, bấm <strong>Review deployments → Approve</strong> (đây là hành vi mong muốn của Lab 5).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>terraform apply</code> báo conflict / muốn thay đổi listener hoặc service</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Listener/service đã bị workflow GitHub Actions thay đổi.<br/><strong>Giải pháp:</strong> Đây là hành vi bình thường nhờ <code>ignore_changes</code> trong Terraform; không cần xử lý.</div>
+  </div>
+
+</body>
+</html>

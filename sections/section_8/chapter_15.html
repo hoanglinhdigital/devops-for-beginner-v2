@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Docker cheat sheet, tổng kết &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Docker cheat sheet, tổng kết &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Tổng kết section</h2>
+  <div class="mermaid">
+  flowchart LR
+      T1["📘 <b>Lý thuyết</b><br/>Container vs VM<br/>Kiến trúc Docker"] --> L1["🧪 <b>Lab 1–2</b><br/>Cài Docker · Docker Hub<br/>Image &amp; Container"]
+      L1 --> T2["📘 <b>Dockerfile</b><br/>FROM · COPY · RUN<br/>CMD · ENTRYPOINT"]
+      T2 --> L2["🧪 <b>Lab 3–5</b><br/>Build image · CMD vs ENTRYPOINT<br/>Multi-stage"]
+      L2 --> T3["📘 <b>Docker Compose</b>"]
+      T3 --> L3["🧪 <b>Lab 6–8</b><br/>Node.js · Redis · MySQL<br/>NGINX load balancer"]
+      L3 --> T4["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:32px;height:32px;'/><br/><b>ECR &amp; ECS</b><br/>Lab 9"]
+  </div>
+
+  <table class="compare-table">
+    <thead><tr><th>Chương</th><th>Nội dung</th><th>Kiến thức chính</th></tr></thead>
+    <tbody>
+      <tr><td>1–2</td><td>Container, Docker &amp; kiến trúc</td><td>VM vs Container, Docker daemon/client/registry, image, layer, container</td></tr>
+      <tr><td>3</td><td>Lab 1: Cài đặt Docker</td><td>Docker Desktop (WSL 2), Docker Engine trên EC2 AL2023, Compose plugin, <code>docker login</code></td></tr>
+      <tr><td>4</td><td>Lab 2: Image &amp; Container</td><td><code>pull</code>, <code>images</code>, <code>run -d -p</code>, <code>ps -a</code>, <code>logs</code>, <code>exec -it</code>, <code>stop/start</code>, <code>rm</code>, <code>rmi</code></td></tr>
+      <tr><td>5</td><td>Dockerfile</td><td><code>FROM</code>, <code>WORKDIR</code>, <code>COPY/ADD</code>, <code>RUN</code>, <code>ENV</code>, <code>EXPOSE</code>, <code>CMD/ENTRYPOINT</code>, multi-stage, best practice</td></tr>
+      <tr><td>6</td><td>Lab 3: Build &amp; Run</td><td><code>docker build -t</code>, build context, tag version, layer cache</td></tr>
+      <tr><td>7</td><td>Lab 4: CMD vs ENTRYPOINT</td><td>Tham số <code>docker run</code> nối vào ENTRYPOINT, thay thế CMD; <code>--entrypoint</code></td></tr>
+      <tr><td>8</td><td>Lab 5: Multi-stage</td><td><code>AS</code>, <code>COPY --from</code>, <code>--target</code>, giảm kích thước image ~10 lần</td></tr>
+      <tr><td>9</td><td>Docker Compose</td><td>services, build, ports, volumes, environment, depends_on, healthcheck, <code>.env</code></td></tr>
+      <tr><td>10–12</td><td>Lab 6–8: Compose</td><td>Bind mount, named volume, DNS theo tên service, replicas, NGINX round-robin</td></tr>
+      <tr><td>13–14</td><td>ECR, ECS &amp; Lab 9</td><td>Repository, push image, cluster, task definition, task Fargate, CloudWatch Logs</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Docker cheat sheet</h2>
+  <p class="body-text">Các lệnh thường dùng nhất, đầy đủ hơn trong file <code>sourcecode/section_8_docker_basic_operation/docker_cheatsheet/commands.sh</code>.</p>
+
+  <h3 class="section-subheading">Image</h3>
+  <table class="req-table">
+    <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>docker pull &lt;image&gt;:&lt;tag&gt;</code></td><td>Tải image từ registry</td></tr>
+      <tr><td><code>docker images</code></td><td>Liệt kê image</td></tr>
+      <tr><td><code>docker build -t &lt;image&gt;:&lt;tag&gt; .</code></td><td>Build image từ Dockerfile trong thư mục hiện tại</td></tr>
+      <tr><td><code>docker tag &lt;image&gt;:&lt;tag&gt; &lt;registry&gt;/&lt;repo&gt;:&lt;tag&gt;</code></td><td>Đánh tag mới cho image</td></tr>
+      <tr><td><code>docker push &lt;registry&gt;/&lt;repo&gt;:&lt;tag&gt;</code></td><td>Đẩy image lên registry</td></tr>
+      <tr><td><code>docker image history</code> / <code>inspect</code></td><td>Xem layer / metadata của image</td></tr>
+      <tr><td><code>docker rmi &lt;image&gt;:&lt;tag&gt;</code></td><td>Xoá image</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Container</h3>
+  <table class="req-table">
+    <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>docker run -d -p 8080:80 --name web nginx</code></td><td>Chạy container nền, mapping port, đặt tên</td></tr>
+      <tr><td><code>docker run -it ubuntu bash</code> / <code>--rm</code></td><td>Chạy interactive / tự xoá khi kết thúc</td></tr>
+      <tr><td><code>docker run -e KEY=value -v vol:/data ...</code></td><td>Truyền biến môi trường, gắn volume</td></tr>
+      <tr><td><code>docker ps</code> / <code>docker ps -a</code></td><td>Container đang chạy / tất cả container</td></tr>
+      <tr><td><code>docker logs -f &lt;container&gt;</code></td><td>Theo dõi log</td></tr>
+      <tr><td><code>docker exec -it &lt;container&gt; sh</code></td><td>Mở shell trong container đang chạy</td></tr>
+      <tr><td><code>docker stop | start | restart &lt;container&gt;</code></td><td>Dừng / chạy / khởi động lại</td></tr>
+      <tr><td><code>docker rm [-f] &lt;container&gt;</code></td><td>Xoá container (<code>-f</code>: xoá cả khi đang chạy)</td></tr>
+      <tr><td><code>docker stats</code> / <code>docker inspect</code></td><td>Theo dõi tài nguyên / xem chi tiết</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Docker Compose &amp; dọn dẹp</h3>
+  <table class="req-table">
+    <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>docker compose up -d --build</code></td><td>Build &amp; start toàn bộ service</td></tr>
+      <tr><td><code>docker compose up -d --scale web=3</code></td><td>Chạy 3 replica của service <code>web</code></td></tr>
+      <tr><td><code>docker compose ps</code> / <code>logs -f</code> / <code>exec</code></td><td>Trạng thái / log / chạy lệnh trong service</td></tr>
+      <tr><td><code>docker compose down [-v] [--rmi local]</code></td><td>Xoá container, network (và volume, image đã build)</td></tr>
+      <tr><td><code>docker system df</code></td><td>Xem dung lượng Docker đang dùng</td></tr>
+      <tr><td><code>docker system prune [-a] [--volumes]</code></td><td>Xoá tài nguyên không dùng (cẩn thận với <code>-a --volumes</code>)</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Tài liệu tham khảo</h3>
+  <ul class="feature-list">
+    <li>Docker cheat sheet chính thức: <a href="https://docs.docker.com/get-started/docker_cheatsheet.pdf" target="_blank" rel="noopener">docs.docker.com/get-started/docker_cheatsheet.pdf</a></li>
+    <li>Docker cheat sheet (Collabnix): <a href="https://collabnix.com/docker-cheatsheet/" target="_blank" rel="noopener">collabnix.com/docker-cheatsheet</a></li>
+    <li>Tài liệu Docker: <a href="https://docs.docker.com/manuals/" target="_blank" rel="noopener">docs.docker.com/manuals</a></li>
+    <li>Amazon ECS Developer Guide: <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html" target="_blank" rel="noopener">docs.aws.amazon.com/AmazonECS</a></li>
+  </ul>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">
+    Hãy rà soát và xoá toàn bộ resource của section để tránh phát sinh chi phí. <strong>EC2, task Fargate, Public IPv4, EBS volume và Load Balancer</strong> đều tính phí theo giờ kể cả khi không có traffic.
+  </div>
+
+  <h3 class="section-subheading">Trên AWS</h3>
+  <ul class="cleanup-list">
+    <li>Stop toàn bộ task và xoá ECS cluster <code>docker-lab-cluster</code>; xoá ECS Service (nếu đã tự tạo thêm).</li>
+    <li>Deregister &amp; delete task definition <code>my-httpd-task</code>.</li>
+    <li>Xoá ECR repository <code>my-httpd</code> (kèm toàn bộ image).</li>
+    <li>Xoá Application Load Balancer, Target Group (nếu đã tự thử nghiệm thêm).</li>
+    <li>Terminate EC2 <code>docker-lab-server</code>; kiểm tra EBS Volume, Snapshot, Elastic IP không còn sót lại.</li>
+    <li>Xoá Security Group <code>docker-lab-sg</code>, <code>ecs-task-sg</code>, key pair <code>docker-lab-key</code>, CloudWatch log group <code>/ecs/my-httpd-task</code>.</li>
+    <li>Môi trường Cloud9 cũ (nếu có từ phiên bản trước của khoá học): xoá environment để dừng EC2 đi kèm.</li>
+    <li>Kiểm tra lại trang <strong>Billing and Cost Management</strong> sau 1 ngày.</li>
+  </ul>
+
+  <h3 class="section-subheading">Trên máy local</h3>
+  <p class="body-text">Kiểm tra dung lượng và xoá các container, image, volume, build cache không còn dùng:</p>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker ps -a
+docker system df
+docker system prune -a --volumes</code></pre>
+  <div class="alert alert-danger"><code>docker system prune -a --volumes</code> xoá <strong>tất cả</strong> image và volume không được container nào sử dụng – bao gồm cả dữ liệu của các dự án khác trên máy bạn. Chỉ chạy khi chắc chắn, hoặc xoá từng resource của lab bằng <code>docker rm</code>, <code>docker rmi</code>, <code>docker volume rm</code>.</div>
+
+  <h2 class="section-heading">Section tiếp theo</h2>
+  <p class="body-text">
+    Bạn đã biết đóng gói ứng dụng thành image, chạy hệ thống nhiều container bằng Docker Compose và đưa image lên AWS. Ở các section tiếp theo, chúng ta sẽ tự động hoá toàn bộ quy trình
+    <strong>build → push lên ECR → deploy lên ECS</strong> bằng pipeline CI/CD với <strong>CodePipeline, CodeBuild, CodeDeploy</strong>, Jenkins và GitHub Actions; sau đó là Kubernetes &amp; EKS.
+  </p>
+
+</body>
+</html>

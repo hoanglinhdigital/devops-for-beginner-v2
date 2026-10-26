@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  url-shorten-app - Ứng dụng rút gọn URL (API Gateway + Lambda + DynamoDB) triển khai bằng AWS SAM
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+    Timeout: 10
+    MemorySize: 128
+    LoggingConfig:
+      LogFormat: JSON
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref UrlShortenTable
+
+Resources:
+  # REST API Gateway, stage "dev"
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+
+  # POST /generate-short-url : nhận URL gốc, trả về mã rút gọn
+  GenerateShortUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: generate_short_url/
+      Handler: app.lambda_handler
+      Policies:
+        # SAM policy template: chỉ cho phép ghi vào đúng 1 table (least privilege)
+        - DynamoDBWritePolicy:
+            TableName: !Ref UrlShortenTable
+      Events:
+        GenerateShortUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /generate-short-url
+            Method: post
+
+  # GET /link/{short_url} : tra cứu URL gốc và redirect
+  GetUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: get_url/
+      Handler: app.lambda_handler
+      Policies:
+        # SAM policy template: chỉ cho phép đọc từ đúng 1 table
+        - DynamoDBReadPolicy:
+            TableName: !Ref UrlShortenTable
+      Events:
+        GetUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /link/{short_url}
+            Method: get
+
+  # Resource CloudFormation thông thường vẫn dùng được trong template SAM
+  UrlShortenTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: short_url
+          AttributeType: S
+      KeySchema:
+        - AttributeName: short_url
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+Outputs:
+  ApiUrl:
+    Description: Base URL của API (stage dev)
+    Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/dev"
+  TableName:
+    Description: Tên DynamoDB table lưu URL
+    Value: !Ref UrlShortenTable

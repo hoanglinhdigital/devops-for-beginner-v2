@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: Triển khai ứng dụng mẫu lên Kubernetes – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: Triển khai ứng dụng mẫu lên Kubernetes</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Triển khai một ứng dụng mẫu (React + Express + MongoDB) lên cluster Kubernetes thật (tạo ở Lab 4).</li>
+    <li>Thực hành trọn vẹn quy trình: chạy thử local → build image → push ECR → viết manifest → deploy → expose bằng ALB.</li>
+    <li>Hiểu cách Ingress định tuyến <code>/api</code> → backend và <code>/</code> → frontend.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/svg-icon/browser.svg' style='width:32px;height:32px;'/><br/>User"]
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:32px;height:32px;'/><br/>ALB<br/>(port 80)"]
+      IC["Ingress Controller<br/>(nginx)"]
+      subgraph Cluster["Kubernetes cluster"]
+          FE["frontend Service<br/>(NodePort 30088)"]
+          BE["backend Service<br/>(NodePort 30099)"]
+          MO["mongo Service<br/>(ClusterIP 27017)"]
+      end
+      User --> ALB --> IC
+      IC -->|"/"| FE
+      IC -->|"/api"| BE
+      BE --> MO
+  </div>
+  <p class="arch-caption">ALB đứng trước cluster chuyển traffic tới Ingress Nginx Controller (NodePort). Ingress định tuyến <code>/</code> → frontend, <code>/api</code> → backend; backend gọi tới MongoDB qua ClusterIP.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 4</strong>: đã có cluster kops và kết nối được bằng kubectl.</li>
+    <li>Có Docker và đã tạo <strong>ECR repositories</strong> cho backend &amp; frontend.</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/lab5_deploy_resources/</code>.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> lab chạy trên cluster thật (EC2) + ALB, tính phí theo giờ. Xoá hết khi hoàn thành.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Kiểm tra cluster &amp; lấy ứng dụng mẫu</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl cluster-info
+kubectl get nodes
+git clone https://github.com/hoanglinhdigital/react-express-mongodb</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Chạy thử local bằng Docker Compose</strong>
+        <p>Trong thư mục <code>frontend</code>, mở <code>package.json_local</code>, copy dòng proxy vào <code>package.json</code>:</p>
+        <pre class="code-block"><code class="language-json">"proxy": "http://backend:3000"</code></pre>
+        <p>Chạy thử (đảm bảo đúng định dạng JSON):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker-compose up -d</code></pre>
+        <p>Mở <code>localhost:3000</code> để test. Sau khi xác nhận chạy tốt, <b>xoá dòng proxy</b> khỏi <code>package.json</code> (tránh lỗi khi deploy lên K8s) rồi dừng compose:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker-compose down --volumes</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Build image &amp; push lên ECR</strong>
+        <p>Build và push image backend &amp; frontend lên ECR (thay <code>&lt;AWS_ACCOUNT_ID&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin &lt;AWS_ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com
+docker build -t &lt;AWS_ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/devops-lab13-backend:latest ./backend
+docker push &lt;AWS_ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/devops-lab13-backend:latest
+docker build -t &lt;AWS_ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/devops-lab13-frontend:latest ./frontend
+docker push &lt;AWS_ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/devops-lab13-frontend:latest</code></pre>
+        <p class="code-note">💡 Đối với frontend, hãy chắc chắn đã <b>xoá dòng proxy</b> trong <code>package.json</code> trước khi build.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo file manifest cho các resource</strong>
+        <p>Tạo <code>lab5.yaml</code> (mongo, backend, frontend, Ingress). Tham khảo cấu trúc:</p>
+        <pre class="code-block"><code class="language-yaml"># Mongo (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  type: ClusterIP
+  selector:
+    app: mongo
+  ports:
+    - protocol: TCP
+      port: 27017
+      targetPort: 27017
+---
+# Backend (Deployment + NodePort 30099) - image ECR
+# Frontend (Deployment + NodePort 30088) - image ECR
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-nginx
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - pathType: Prefix
+        path: /api
+        backend:
+          service:
+            name: backend
+            port:
+              number: 3000
+      - pathType: Prefix
+        path: /
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 3000</code></pre>
+        <p class="code-note">💡 File đầy đủ tại <code>lab5_deploy_resources/lab5.yaml</code>; nhớ thay <code>&lt;AWS_ACCOUNT_ID&gt;</code> bằng Account ID của bạn.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Cài Ingress Nginx Controller</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/baremetal/deploy.yaml
+kubectl get services -n ingress-nginx</code></pre>
+        <p>Kết quả mong đợi: Service <code>ingress-nginx-controller</code> kiểu <code>NodePort</code> (vd <code>80:31646/TCP</code> – ghi nhớ nodePort này).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Deploy các resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f lab5.yaml
+kubectl get pods
+kubectl get services
+kubectl get deployments
+kubectl get ingress
+kubectl describe ingress/ingress-nginx</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Tạo LoadBalancer + Target Group</strong>
+        <ul class="feature-list">
+          <li>Tạo <strong>Security Group</strong> cho ALB, cho phép HTTP:80 từ mọi nơi.</li>
+          <li>Tạo <strong>Application Load Balancer</strong> (internet-facing), listener port 80.</li>
+          <li>Tạo <strong>Target Group</strong> type <em>Instance</em>, port HTTP = nodePort của Ingress Nginx Controller (lấy ở Bước 5).</li>
+          <li>Cấu hình Security Group của các EC2 instance cho phép truy cập từ Security Group của ALB (all traffic).</li>
+        </ul>
+        <p>Truy cập DNS của Load Balancer trên trình duyệt để test ứng dụng.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get pods</code> hiển thị các Pod backend, frontend, mongo ở trạng thái <strong>Running</strong>.</li>
+      <li>Truy cập DNS của ALB thấy giao diện ứng dụng; gọi <code>/api</code> nhận dữ liệu từ backend.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Frontend không gọi được backend (lỗi proxy)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> còn dòng <code>proxy</code> trong <code>package.json</code> của frontend.<br/><strong>Giải pháp:</strong> xoá dòng proxy, build lại image và deploy lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">ALB trả <code>502</code> hoặc không nhận traffic</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> target group chưa có instance healthy, sai port, hoặc SG chưa mở.<br/><strong>Giải pháp:</strong> kiểm tra target group type Instance, port đúng nodePort, và SG của instance cho phép traffic từ SG của ALB.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Bắt buộc:</strong> xoá LoadBalancer, Target Group, các resource trên Kubernetes, sau đó xoá cluster kops và EC2 để tránh tốn phí.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f lab5.yaml
+# Trên kops admin server:
+kops delete cluster --name hoanglinhdigital.com --state=s3://udemy-devops-kops --yes</code></pre>
+  <p>Kiểm tra và xoá thêm: ALB, Target Group, EBS volume, NAT Gateway, Elastic IP, ECR (nếu không dùng nữa).</p>
+
+</body>
+</html>

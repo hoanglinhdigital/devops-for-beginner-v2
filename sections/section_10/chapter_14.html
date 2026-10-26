@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 12: Gửi notification kết quả job sang Slack – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 12: Gửi notification kết quả job sang Slack</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo Slack channel và một <strong>Slack App</strong> (bot) cho Jenkins bằng app manifest.</li>
+    <li>Cài &amp; cấu hình plugin <strong>Slack Notification</strong>, lưu Bot token vào Jenkins credential loại <strong>Secret text</strong>.</li>
+    <li>Tạo job có khối <code>post { always { slackSend ... } }</code> – notify kết quả sang Slack với màu theo trạng thái.</li>
+    <li>Chạy job trong trường hợp <strong>success</strong> và <strong>fail</strong> (giả lập unit test lỗi bằng parameter).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>nodejs-random-color"]
+      subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server"]
+          direction TB
+          J1["Checkout → Unit test<br/>→ Build → Push ECR"] --> J2["post { always }<br/>slackSend"]
+          CRED["🔐 slack-bot-token<br/>(Secret text)"]
+          CRED -.-> J2
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR"]
+      SL["<img src='../../assets/aws-svg/slack.svg' style='width:40px;height:40px;'/><br/><b>Slack</b><br/>#jenkins-notification<br/>🟢 SUCCESS · 🔴 FAILURE"]
+      GH --> J1
+      J1 --> ECR
+      J2 -->|"Slack API (bot token)"| SL
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 6 (Docker, ECR) và Lab 8 (credential <code>github-ssh-key</code>). Lab này không cần Terraform stack.</li>
+    <li>Slack workspace mà bạn có quyền cài app (tạo miễn phí tại <code>slack.com</code> nếu chưa có).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab12_slack_notification/</code> (<code>slack-app-manifest.yaml</code>, <code>Jenkinsfile-slack</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo Slack channel</strong>
+        <p>Trong Slack workspace, tạo channel <code>#jenkins-notification</code> (Public).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo Slack App cho Jenkins</strong>
+        <p>Truy cập <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> → <strong>Create New App → From a manifest</strong>, chọn workspace, dán nội dung <code>slack-app-manifest.yaml</code> (định dạng YAML):</p>
+        <pre class="code-block"><code class="language-yaml">display_information:
+  name: Jenkins
+features:
+  bot_user:
+    display_name: Jenkins
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:read
+      - chat:write
+      - chat:write.customize
+      - files:write
+      - reactions:write
+      - users:read
+      - users:read.email
+      - groups:read
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false</code></pre>
+        <p>Create → <strong>Install to Workspace</strong> → Allow. Vào <strong>OAuth &amp; Permissions</strong>, copy <strong>Bot User OAuth Token</strong> (bắt đầu bằng <code>xoxb-</code>).</p>
+        <p class="code-note">💡 App "Jenkins CI" cũ trong Slack App Directory (dùng trong phiên bản trước của khoá học) đã ngừng hỗ trợ. Plugin Slack Notification hiện khuyến nghị tạo Slack App riêng với bot token như trên.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Mời bot vào channel</strong>
+        <p>Trong channel <code>#jenkins-notification</code>, gõ lệnh sau và gửi:</p>
+        <pre class="code-block"><code class="language-text">/invite @Jenkins</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cài plugin Slack Notification</strong>
+        <p>Vào <strong>Manage Jenkins → Plugins → Available plugins</strong>, tìm <code>Slack Notification</code> → <strong>Install</strong>. Chờ cài xong (tick <em>Restart Jenkins when installation is complete</em> nếu được yêu cầu).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo credential cho Bot token</strong>
+        <p>Vào <strong>Manage Jenkins → Credentials → System → Global credentials → Add Credentials</strong>:</p>
+        <ul class="feature-list">
+          <li>Kind: <strong>Secret text</strong>; Secret: dán Bot User OAuth Token <code>xoxb-...</code></li>
+          <li>ID: <code>slack-bot-token</code>; Description: <code>Slack bot token for Jenkins</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Cấu hình Slack trong Jenkins</strong>
+        <p>Vào <strong>Manage Jenkins → System</strong>, tìm mục <strong>Slack</strong>:</p>
+        <ul class="feature-list">
+          <li>Workspace: <em>Team Subdomain</em> của workspace (phần trước <code>.slack.com</code>, ví dụ <code>myworkspace</code>)</li>
+          <li>Credential: <code>slack-bot-token</code></li>
+          <li>Default channel / member id: <code>#jenkins-notification</code></li>
+          <li>Tick <strong>Custom slack app bot user</strong></li>
+        </ul>
+        <p>Bấm <strong>Test Connection</strong> → Jenkins báo <code>Success</code> và channel nhận được một tin nhắn test. Save.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Tạo job có notification</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab12-slack-notification</code>:</p>
+        <ul class="feature-list">
+          <li>General → tick <strong>This project is parameterized</strong> → <strong>Boolean Parameter</strong>: Name <code>SIMULATE_FAILURE</code>, Set by Default: <strong>không tick</strong></li>
+          <li>Pipeline → Definition <strong>Pipeline script</strong>, dán nội dung <code>Jenkinsfile-slack</code> và sửa <code>GIT_REPO</code></li>
+        </ul>
+        <pre class="code-block"><code class="language-groovy">// Lab 12 – Gửi notification kết quả job sang Slack channel
+// Job: lab12-slack-notification | Pipeline definition: Pipeline script (dán nội dung file này)
+// This project is parameterized: Boolean parameter SIMULATE_FAILURE (Default: không tick)
+// Yêu cầu: plugin "Slack Notification" đã cấu hình ở Manage Jenkins -&gt; System -&gt; Slack
+def COLOR_MAP = [
+    'SUCCESS' : 'good',
+    'FAILURE' : 'danger',
+    'UNSTABLE': 'warning',
+    'ABORTED' : '#808080',
+]
+
+pipeline {
+    agent any
+
+    environment {
+        // Thay &lt;your-github-username&gt;; credential github-ssh-key đã tạo ở Lab 8
+        GIT_REPO      = 'git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git'
+        AWS_REGION    = 'ap-southeast-1'
+        ECR_REPO      = 'nodejs-random-color'
+        IMAGE_TAG     = "slack-${BUILD_NUMBER}"
+        SLACK_CHANNEL = '#jenkins-notification'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}", credentialsId: 'github-ssh-key'
+            }
+        }
+
+        stage('Unit test') {
+            steps {
+                // Giả lập test thất bại khi tick SIMULATE_FAILURE để kiểm tra notification lỗi
+                sh '''
+                    if [ "${SIMULATE_FAILURE}" = "true" ]; then
+                        echo "Unit test failed: expected 200 but got 500"
+                        exit 1
+                    fi
+                    echo "All tests passed"
+                '''
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+            echo 'Build has been finished! Notify to Slack'
+            slackSend channel: "${SLACK_CHANNEL}",
+                color: COLOR_MAP[currentBuild.currentResult],
+                message: "*${currentBuild.currentResult}:* Job `${env.JOB_NAME}` build #${env.BUILD_NUMBER} (image tag `${IMAGE_TAG}`)\nThời gian: ${currentBuild.durationString}\nChi tiết: ${env.BUILD_URL}"
+        }
+    }
+}</code></pre>
+        <p class="code-note">💡 <code>post { always { } }</code> chạy dù pipeline thành công hay lỗi. <code>currentBuild.currentResult</code> trả về <code>SUCCESS</code> / <code>FAILURE</code> / <code>UNSTABLE</code> / <code>ABORTED</code>, được map sang màu của Slack (<code>good</code> = xanh lá, <code>danger</code> = đỏ).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Chạy job – trường hợp success</strong>
+        <p><strong>Build with Parameters</strong>, giữ <code>SIMULATE_FAILURE</code> không tick → Build. Channel <code>#jenkins-notification</code> nhận tin nhắn có viền xanh:</p>
+        <pre class="output-box"><code>SUCCESS: Job lab12-slack-notification build #1 (image tag slack-1)
+Thời gian: 35 sec and counting
+Chi tiết: http://&lt;jenkins-public-ip&gt;:8080/job/lab12-slack-notification/1/</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Chạy job – trường hợp fail</strong>
+        <p>Build lại, tick <code>SIMULATE_FAILURE</code>. Stage <em>Unit test</em> lỗi, các stage sau bị skip, Slack nhận tin nhắn viền đỏ <code>FAILURE: ...</code>. Click link <em>Chi tiết</em> để mở thẳng trang build và xem log lỗi.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><strong>Test Connection</strong> trong Manage Jenkins → System báo Success.</li>
+      <li>Channel <code>#jenkins-notification</code> nhận 2 tin nhắn: 1 SUCCESS (xanh) và 1 FAILURE (đỏ), có link tới đúng build.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Test Connection báo <code>Failure</code> / log có <code>not_in_channel</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Bot chưa được mời vào channel.<br/><strong>Giải pháp:</strong> Gõ <code>/invite @Jenkins</code> trong channel (Bước 3).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Log có <code>invalid_auth</code> hoặc <code>not_authed</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai token, dùng nhầm token khác (không phải <code>xoxb-</code>), hoặc chưa tick <em>Custom slack app bot user</em>.<br/><strong>Giải pháp:</strong> Copy lại Bot User OAuth Token, cập nhật credential <code>slack-bot-token</code>, kiểm tra lại Bước 6.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>No such DSL method 'slackSend' found among steps</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cài plugin Slack Notification hoặc chưa restart Jenkins sau khi cài.<br/><strong>Giải pháp:</strong> Kiểm tra Installed plugins, restart bằng <code>sudo systemctl restart jenkins</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>channel_not_found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai tên channel trong <code>SLACK_CHANNEL</code>, hoặc channel Private mà bot chưa được mời.<br/><strong>Giải pháp:</strong> Kiểm tra tên channel (có dấu <code>#</code>), mời bot vào channel.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo resource tính phí trên AWS (chỉ thêm vài image <code>slack-*</code> trên ECR). Sau khi học xong có thể xoá Slack App tại <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> → <strong>Basic Information → Delete App</strong> và xoá credential <code>slack-bot-token</code>.</div>
+
+</body>
+</html>

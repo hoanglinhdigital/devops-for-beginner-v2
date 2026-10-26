@@ -1,0 +1,46 @@
+# Lab 4: Workflow clear old resources: scale ECS Service của môi trường cũ về 0 task.
+# Copy file này thành .github/workflows/clear-resources.yml
+name: Clear ECS Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'ECS Cluster name to clear resources from'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      cluster_name:
+        description: 'ECS Cluster name to clear resources from'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ap-southeast-1
+  SERVICE_NAME: nodejs-service
+
+jobs:
+  clear-resources:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Scale service down to 0
+      run: |
+        echo "Clearing resources from cluster: ${{ inputs.cluster_name }}"
+
+        # Scale service về 0 (ECS tự dừng toàn bộ task của service)
+        aws ecs update-service \
+          --cluster ${{ inputs.cluster_name }} \
+          --service ${{ env.SERVICE_NAME }} \
+          --desired-count 0 \
+          --region ${{ env.AWS_REGION }}
+
+        echo "Service ${{ env.SERVICE_NAME }} scaled to 0 desired count in cluster ${{ inputs.cluster_name }}"

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secret – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Secret</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Secret</strong> là một đối tượng API dùng để lưu trữ <strong>thông tin nhạy cảm</strong> như mật khẩu, token, private key...
+    Nó giúp bảo vệ thông tin quan trọng và ngăn chặn rò rỉ dữ liệu nhạy cảm.
+    Secret được Pod sử dụng để truy cập thông tin nhạy cảm, và có thể được truyền vào Pod qua biến môi trường hoặc volume mount (tương tự ConfigMap).
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Lưu dữ liệu nhạy cảm:</strong> mật khẩu, token, certificate, private key.</li>
+    <li><strong>Giá trị phải base64:</strong> khi khai báo trong YAML, giá trị phải được mã hoá base64.</li>
+    <li><strong>2 cách sử dụng:</strong> biến môi trường và volume mount.</li>
+    <li><strong>Phân biệt với ConfigMap:</strong> Secret dành cho dữ liệu nhạy cảm; ConfigMap cho cấu hình thường.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      SEC["🔐 Secret<br/>MYSQL_ROOT_USER / MYSQL_ROOT_PASSWORD"]
+      Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:32px;height:32px;'/><br/>Pod"]
+      subgraph C["Cách truyền vào"]
+          E["Biến môi trường<br/>(secretKeyRef)"]
+          V["Volume mount"]
+      end
+      SEC --> Pod
+      Pod --> E
+      Pod --> V
+  </div>
+  <p class="arch-caption">Secret chứa dữ liệu nhạy cảm (đã base64) và được truyền vào Pod qua biến môi trường hoặc mount thành file trong volume.</p>
+
+  <h2 class="section-heading">Ví dụ Secret</h2>
+  <p class="body-text">Tạo chuỗi base64 bằng lệnh:</p>
+  <pre class="command-line" data-prompt="$" data-output="2,3"><code class="language-bash">echo -n "root" | base64
+cm9vdA==
+echo -n "VeryStrongPassword123" | base64
+VmVyeVN0cm9uZ1Bhc3N3b3JkMTIz</code></pre>
+  <p class="body-text">Khai báo Secret trong YAML:</p>
+  <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: Secret
+metadata:
+  name: my-secret
+type: Opaque
+data:
+  MYSQL_ROOT_USER: cm9vdA==
+  MYSQL_ROOT_PASSWORD: VmVyeVN0cm9uZ1Bhc3N3b3JkMTIz</code></pre>
+  <p class="body-text">Đưa Secret vào Pod qua <code>secretKeyRef</code>:</p>
+  <pre class="code-block"><code class="language-yaml">env:
+  - name: MYSQL_ROOT_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: my-secret
+        key: MYSQL_ROOT_PASSWORD</code></pre>
+
+  <h2 class="section-heading">Thực hành: Tạo Secret</h2>
+  <p class="body-text">Tạo Secret lưu username/password (dạng base64), truyền vào Pod MySQL (NodePort) qua biến môi trường (<code>secretKeyRef</code>), sau đó kết nối MySQL bằng thông tin trong Secret.</p>
+  <div class="mermaid">
+  flowchart LR
+      SEC["🔐 Secret<br/>my-secret"]
+      Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:32px;height:32px;'/><br/>mysql Pod<br/>(env secretKeyRef)"]
+      SEC -->|"env"| Pod
+  </div>
+  <p class="arch-caption">Deployment dùng <code>valueFrom.secretKeyRef</code> để lấy từng key trong Secret làm biến môi trường cho container MySQL.</p>
+
+  <h3 class="sub-heading">Yêu cầu trước khi bắt đầu</h3>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong> (Minikube chạy), có <strong>MySQL Workbench</strong>.</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/secret/</code>.</li>
+  </ul>
+
+  <h3 class="sub-heading">Các bước thực hành</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo chuỗi base64</strong>
+        <pre class="command-line" data-prompt="$" data-output="2,3,4,5"><code class="language-bash">echo -n "root" | base64
+cm9vdA==
+echo -n "VeryStrongPassword123" | base64
+VmVyeVN0cm9uZ1Bhc3N3b3JkMTIz</code></pre>
+        <p>Copy các giá trị base64 và thay thế vào file <code>secret-simple.yaml</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo file cấu hình Secret + MySQL</strong>
+        <p>Tạo file <code>secret-simple.yaml</code>:</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: Secret
+metadata:
+  name: my-secret
+type: Opaque
+data:
+  MYSQL_ROOT_USER: cm9vdA==
+  MYSQL_ROOT_PASSWORD: VmVyeVN0cm9uZ1Bhc3N3b3JkMTIz
+  ADDRESS: U2FpR29uLVZpZXROYW0=
+---
+# ... (PersistentVolume + PVC + Service NodePort giống phần thực hành Persistent Volume)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: my-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: my-secret
+                  key: MYSQL_ROOT_USER
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: mysql-persistent-storage
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: mysql-persistent-storage
+          persistentVolumeClaim:
+            claimName: my-pvc</code></pre>
+        <p class="code-note">💡 Khác với phần thực hành ConfigMap (dùng <code>envFrom</code> nạp cả ConfigMap), ở đây ta chọn từng key bằng <code>secretKeyRef</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Apply và kiểm tra Secret</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f secret-simple.yaml
+kubectl get secret my-secret -o yaml
+kubectl get secret my-secret -o jsonpath="{.data.MYSQL_ROOT_USER}" | base64 --decode
+kubectl get secret my-secret -o jsonpath="{.data.MYSQL_ROOT_PASSWORD}" | base64 --decode
+kubectl get secret my-secret -o jsonpath="{.data.ADDRESS}" | base64 --decode</code></pre>
+        <p>Ba lệnh decode sẽ lần lượt in ra <code>root</code>, <code>VeryStrongPassword123</code>, <code>SaiGon-VietNam</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Kết nối MySQL bằng thông tin trong Secret</strong>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">minikube service mysql-service --url
+http://127.0.0.1:&lt;port&gt;</code></pre>
+        <p>Mở MySQL Workbench, kết nối với <code>username = root</code>, <code>password = VeryStrongPassword123</code> (giá trị trong Secret).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Xoá resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f secret-simple.yaml</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sub-heading">Kiểm tra kết quả</h3>
+  <div class="verify-box">
+    <h4>✅ Thực hành thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get secret my-secret -o yaml</code> hiển thị các giá trị đã base64.</li>
+      <li>Lệnh <code>base64 --decode</code> khôi phục đúng giá trị gốc.</li>
+      <li>MySQL kết nối được với username/password từ Secret.</li>
+    </ul>
+  </div>
+
+  <h3 class="sub-heading">Troubleshoot</h3>
+  <div class="troubleshoot-item">
+    <div class="err">Decode ra chuỗi có ký tự lạ / không khớp</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> mã hoá có kèm ký tự xuống dòng (thiếu cờ <code>-n</code> khi <code>echo</code>).<br/><strong>Giải pháp:</strong> dùng đúng <code>echo -n "..." | base64</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pod báo <code>CreateContainerConfigError</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>secretKeyRef</code> trỏ tới key không tồn tại trong Secret.<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl get secret my-secret -o yaml</code>; đảm bảo tên key khớp chính xác (phân biệt hoa thường).</div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Giải mã:</strong> <code>kubectl get secret my-secret -o jsonpath="{.data.MYSQL_ROOT_USER}" | base64 --decode</code>.</li>
+    <li><strong>Base64 ≠ mã hoá:</strong> base64 chỉ là encoding, ai có quyền đọc Secret vẫn decode được. Hãy dùng RBAC để giới hạn ai đọc được Secret.</li>
+    <li><strong>Best practice:</strong> với cloud, cân nhắc dùng giải pháp quản lý secret chuyên dụng (AWS Secrets Manager, Parameter Store, External Secrets Operator) thay vì Secret thô.</li>
+    <li><strong>Không commit Secret vào Git:</strong> tương tự quy tắc không hard-code credential đã học xuyên suốt khoá học.</li>
+  </ul>
+
+</body>
+</html>

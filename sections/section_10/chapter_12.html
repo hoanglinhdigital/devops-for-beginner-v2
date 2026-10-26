@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 10: Job release theo Git tag &amp; tham số ACTION – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 10: Job release theo Git tag &amp; tham số ACTION</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <p class="body-text">Thiết kế một job Jenkins cho <strong>production</strong> với các yêu cầu:</p>
+  <ul class="feature-list">
+    <li>Job release được <strong>trigger thủ công</strong> (không tự động từ GitHub như Lab 9).</li>
+    <li>Code được checkout theo một <strong>Git tag chỉ định</strong> trên nhánh <code>master</code> (ví dụ <code>v1.0.0</code>) thay vì commit mới nhất; image trên ECR có tag trùng với Git tag.</li>
+    <li>Chọn được hành động: <strong>BuildAndDeploy</strong>, <strong>OnlyBuild</strong>, <strong>OnlyDeploy</strong> (dùng <code>when</code> trong Declarative Pipeline).</li>
+    <li>Stage deploy tạm thời dùng rolling update (<code>force-new-deployment</code>) cho ECS; thử <strong>rollback</strong> bằng OnlyDeploy một tag cũ.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Lead["<img src='../../assets/aws-svg/user.svg' style='width:36px;height:36px;'/><br/><b>Team Lead</b><br/>Build with Parameters<br/>VERSION · ACTION"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>master · tag v1.0.0, v1.0.1"]
+      subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> lab10-release-manual"]
+          direction TB
+          C["① Checkout refs/tags/VERSION"] --> B["② Build image :VERSION"]
+          B --> P["③ Push ECR :VERSION"]
+          P --> D["④ Deploy ECS :VERSION"]
+          N1["BuildAndDeploy: ①②③④<br/>OnlyBuild: ①②③<br/>OnlyDeploy: ④"]
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR<br/>v1.0.0 · v1.0.1"]
+      ECS["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:36px;height:36px;'/><br/>nodejs-service"]
+      Lead --> C
+      GH -->|"git (SSH)"| C
+      P --> ECR
+      D --> ECS
+      ECR -.-> ECS
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 7 (Terraform stack đang chạy), Lab 8 (credential <code>github-ssh-key</code>) và Lab 9 (nhánh <code>develop</code>).</li>
+    <li>Kiến thức về tag trong Git (Section 7 – Lab 5).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab10_release_by_tag/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo job release có tham số</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab10-release-manual</code>:</p>
+        <ul class="feature-list">
+          <li>General → tick <strong>This project is parameterized</strong>:
+            <ul class="feature-list">
+              <li><strong>String Parameter</strong> – Name <code>VERSION</code>, Default Value <code>v1.0.0</code>, Description <code>Git tag cần release</code></li>
+              <li><strong>Choice Parameter</strong> – Name <code>ACTION</code>, Choices (mỗi giá trị 1 dòng): <code>BuildAndDeploy</code>, <code>OnlyBuild</code>, <code>OnlyDeploy</code></li>
+            </ul>
+          </li>
+          <li>Triggers: <strong>không tick</strong> trigger nào (release thủ công)</li>
+          <li>Pipeline → Definition <strong>Pipeline script</strong>, dán nội dung <code>lab10_release_by_tag/Jenkinsfile-release</code> và sửa <code>GIT_REPO</code></li>
+        </ul>
+        <pre class="code-block"><code class="language-groovy">// Lab 10 – Job release production: trigger thủ công, checkout theo Git tag trên nhánh master
+// Job: lab10-release-manual | Pipeline definition: Pipeline script (dán nội dung file này)
+// This project is parameterized:
+//   - String parameter VERSION (Default: v1.0.0) – Git tag cần release, cũng là image tag trên ECR
+//   - Choice parameter ACTION (BuildAndDeploy, OnlyBuild, OnlyDeploy – mỗi giá trị 1 dòng)
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        // Thay &lt;your-github-username&gt;; credential github-ssh-key đã tạo ở Lab 8
+        GIT_REPO       = 'git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git'
+        GIT_CREDENTIAL = 'github-ssh-key'
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_REPO       = 'nodejs-random-color'
+        ECS_CLUSTER    = 'jenkins-lab-cluster'
+        ECS_SERVICE    = 'nodejs-service'
+        TASK_FAMILY    = 'jenkins-lab-nodejs-task'
+        CONTAINER_NAME = 'nodejs-container'
+    }
+
+    stages {
+        stage('Checkout using tag') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyBuild'] }
+            }
+            steps {
+                checkout scmGit(
+                    branches: [[name: "refs/tags/${params.VERSION}"]],
+                    userRemoteConfigs: [[url: "${GIT_REPO}", credentialsId: "${GIT_CREDENTIAL}"]]
+                )
+                sh 'git log -1 --oneline --decorate'
+            }
+        }
+
+        stage('Build image') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyBuild'] }
+            }
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${VERSION} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyBuild'] }
+            }
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${VERSION} ${ECR_REGISTRY}/${ECR_REPO}:${VERSION}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${VERSION}
+                '''
+            }
+        }
+
+        stage('Deploy to ECS') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyDeploy'] }
+            }
+            steps {
+                // Tạm thời dùng rolling update (force-new-deployment) giống Lab 7
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    FULL_IMAGE=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${VERSION}
+                    echo "Deploying image: ${FULL_IMAGE}"
+
+                    # OnlyDeploy: image tag phải tồn tại sẵn trên ECR
+                    aws ecr describe-images --region ${AWS_REGION} --repository-name ${ECR_REPO} --image-ids imageTag=${VERSION} &gt; /dev/null
+
+                    aws ecs describe-task-definition --region ${AWS_REGION} --task-definition ${TASK_FAMILY} |
+                    jq --arg IMAGE "${FULL_IMAGE}" --arg NAME "${CONTAINER_NAME}" '.taskDefinition | (.containerDefinitions[] | select(.name == $NAME) | .image) = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' &gt; new-task-definition.json
+
+                    NEW_REVISION=$(aws ecs register-task-definition --region ${AWS_REGION} --cli-input-json file://new-task-definition.json --query 'taskDefinition.revision' --output text)
+                    echo "New revision: ${TASK_FAMILY}:${NEW_REVISION}"
+
+                    aws ecs update-service --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --task-definition ${TASK_FAMILY}:${NEW_REVISION} --force-new-deployment &gt; /dev/null
+                    aws ecs wait services-stable --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+        }
+        success {
+            echo "Release ${params.VERSION} (${params.ACTION}) thành công!"
+        }
+    }
+}</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Điểm mới</th><th>Giải thích</th></tr></thead>
+          <tbody>
+            <tr><td><code>checkout scmGit(branches: [[name: "refs/tags/${params.VERSION}"]], ...)</code></td><td>Checkout đúng commit mà tag trỏ tới, thay vì commit mới nhất của một nhánh. Dùng nháy kép để Groovy thay giá trị <code>VERSION</code>.</td></tr>
+            <tr><td><code>when { expression { params.ACTION in [...] } }</code></td><td>Stage chỉ chạy khi điều kiện đúng; stage bị bỏ qua hiển thị màu xám (<em>skipped</em>) trên giao diện.</td></tr>
+            <tr><td>Image tag = <code>VERSION</code></td><td>Image trên ECR mang đúng tên release (<code>v1.0.0</code>) – nhìn tag biết ngay code nào đang chạy production.</td></tr>
+            <tr><td><code>disableConcurrentBuilds()</code></td><td>Không cho 2 lần release chạy cùng lúc.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Đưa code từ develop lên master</strong>
+        <p>Có thể tạo Pull Request <code>develop → master</code> trên GitHub và merge, hoặc merge trực tiếp trên máy local:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/jenkins-labs/nodejs-random-color
+git checkout master
+git pull origin master
+git merge develop
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo tag v1.0.0 trên master</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+git tag -l</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Release v1.0.0 (BuildAndDeploy)</strong>
+        <p>Mở job <code>lab10-release-manual</code> → <strong>Build with Parameters</strong> → <code>VERSION</code> = <code>v1.0.0</code>, <code>ACTION</code> = <code>BuildAndDeploy</code> → <strong>Build</strong>. Log stage checkout:</p>
+        <pre class="output-box"><code> &gt; git checkout -f a1b2c3d4...
++ git log -1 --oneline --decorate
+a1b2c3d (HEAD, tag: v1.0.0, origin/master) feat: update welcome message v3 from develop</code></pre>
+        <p>Sau khi job xong, website qua ALB hiển thị nội dung của <code>v1.0.0</code>; ECR có image tag <code>v1.0.0</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Chuẩn bị v1.0.1 (OnlyBuild)</strong>
+        <p>Sửa text thẻ <code>&lt;h1 id="welcome" ...&gt;</code> trong <code>public/index.html</code> thành <code>Welcome to My Website – v1.0.1</code>, commit lên <code>master</code> và tạo tag mới:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add public/index.html
+git commit -m "feat: release v1.0.1"
+git push origin master
+git tag -a v1.0.1 -m "Release v1.0.1"
+git push origin v1.0.1</code></pre>
+        <p>Chạy job với <code>VERSION</code> = <code>v1.0.1</code>, <code>ACTION</code> = <code>OnlyBuild</code>: stage <em>Deploy to ECS</em> bị skip – image <code>v1.0.1</code> đã sẵn sàng trên ECR nhưng production vẫn chạy <code>v1.0.0</code>. Thực tế, bước này thường làm trước giờ release (build sẵn, chờ lịch deploy).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Deploy v1.0.1 (OnlyDeploy)</strong>
+        <p>Chạy job với <code>VERSION</code> = <code>v1.0.1</code>, <code>ACTION</code> = <code>OnlyDeploy</code>: chỉ stage deploy chạy (không checkout, không build) → website hiển thị <code>v1.0.1</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Rollback về v1.0.0</strong>
+        <p>Giả sử <code>v1.0.1</code> có lỗi: chạy job với <code>VERSION</code> = <code>v1.0.0</code>, <code>ACTION</code> = <code>OnlyDeploy</code>. Production quay về <code>v1.0.0</code> chỉ trong vài phút, không cần build lại.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr list-images --repository-name nodejs-random-color --region ap-southeast-1 --query 'imageIds[].imageTag'
+curl -s http://&lt;alb-dns-name&gt;/ | grep -o "&lt;h1[^&gt;]*&gt;[^&lt;]*"</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>ECR có image tag <code>v1.0.0</code> và <code>v1.0.1</code>.</li>
+      <li>Giao diện job hiển thị đúng stage bị skip theo từng giá trị <code>ACTION</code>.</li>
+      <li>Website qua ALB đổi đúng version sau mỗi lần OnlyDeploy (v1.0.1 → rollback v1.0.0).</li>
+      <li>Trang <strong>Parameters</strong> của từng build cho biết ai đã release version nào, lúc nào.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Couldn't find any revision to build. Verify the repository and branch configuration for this job.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tag chưa được push lên GitHub (<code>git push</code> thường không đẩy tag) hoặc nhập sai tên tag.<br/><strong>Giải pháp:</strong> Chạy <code>git push origin v1.0.0</code>, kiểm tra tab <strong>Tags</strong> trên GitHub.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">OnlyDeploy lỗi <code>ImageNotFoundException</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Version đó chưa từng được build (chưa có image trên ECR).<br/><strong>Giải pháp:</strong> Chạy OnlyBuild hoặc BuildAndDeploy cho version đó trước.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không thấy nút <strong>Build with Parameters</strong></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa tick <em>This project is parameterized</em>.<br/><strong>Giải pháp:</strong> Làm lại Bước 1. Lưu ý tên parameter phân biệt hoa/thường (<code>VERSION</code>, <code>ACTION</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Push một tag lên GitHub làm job <code>lab09-cicd-nodejs-auto</code> cũng chạy</div>
+    <div class="fix"><strong>Nguyên nhân &amp; giải pháp:</strong> Webhook gửi push event cho cả tag; job Lab 9 sẽ kiểm tra nhánh <code>develop</code> và thường không có thay đổi mới nên không build. Nếu muốn tách hẳn, xoá webhook của Lab 9 sau khi học xong.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Đây là lab cuối dùng Terraform stack.</strong> Chạy <code>terraform destroy</code> để xoá ALB, ECS service, VPC – tránh phát sinh chi phí theo giờ. Xoá rule 8080 cho GitHub trong <code>jenkins-sg</code> và webhook trên GitHub (Lab 9).</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_10_cicd_with_jenkins/terraform_ecs_stack
+terraform destroy</code></pre>
+
+</body>
+</html>

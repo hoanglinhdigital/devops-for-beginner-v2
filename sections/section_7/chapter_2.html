@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kiến trúc &amp; vòng đời (life cycle) của Git – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Kiến trúc &amp; vòng đời (life cycle) của Git</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Trước khi gõ lệnh, cần hiểu Git lưu code ở đâu và một thay đổi đi qua những “khu vực” nào trước khi tới được GitHub.
+    Nắm vững các khái niệm <strong>repository, commit, branch, remote</strong> và 4 khu vực <strong>Working Directory → Staging Area → Local Repository → Remote Repository</strong> sẽ giúp bạn hiểu mọi lệnh Git thay vì học thuộc lòng.
+  </p>
+
+  <h2 class="section-heading">Các khái niệm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Repository (repo):</strong> nơi lưu toàn bộ file code, thư mục và lịch sử thay đổi của project. Repository có thể nằm ở máy local, server công ty hoặc trên Cloud (GitHub...). Ở local, lịch sử nằm trong thư mục ẩn <code>.git</code>.</li>
+    <li><strong>Commit:</strong> ảnh chụp (snapshot) của codebase tại một thời điểm, có mã hash duy nhất (ví dụ <code>a1b2c3d</code>), tác giả, thời gian và message mô tả.</li>
+    <li><strong>Branch:</strong> một “dòng phát triển” riêng biệt tạo ra từ một commit. Về bản chất branch chỉ là con trỏ trỏ tới commit mới nhất của nhánh đó.</li>
+    <li><strong>Merge:</strong> kết hợp thay đổi của một branch vào branch khác.</li>
+    <li><strong>Remote:</strong> bản copy của repository nằm trên máy khác hoặc server (thường tên là <code>origin</code>), dùng để cộng tác và đồng bộ thay đổi giữa các thành viên.</li>
+    <li><strong>Clone / Pull / Push:</strong> <code>clone</code> tải bản copy đầy đủ của remote về máy; <code>pull</code> tải thay đổi mới từ remote và merge vào local; <code>push</code> đẩy commit từ local lên remote.</li>
+  </ul>
+
+  <table class="compare-table">
+    <thead><tr><th>Thuật ngữ</th><th>Ý nghĩa</th><th>Lệnh liên quan</th></tr></thead>
+    <tbody>
+      <tr><td><strong>HEAD</strong></td><td>Con trỏ cho biết bạn đang đứng ở branch/commit nào</td><td><code>git log</code>, <code>git checkout</code></td></tr>
+      <tr><td><strong>origin</strong></td><td>Tên mặc định của remote repository khi clone</td><td><code>git remote -v</code></td></tr>
+      <tr><td><strong>fetch</strong></td><td>Tải thông tin mới từ remote nhưng <em>chưa</em> merge vào code đang làm</td><td><code>git fetch</code></td></tr>
+      <tr><td><strong>pull</strong></td><td>= <code>fetch</code> + <code>merge</code></td><td><code>git pull origin develop</code></td></tr>
+      <tr><td><strong>tag</strong></td><td>Nhãn cố định gắn vào một commit, thường đánh dấu version release</td><td><code>git tag -a v1.0</code></td></tr>
+      <tr><td><strong>Pull Request (PR)</strong><br/>Merge Request (GitLab)</td><td>Yêu cầu merge một branch vào branch khác, kèm review &amp; thảo luận. Là tính năng của GitHub/GitLab, không phải lệnh Git</td><td>Thao tác trên web</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Mô hình kiến trúc: 4 khu vực của Git</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph PC["💻 PC Local"]
+          direction LR
+          WD["📝 <b>Working Directory</b><br/>file bạn đang sửa"]
+          SA["📋 <b>Staging Area</b><br/>(Index)<br/>thay đổi chuẩn bị commit"]
+          LRP["📦 <b>Local Repository</b><br/>thư mục .git<br/>lịch sử commit"]
+      end
+      RR["<img src='../../assets/svg-icon/github.svg' style='width:40px;height:40px;'/><br/><b>Remote Repository</b><br/>GitHub · GitLab · CodeCommit"]
+      WD -->|"git add"| SA
+      SA -->|"git commit"| LRP
+      LRP -->|"git push"| RR
+      RR -->|"git fetch"| LRP
+      RR -.->|"git pull = fetch + merge"| WD
+      RR -.->|"git clone"| PC
+  </div>
+  <p class="arch-caption">Một thay đổi đi từ trái sang phải: sửa file → <code>add</code> vào staging → <code>commit</code> vào local repo → <code>push</code> lên remote. Chiều ngược lại dùng <code>fetch</code>/<code>pull</code>.</p>
+
+  <div class="tip-box"><strong>Vì sao cần Staging Area?</strong> Bạn sửa 5 file nhưng chỉ muốn commit 2 file liên quan tới một tính năng. Staging Area cho phép chọn chính xác những thay đổi nào đi vào commit, giúp mỗi commit gọn gàng, có ý nghĩa.</div>
+
+  <h2 class="section-heading">Git life cycle</h2>
+  <div class="mermaid">
+  flowchart LR
+      C["🆕 <b>Create</b><br/>git init / git clone"] --> M["✏️ <b>Modify</b><br/>sửa code bằng IDE<br/>Git tự phát hiện thay đổi"]
+      M --> S["📋 <b>Stage</b><br/>git add"]
+      S --> CM["✅ <b>Commit</b><br/>git commit -m"]
+      CM --> P["🚀 <b>Push</b><br/>git push"]
+      P -->|"tiếp tục phát triển"| M
+  </div>
+  <ul class="feature-list">
+    <li><strong>Create:</strong> tạo mới repository ở local (<code>git init</code>) hoặc trên remote rồi clone về (<code>git clone</code>).</li>
+    <li><strong>Modify:</strong> thêm/sửa/xoá file bằng IDE (VS Code...). Git tự động phát hiện file thay đổi (<code>git status</code>).</li>
+    <li><strong>Stage:</strong> dùng <code>git add</code> để chọn các thay đổi sẽ được commit.</li>
+    <li><strong>Commit:</strong> ghi các thay đổi đã stage vào lịch sử của local repository.</li>
+    <li><strong>Push:</strong> đẩy commit từ local lên remote repository (GitHub, Git server công ty...) để chia sẻ với team.</li>
+  </ul>
+
+  <h3 class="section-subheading">Trạng thái của một file</h3>
+  <div class="mermaid">
+  stateDiagram-v2
+      direction LR
+      [*] --> Untracked: tạo file mới
+      Untracked --> Staged: git add
+      Unmodified --> Modified: sửa file
+      Modified --> Staged: git add
+      Staged --> Unmodified: git commit
+      Staged --> Modified: git restore --staged
+      Modified --> Unmodified: git restore
+  </div>
+  <p class="arch-caption">Lệnh <code>git status</code> cho biết file đang ở trạng thái nào: <em>Untracked files</em> (file mới Git chưa theo dõi), <em>Changes not staged for commit</em> (Modified), <em>Changes to be committed</em> (Staged).</p>
+
+  <h3 class="section-subheading">Branch &amp; Merge nhìn từ lịch sử commit</h3>
+  <div class="mermaid">
+  gitGraph
+      commit id: "C1"
+      commit id: "C2"
+      branch feature/login
+      checkout feature/login
+      commit id: "F1"
+      commit id: "F2"
+      checkout main
+      commit id: "C3"
+      merge feature/login id: "Merge"
+      commit id: "C4"
+  </div>
+  <p class="arch-caption">Nhánh <code>feature/login</code> tạo từ commit C2, phát triển độc lập (F1, F2) trong khi <code>main</code> vẫn tiếp tục (C3). Merge tạo ra một commit hợp nhất hai dòng phát triển.</p>
+
+  <h2 class="section-heading">Use Cases: một ngày làm việc với Git</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Buổi sáng: lấy code mới nhất</h4>
+      <p><code>git checkout develop</code> → <code>git pull</code> để có code mới nhất mà đồng nghiệp đã merge hôm qua, sau đó <code>git checkout -b feature/T123</code> để bắt đầu task mới.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Trong ngày: commit thường xuyên</h4>
+      <p>Mỗi khi hoàn thành một phần nhỏ: <code>git status</code> → <code>git add</code> → <code>git commit -m "..."</code>. Commit nhỏ giúp dễ review và dễ revert.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Cuối ngày: push &amp; tạo Pull Request</h4>
+      <p><code>git push -u origin feature/T123</code> để backup code lên remote, tạo Pull Request vào <code>develop</code> nhờ đồng nghiệp review, CI tự chạy test.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Thư mục <code>.git</code> chính là toàn bộ repository. Xoá <code>.git</code> = mất toàn bộ lịch sử (chỉ còn file hiện tại). Không chỉnh sửa tay file trong <code>.git</code>.</li>
+    <li>Commit chỉ nằm ở máy bạn cho tới khi <code>push</code>. Hỏng ổ cứng trước khi push = mất code, hãy push thường xuyên.</li>
+    <li>File <code>.gitignore</code> khai báo những file/thư mục Git bỏ qua (ví dụ <code>node_modules/</code>, <code>.env</code>, <code>*.pem</code>, <code>terraform.tfstate</code>).</li>
+    <li>Git chỉ theo dõi file, không theo dõi thư mục rỗng. Muốn giữ thư mục rỗng, tạo file <code>.gitkeep</code> bên trong.</li>
+  </ul>
+
+</body>
+</html>

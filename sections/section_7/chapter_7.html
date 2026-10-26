@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Protect branch, nhánh feature &amp; Pull Request – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Protect branch, nhánh feature &amp; Pull Request</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Thiết lập <strong>bảo vệ branch</strong> <code>main</code> và <code>develop</code> bằng GitHub Ruleset: chặn push trực tiếp, chặn xoá, chặn force push.</li>
+    <li>Kiểm chứng việc push thẳng vào <code>develop</code> bị từ chối.</li>
+    <li>Tạo nhánh <code>feature/F001</code> từ <code>develop</code>, thay đổi code và push lên GitHub.</li>
+    <li>Tạo <strong>Pull Request</strong> từ <code>feature/F001</code> vào <code>develop</code>, review và merge.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      DEV["<img src='../../assets/svg-icon/developer.svg' style='width:36px;height:36px;'/><br/><b>Developer</b><br/>~/git-labs/demo-git"]
+      subgraph GH["GitHub · demo-git"]
+          direction TB
+          FB["🌿 <b>feature/F001</b>"]
+          PR["🔀 <b>Pull Request</b><br/>review · comment · approve"]
+          DV["🛡️ <b>develop</b><br/>protected"]
+          MN["🛡️ <b>main</b><br/>protected"]
+          FB --> PR -->|"Merge"| DV
+      end
+      DEV -->|"git push origin feature/F001 ✅"| FB
+      DEV -.->|"git push origin develop ❌<br/>bị Ruleset chặn"| DV
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3: repository <code>demo-git</code> (Public) đã có branch <code>main</code> và <code>develop</code>.</li>
+    <li>Bạn là owner của repository (có quyền vào tab <strong>Settings</strong>).</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab4_protect_branch_pull_request/</code> (<code>commands.sh</code>, <code>about.html</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo Ruleset bảo vệ main &amp; develop</strong>
+        <p>Trên GitHub, vào repository <code>demo-git</code> → <strong>Settings → Rules → Rulesets</strong>, tạo <strong>branch ruleset</strong> mới với các thông số:</p>
+        <ul class="feature-list">
+          <li>Ruleset name: <code>protect-main-develop</code></li>
+          <li>Enforcement status: <strong>Active</strong></li>
+          <li>Bypass list: <strong>để trống</strong> (kể cả admin/owner cũng phải tuân thủ)</li>
+          <li>Target branches: <strong>Include default branch</strong> (<code>main</code>) và <strong>Include by pattern</strong> <code>develop</code></li>
+          <li>Rules:
+            <ul class="feature-list-sm">
+              <li><strong>Restrict deletions</strong> – không cho xoá branch</li>
+              <li><strong>Require a pull request before merging</strong> – Required approvals: <code>0</code></li>
+              <li><strong>Block force pushes</strong> – không cho <code>git push --force</code></li>
+            </ul>
+          </li>
+        </ul>
+        <div class="alert alert-info"><strong>Required approvals = 0?</strong> GitHub không cho tác giả tự approve Pull Request của chính mình. Nếu học một mình, đặt <code>0</code> (vẫn bắt buộc đi qua PR). Nếu có bạn học cùng, mời họ vào repository (<strong>Settings → Collaborators</strong>) và đặt <code>1</code> để thực hành review thật.</div>
+        <p class="code-note">💡 GitHub còn có giao diện cũ <strong>Settings → Branches → Branch protection rules</strong> với chức năng tương tự. Ruleset là cách mới, linh hoạt hơn (áp dụng nhiều branch theo pattern, có bypass list).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Kiểm chứng – push trực tiếp vào develop bị chặn</strong>
+        <p>Tạo một commit rỗng trên <code>develop</code> và thử push:</p>
+        <pre class="command-line" data-prompt="$" data-output="6-11"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout develop
+git pull origin develop
+git commit --allow-empty -m "test: direct push to develop"
+git push origin develop
+remote: error: GH013: Repository rule violations found for refs/heads/develop.
+remote: - Changes must be made through a pull request.
+To github.com:&lt;GITHUB_USERNAME&gt;/demo-git.git
+ ! [remote rejected] develop -&gt; develop (push declined due to repository rule violations)
+error: failed to push some refs to 'github.com:&lt;GITHUB_USERNAME&gt;/demo-git.git'</code></pre>
+        <p>Push bị từ chối đúng như mong đợi. Bỏ commit test để <code>develop</code> local trở về giống <code>develop</code> trên GitHub (lệnh <code>reset</code> sẽ được giải thích kỹ ở chương Merge/Rebase/Squash):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git reset --hard origin/develop
+git log --oneline -3</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo nhánh feature/F001 từ develop</strong>
+        <p>Luôn pull code mới nhất trước khi tạo branch mới:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout develop
+git pull origin develop
+git checkout -b feature/F001</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Thay đổi code</strong>
+        <ul class="feature-list">
+          <li>Copy file <code>about.html</code> từ source code vào thư mục gốc của <code>demo-git</code>.</li>
+          <li>Mở <code>index.html</code>, thêm link tới trang About vào danh sách <code>&lt;ul&gt;</code>:</li>
+        </ul>
+        <pre class="code-block"><code class="language-html">    &lt;li&gt;&lt;a href="about.html"&gt;About&lt;/a&gt;&lt;/li&gt;</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git status
+git add about.html index.html
+git commit -m "feat(F001): add about page"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Push nhánh feature/F001 lên GitHub</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git push -u origin feature/F001</code></pre>
+        <p>Push thành công vì <code>feature/F001</code> không nằm trong Ruleset. Output có gợi ý link tạo Pull Request: <code>remote: Create a pull request for 'feature/F001' on GitHub by visiting: ...</code></p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Tạo Pull Request</strong>
+        <p>Trên GitHub (banner <strong>Compare &amp; pull request</strong> hoặc tab <strong>Pull requests → New pull request</strong>), tạo PR với thông số:</p>
+        <ul class="feature-list">
+          <li>base: <code>develop</code> ← compare: <code>feature/F001</code> <em>(chú ý: mặc định base là <code>main</code>, cần đổi sang <code>develop</code>)</em></li>
+          <li>Title: <code>F001 - Add about page</code></li>
+          <li>Description: mô tả ngắn thay đổi, cách kiểm tra (ví dụ “Mở index.html, click link About”).</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Review &amp; Merge Pull Request</strong>
+        <ul class="feature-list">
+          <li>Tab <strong>Files changed</strong>: xem diff từng file, thử thêm comment vào một dòng code (dấu <code>+</code> cạnh số dòng).</li>
+          <li>Nếu có reviewer: reviewer chọn <strong>Review changes → Approve</strong>.</li>
+          <li>Tab <strong>Conversation</strong>: chọn <strong>Merge pull request</strong> (kiểu <em>Create a merge commit</em>) → <strong>Confirm merge</strong>.</li>
+          <li>Xoá branch <code>feature/F001</code> trên GitHub bằng nút <strong>Delete branch</strong> sau khi merge.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Cập nhật develop ở local</strong>
+        <p>Merge diễn ra trên GitHub nên <code>develop</code> ở local chưa có thay đổi. Pull về và xoá branch feature đã merge:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout develop
+git pull origin develop
+git log --oneline --graph -10
+git branch -d feature/F001
+git fetch --prune
+git branch -a</code></pre>
+        <p><code>git fetch --prune</code> xoá các tham chiếu <code>remotes/origin/feature/F001</code> đã bị xoá trên GitHub.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Push trực tiếp vào <code>develop</code> (hoặc <code>main</code>) bị từ chối với lỗi <code>GH013: Repository rule violations</code>.</li>
+      <li>Tab <strong>Pull requests → Closed</strong> có PR <em>F001 - Add about page</em> ở trạng thái <strong>Merged</strong>.</li>
+      <li>Branch <code>develop</code> (GitHub và local) có file <code>about.html</code>; <code>git log --graph</code> hiển thị merge commit <em>Merge pull request #1 ...</em>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Push trực tiếp vào <code>develop</code> vẫn thành công, kèm dòng <code>remote: Bypassed rule violations for refs/heads/develop</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tài khoản của bạn nằm trong Bypass list, hoặc dùng Branch protection rule kiểu cũ mà không bật “Do not allow bypassing the above settings”.<br/><strong>Giải pháp:</strong> Xoá mọi mục trong Bypass list của Ruleset, kiểm tra Enforcement status là <strong>Active</strong> (không phải Evaluate/Disabled).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không thấy tuỳ chọn Rulesets/Branch protection hoặc có thông báo cần nâng cấp lên GitHub Team</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Repository đang để <strong>Private</strong> trên tài khoản GitHub Free.<br/><strong>Giải pháp:</strong> Đổi repository sang Public (<strong>Settings → General → Danger Zone → Change visibility</strong>) hoặc dùng GitHub Pro (miễn phí cho sinh viên qua GitHub Student Developer Pack).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Nút Merge bị khoá: <em>Review required – At least 1 approving review is required</em></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Ruleset đặt Required approvals ≥ 1 nhưng chỉ có một mình bạn (không thể tự approve PR của mình).<br/><strong>Giải pháp:</strong> Sửa Ruleset về Required approvals <code>0</code>, hoặc mời collaborator vào review.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">PR tạo nhầm vào <code>main</code> thay vì <code>develop</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Base branch mặc định là default branch (<code>main</code>).<br/><strong>Giải pháp:</strong> Trong PR, chọn <strong>Edit</strong> cạnh tiêu đề để đổi base branch sang <code>develop</code> (chưa merge thì đổi được).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại Ruleset và repository để dùng tiếp ở Lab 5 → Lab 7. Lab không phát sinh chi phí.</div>
+
+</body>
+</html>

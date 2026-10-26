@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Tạo một EKS Cluster và kết nối – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Tạo một EKS Cluster và kết nối</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt sẵn <strong>kubectl</strong> và <strong>eksctl</strong> trên máy local.</li>
+    <li>Tạo một <strong>EKS Cluster</strong> (kèm node group) bằng <code>eksctl</code>.</li>
+    <li>Kết nối tới cluster từ máy local bằng <code>kubectl</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:34px;height:34px;'/><br/>Máy local<br/>(eksctl, kubectl)"]
+      subgraph AWS["AWS - ap-southeast-1"]
+          CP["<img src='../../assets/aws-svg/Elastic-Kubernetes-Service.svg' style='width:40px;height:40px;'/><br/>EKS Control Plane<br/>(do AWS quản lý)"]
+          subgraph NG["Node Group"]
+              N1["<img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/><br/>Node t3.medium"]
+              N2["<img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/><br/>Node t3.medium"]
+          end
+      end
+      PC -->|"eksctl create cluster"| CP
+      CP -->|"quản lý"| NG
+      PC -->|"kubectl get nodes"| CP
+  </div>
+  <p class="arch-caption">eksctl tạo cluster với control plane (AWS quản lý) và node group (2 EC2 t3.medium). Sau đó bạn cập nhật kubeconfig để kubectl giao tiếp với cluster.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã cài <strong>AWS CLI v2</strong> (chú ý không dùng version quá cũ), <strong>kubectl</strong>, <strong>eksctl</strong>, <strong>helm</strong>.</li>
+    <li>IAM User hiện tại có quyền tạo EKS Cluster (ví dụ <code>AdministratorAccess</code>).</li>
+    <li>Source code: <code>sourcecode/section_14_eks_basic/lab1_create_cluster/</code>.</li>
+  </ul>
+  <div class="alert alert-info">
+    <strong>Mẹo cài đặt:</strong> trên Windows nên dùng <strong>chocolatey</strong> để cài eksctl, kubectl, helm.
+    Link tham khảo: <a href="https://docs.aws.amazon.com/eks/latest/userguide/getting-started-eksctl.html" target="_blank" rel="noopener">docs.aws.amazon.com/eks/latest/userguide/getting-started-eksctl.html</a>.
+  </div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Kiểm tra tool và quyền</strong>
+        <p>Kiểm tra version các tool đã cài:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws --version
+kubectl version --client
+eksctl version
+helm version --short</code></pre>
+        <p>Xác nhận IAM user hiện tại có quyền:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws sts get-caller-identity</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo EKS Cluster bằng eksctl</strong>
+        <p>Tạo file <code>cluster-config.yaml</code> (đã có sẵn trong source code):</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: devops-test-cluster
+  region: ap-southeast-1
+
+nodeGroups:
+  - name: my-nodes
+    instanceType: t3.medium
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4</code></pre>
+        <p>Chạy lệnh tạo cluster (quá trình này mất <strong>khoảng 10 phút</strong>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create cluster -f cluster-config.yaml</code></pre>
+        <p>Disable extended support cho EKS (giúp tiết kiệm chi phí):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws eks update-cluster-config --name devops-test-cluster --upgrade-policy supportType=STANDARD</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cập nhật kubeconfig để kết nối cluster</strong>
+        <p>Cập nhật file <code>~/.kube/config</code> (trên Windows: <code>C:\Users\&lt;user&gt;\.kube\config</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws eks update-kubeconfig --region ap-southeast-1 --name devops-test-cluster</code></pre>
+        <p>Kiểm tra context:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl config get-contexts</code></pre>
+        <p>Nếu máy có nhiều cluster, chuyển context về cluster mới tạo:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl config use-context devops-test-cluster</code></pre>
+        <p>Xem thông tin cluster:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl cluster-info</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: (Tuỳ chọn) Tạo node group riêng</strong>
+        <p>Bỏ qua bước này nếu đã tạo cluster có node group ở Bước 2. Nếu cần thêm node group:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create nodegroup --cluster=devops-test-cluster --region=ap-southeast-1 --name=my-node-group --node-type=t3.medium --nodes=2 --nodes-min=2 --nodes-max=2 --managed</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra node</strong>
+        <p>Đợi khoảng 5 phút rồi kiểm tra các node của cluster:</p>
+        <pre class="command-line" data-prompt="$" data-output="2,3"><code class="language-bash">kubectl get nodes
+NAME                                               STATUS   ROLES    AGE   VERSION
+ip-192-168-13-199.ap-southeast-1.compute.internal  Ready    &lt;none&gt;   5m    v1.29.3-eks
+ip-192-168-56-45.ap-southeast-1.compute.internal   Ready    &lt;none&gt;   5m    v1.29.3-eks</code></pre>
+        <p class="code-note">💡 Thấy 2 node với STATUS <code>Ready</code> là thành công.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>eksctl create cluster</code> hoàn tất không báo lỗi.</li>
+      <li><code>kubectl cluster-info</code> hiển thị control plane đang chạy tại địa chỉ <code>*.eks.amazonaws.com</code>.</li>
+      <li><code>kubectl get nodes</code> hiển thị 2 node <strong>Ready</strong>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>kubectl</code> báo lỗi không kết nối được cluster</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> kubeconfig chưa được cập nhật hoặc context chưa đúng.<br/><strong>Giải pháp:</strong> chạy lại <code>aws eks update-kubeconfig --region ap-southeast-1 --name devops-test-cluster</code> và kiểm tra <code>kubectl config get-contexts</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>eksctl create cluster</code> báo lỗi thiếu quyền (AccessDenied)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> IAM user chưa có quyền tạo EKS/EC2/CloudFormation.<br/><strong>Giải pháp:</strong> gán thêm quyền (tạm thời <code>AdministratorAccess</code> hoặc các policy EKS/EC2 tương ứng), kiểm tra lại bằng <code>aws sts get-caller-identity</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Node mãi không <code>Ready</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> node vẫn đang khởi tạo (join cluster) hoặc thiếu IAM role node.<br/><strong>Giải pháp:</strong> đợi thêm 5–10 phút; kiểm tra CloudFormation stack của cluster xem node group đã <code>CREATE_COMPLETE</code> chưa.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> EKS Cluster tính phí control plane theo giờ, node EC2 t3.medium tính phí theo giờ. Chỉ giữ cluster khi bạn còn làm các lab tiếp theo; xoá khi không dùng.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 9: Thêm SSH key cho thành viên dự án – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 9: Thêm SSH key cho thành viên dự án</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu cơ chế đăng nhập SSH bằng cặp khoá <strong>public key / private key</strong>.</li>
+    <li>Sinh cặp khoá cho thành viên dự án bằng <code>ssh-keygen</code>.</li>
+    <li>Tạo user <code>dev01</code> trên server và cấu hình <code>~/.ssh/authorized_keys</code> với quyền đúng chuẩn.</li>
+    <li>Đăng nhập bằng private key của <code>dev01</code> và thu hồi quyền truy cập khi thành viên rời dự án.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph DEV["💻 PC của thành viên dev01"]
+          direction TB
+          PRIV["🔑 <b>~/.ssh/dev01</b><br/>private key – giữ bí mật"]
+          PUB["📄 <b>~/.ssh/dev01.pub</b><br/>public key"]
+      end
+      subgraph EC2["🖥️ EC2 · linux-lab-server"]
+          direction TB
+          SSHD["🔐 sshd"]
+          AK["📜 <b>/home/dev01/.ssh/authorized_keys</b><br/>chứa public key của dev01"]
+          SSHD -->|"đối chiếu"| AK
+      end
+      Admin["<img src='../../assets/svg-icon/operator.svg' style='width:32px;height:32px;'/><br/><b>Admin</b><br/>ec2-user"]
+      PUB -.->|"gửi public key cho admin"| Admin
+      Admin -->|"thêm vào"| AK
+      PRIV ==>|"ssh -i ~/.ssh/dev01 dev01@IP"| SSHD
+  </div>
+  <p class="arch-caption">Thành viên chỉ gửi <strong>public key</strong> cho admin. Private key không bao giờ rời khỏi máy của thành viên.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Instance <code>linux-lab-server</code> đang Running, SSH được bằng <code>ec2-user</code>.</li>
+    <li>Đã hoàn thành Lab 3 (user/group) và Lab 4 (permission).</li>
+    <li>PC Local có lệnh <code>ssh-keygen</code> (Git Bash trên Windows, Terminal trên Mac/Linux).</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab9_ssh_key/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Sinh cặp khoá trên PC Local</strong>
+        <p>Đóng vai thành viên <code>dev01</code>, chạy trên PC Local (không phải trên server). Nhấn <strong>Enter</strong> để bỏ qua passphrase (hoặc đặt passphrase để bảo vệ key tốt hơn):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/.ssh
+ssh-keygen -t ed25519 -C "dev01" -f ~/.ssh/dev01
+ls -l ~/.ssh/dev01 ~/.ssh/dev01.pub
+cat ~/.ssh/dev01.pub</code></pre>
+        <p>Thuật toán <code>ed25519</code> ngắn, nhanh và an toàn hơn RSA. Nếu hệ thống cũ không hỗ trợ, dùng <code>ssh-keygen -t rsa -b 4096 -C "dev01" -f ~/.ssh/dev01</code>. Copy toàn bộ nội dung dòng <code>ssh-ed25519 AAAA... dev01</code> để dùng ở bước 3.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo user dev01 trên server</strong>
+        <p>SSH vào server bằng <code>ec2-user</code>. Tạo user <strong>không đặt password</strong> – user này chỉ đăng nhập được bằng SSH key:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo useradd dev01
+id dev01</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình authorized_keys cho dev01</strong>
+        <p>Chuyển sang user <code>dev01</code> để file tạo ra thuộc đúng owner <code>dev01</code>:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo su - dev01</code></pre>
+        <pre class="command-line" data-prompt="[dev01 ~]$" data-output="2,4"><code class="language-bash">pwd
+/home/dev01
+whoami
+dev01
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+vim ~/.ssh/authorized_keys</code></pre>
+        <p>Nhấn <code>i</code>, dán nội dung public key đã copy ở bước 1 (đúng <strong>1 dòng</strong>), <code>Esc</code> → <code>:wq</code>. Mỗi dòng trong file là một public key được phép đăng nhập. Đặt quyền cho file:</p>
+        <pre class="command-line" data-prompt="[dev01 ~]$"><code class="language-bash">chmod 600 ~/.ssh/authorized_keys
+ls -la ~/.ssh
+exit</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Đường dẫn</th><th>Quyền</th><th>Owner</th></tr></thead>
+          <tbody>
+            <tr><td><code>/home/dev01</code></td><td><code>700</code> (không được để group/other có quyền ghi)</td><td><code>dev01</code></td></tr>
+            <tr><td><code>/home/dev01/.ssh</code></td><td><code>700</code></td><td><code>dev01</code></td></tr>
+            <tr><td><code>/home/dev01/.ssh/authorized_keys</code></td><td><code>600</code></td><td><code>dev01</code></td></tr>
+          </tbody>
+        </table>
+        <p class="code-note">💡 Không cần restart <code>sshd</code> — SSH server đọc file <code>authorized_keys</code> ở mỗi lần đăng nhập.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Đăng nhập bằng private key của dev01</strong>
+        <p>Từ PC Local (thay <code>&lt;PUBLIC_IP&gt;</code> bằng IP của server):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh -i ~/.ssh/dev01 dev01@&lt;PUBLIC_IP&gt;</code></pre>
+        <pre class="command-line" data-prompt="[dev01 ~]$" data-output="2"><code class="language-bash">whoami
+dev01
+exit</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5 (tuỳ chọn): Cấu hình ~/.ssh/config để SSH nhanh</strong>
+        <p>Trên PC Local, mở (hoặc tạo) file <code>~/.ssh/config</code> bằng VS Code và thêm nội dung sau (thay <code>&lt;PUBLIC_IP&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">code ~/.ssh/config</code></pre>
+        <pre class="code-block"><code class="language-bash">Host linux-lab-dev01
+    HostName &lt;PUBLIC_IP&gt;
+    User dev01
+    IdentityFile ~/.ssh/dev01</code></pre>
+        <p>Sau đó chỉ cần gõ:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh linux-lab-dev01</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Thu hồi quyền truy cập</strong>
+        <p>Khi thành viên rời dự án hoặc bị lộ private key: xoá dòng public key tương ứng trong <code>authorized_keys</code> (nếu dùng chung user), hoặc xoá hẳn user. Login bằng <code>ec2-user</code>:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="3"><code class="language-bash">sudo userdel -r dev01
+id dev01
+id: 'dev01': no such user</code></pre>
+        <p>Thử lại <code>ssh -i ~/.ssh/dev01 dev01@&lt;PUBLIC_IP&gt;</code> từ PC Local sẽ bị từ chối.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Đăng nhập được bằng <code>ssh -i ~/.ssh/dev01 dev01@&lt;PUBLIC_IP&gt;</code> mà không cần password.</li>
+      <li><code>ls -la /home/dev01/.ssh</code> cho thấy thư mục <code>drwx------</code> và file <code>-rw-------</code>, owner <code>dev01</code>.</li>
+      <li>Sau bước 6, dev01 không còn đăng nhập được.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>dev01@...: Permission denied (publickey,gssapi-keyex,gssapi-with-mic)</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Public key dán sai (bị xuống dòng, thiếu ký tự), dùng sai private key, hoặc quyền/owner của <code>.ssh</code>, <code>authorized_keys</code> không đúng (ví dụ tạo file bằng ec2-user với sudo nên owner là root).<br/><strong>Giải pháp:</strong> Kiểm tra <code>sudo ls -la /home/dev01/.ssh</code>; sửa owner bằng <code>sudo chown -R dev01:dev01 /home/dev01/.ssh</code> và quyền <code>700</code>/<code>600</code>. Xem lý do chi tiết trên server: <code>sudo journalctl -u sshd -n 20</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Authentication refused: bad ownership or modes for directory /home/dev01</code> (trong log sshd)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thư mục home hoặc <code>.ssh</code> cho phép group/other ghi.<br/><strong>Giải pháp:</strong> <code>sudo chmod 700 /home/dev01 /home/dev01/.ssh</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Debug chi tiết quá trình SSH từ phía client</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Cần biết SSH client đang thử key nào, server phản hồi gì.<br/><strong>Giải pháp:</strong> Thêm <code>-v</code> (hoặc <code>-vvv</code>): <code>ssh -v -i ~/.ssh/dev01 dev01@&lt;PUBLIC_IP&gt;</code>.</div>
+  </div>
+
+  <div class="tip-box"><strong>Trong thực tế:</strong> quản lý SSH key thủ công trên nhiều server rất khó kiểm soát. Các giải pháp thường dùng trên AWS: <strong>AWS Systems Manager Session Manager</strong> (không cần mở cổng 22, không cần key, phân quyền bằng IAM), <strong>EC2 Instance Connect</strong> (đẩy key tạm thời 60 giây), hoặc tự động hoá bằng Ansible/user data.</div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">User <code>dev01</code> đã được xoá ở bước 6. Trên PC Local có thể xoá cặp key thực hành bằng <code>rm ~/.ssh/dev01 ~/.ssh/dev01.pub</code> và xoá block <code>linux-lab-dev01</code> trong <code>~/.ssh/config</code>. Dọn dẹp toàn bộ resource AWS của section ở chương tiếp theo.</div>
+
+</body>
+</html>

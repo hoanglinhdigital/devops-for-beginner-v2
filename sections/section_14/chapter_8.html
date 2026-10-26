@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service: NodePort, ClusterIP, LoadBalancer – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Service: NodePort, ClusterIP, LoadBalancer</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Pod là tạm thời: khi chết và được tạo lại, Pod có <strong>IP mới</strong>. Vì vậy không thể "gọi thẳng" vào IP của Pod.
+    <strong>Service</strong> là một khái niệm trừu tượng mô tả một tập hợp các Pod hoạt động cùng nhau như một dịch vụ, và cung cấp một <strong>điểm truy cập ổn định</strong> (IP/DNS cố định).
+    Service chọn Pod bằng <strong>selector</strong> và điều hướng traffic, giúp bạn có High Availability và Load Balancing mà không cần biết chi tiết mạng hay vị trí của Pod.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>IP/DNS ổn định:</strong> Service có ClusterIP cố định, không đổi khi Pod thay đổi.</li>
+    <li><strong>Chọn Pod bằng selector:</strong> <code>selector: app: nginx</code> để Service biết cần gửi traffic tới Pod nào.</li>
+    <li><strong>Load balancing:</strong> tự phân phối request đều giữa các Pod trong tập hợp.</li>
+    <li><strong>3 loại:</strong> <strong>ClusterIP</strong> (nội bộ), <strong>NodePort</strong> (mở cổng trên mỗi node), <strong>LoadBalancer</strong> (tạo LB trên cloud).</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      Client["<img src='../../assets/svg-icon/browser.svg' style='width:32px;height:32px;'/><br/>Client"]
+      LB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:32px;height:32px;'/><br/>LoadBalancer"]
+      SVC["Service<br/>(selector: app=nginx)"]
+      subgraph Pods["Các Pod"]
+          P1["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>Pod"]:::p
+          P2["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>Pod"]:::p
+          P3["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>Pod"]:::p
+      end
+      Client --> LB --> SVC --> Pods
+      classDef p fill:#eef2ff,stroke:#8f0c9e,stroke-width:1px
+  </div>
+  <p class="arch-caption">Client truy cập qua LoadBalancer → Service → Service dùng selector để điều hướng tới đúng các Pod (mỗi request tới một Pod khác nhau).</p>
+
+  <h2 class="section-heading">Ba loại Service</h2>
+  <table class="compare-table">
+    <thead><tr><th>Loại</th><th>Phạm vi truy cập</th><th>Dùng khi</th></tr></thead>
+    <tbody>
+      <tr><td><strong>ClusterIP</strong> (mặc định)</td><td>Chỉ trong cluster</td><td>Các Pod nội bộ giao tiếp với nhau (Frontend → Backend → DB).</td></tr>
+      <tr><td><strong>NodePort</strong></td><td>Qua cổng cố định trên mỗi node (30000–32767)</td><td>Cần truy cập dịch vụ từ ngoài cluster một cách đơn giản (môi trường dev/demo).</td></tr>
+      <tr><td><strong>LoadBalancer</strong></td><td>Qua LB công khai trên cloud</td><td>Expose dịch vụ ra Internet trong production.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Ba loại Port cần phân biệt</h2>
+  <ul class="feature-list">
+    <li><strong><code>port</code>:</strong> port của Service (nơi các thành phần khác gọi tới Service).</li>
+    <li><strong><code>targetPort</code>:</strong> port mà Pod expose để nhận traffic. Nếu không chỉ định, mặc định bằng <code>port</code>.</li>
+    <li><strong><code>nodePort</code>:</strong> (chỉ với NodePort) port mở trên node, range 30000–32767. Nếu không chỉ định sẽ được gán ngẫu nhiên trong range.</li>
+  </ul>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section13/service-ports.png" alt="Ba loại port: NodePort 30008 trên node → port 3000 của Service A → targetPort 3000 của Pod" />
+    <div class="figure-title">targetPort, port và nodePort của một Service NodePort</div>
+  </div>
+
+  <h2 class="section-heading">NodePort &amp; ClusterIP chi tiết</h2>
+  <ul class="feature-list">
+    <li><strong>NodePort:</strong> là loại đơn giản nhất để expose ra ngoài. Kubernetes mở một cổng cố định trên <em>mọi node</em>; ai kết nối tới cổng đó ở bất kỳ node nào cũng được chuyển tới Service. Trong multi-node, NodePort trải rộng trên các node nên có thể truy cập bằng IP của bất kỳ node nào.</li>
+    <li><strong>ClusterIP:</strong> chỉ truy cập được từ bên trong cluster, bằng IP hoặc <code>service-name</code>. Ví dụ: Frontend cần một connection point tới Backend, Backend cần một connection point tới DB.</li>
+  </ul>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section13/service-nodeport-single-node.png" alt="NodePort trong single-node cluster: user truy cập 192.168.1.2:30008 → Service A → 3 Pod" />
+    <div class="figure-title">NodePort trong single-node cluster</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section13/service-nodeport-multi-node.png" alt="NodePort trong multi-node cluster: cổng 30008 mở trên cả 3 node, đều chuyển tới Service A rồi tới các Pod" />
+    <div class="figure-title">NodePort trong multi-node cluster – truy cập qua IP của bất kỳ node nào</div>
+  </div>
+  <div class="alert alert-warning"><strong>Lưu ý NodePort:</strong> IP của node có thể thay đổi (node chết và tạo lại) nên truy cập bằng IP node là mong manh; cần thêm cơ chế (LoadBalancer/Ingress, DNS) để ổn định.</div>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section13/service-clusterip.png" alt="ClusterIP: Frontend Pod gọi Backend Service, Backend Pod gọi DB Service, tất cả bên trong cluster" />
+    <div class="figure-title">ClusterIP – connection point nội bộ giữa Frontend → Backend → DB</div>
+  </div>
+
+  <h2 class="section-heading">LoadBalancer chi tiết</h2>
+  <p class="body-text">
+    <strong>LoadBalancer</strong> là loại phức tạp nhất: Kubernetes cấp một địa chỉ IP công khai cho Service và nhờ <strong>cloud provider</strong> tạo một LoadBalancer (ví dụ AWS ALB/NLB) để điều hướng traffic tới Service.
+    Cluster cần quyền (IAM Role) để thao tác với cloud. Trên AWS, LoadBalancer sẽ được hướng dẫn chi tiết trong chương EKS (Section 14).
+  </p>
+  <div class="figure-centered">
+    <img src="../../images/section13/service-loadbalancer.png" alt="LoadBalancer: user → Load Balancer trên AWS Cloud → NodePort 30008/30009 trên các node → Frontend Service và Backend Service → Pod" />
+    <div class="figure-title">LoadBalancer – cloud provider tạo Load Balancer điều hướng traffic tới các node của cluster</div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Multi-container trong Pod:</strong> Service có thể đứng trước một nhóm Pod mà mỗi Pod chứa nhiều container; khi đó <code>targetPort</code> cần được đặt <code>name</code> để phân biệt cổng của từng container.</li>
+    <li><strong>DNS nội bộ:</strong> trong cluster, một Service tên <code>mongo-service</code> ở namespace <code>default</code> được truy cập bằng <code>mongo-service</code> (hoặc <code>mongo-service.default.svc.cluster.local</code>).</li>
+    <li><strong>Liên hệ Section 4:</strong> LoadBalancer Service trên AWS sẽ tạo ELB, target group và listener tương tự những gì bạn đã học ở phần Load Balancer.</li>
+  </ul>
+
+</body>
+</html>

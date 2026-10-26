@@ -1,0 +1,36 @@
+{
+    "family": "nodejs-task-definition",
+    "executionRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/nodejs-task-execution-role",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "256",
+    "memory": "512",
+    "runtimePlatform": {
+        "operatingSystemFamily": "LINUX",
+        "cpuArchitecture": "X86_64"
+    },
+    "containerDefinitions": [
+        {
+            "name": "nodejs-container",
+            "image": "<IMAGE_NAME>",
+            "essential": true,
+            "portMappings": [
+                {
+                    "containerPort": 3000,
+                    "protocol": "tcp",
+                    "appProtocol": "http"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/nodejs-random-color",
+                    "awslogs-region": "ap-southeast-1",
+                    "awslogs-stream-prefix": "nodejs"
+                }
+            }
+        }
+    ]
+}

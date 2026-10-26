@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevOps on AWS for Beginner - Tiếng Việt</title>
+  <link rel="icon" type="image/svg+xml" href="assets/images/devops-logo-croped.jpg" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="prism.css" />
+  <script src="prism.js"></script>
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="logo-wrap">
+      <img src="assets/images/devops-logo-croped.jpg" alt="DevOps on AWS for Beginner Logo" class="logo" />
+    </div>
+    <h1 class="site-title">DevOps on AWS for Beginner <span> - Tiếng Việt</span></h1>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar" aria-label="Course navigation">
+
+      <!-- ═══════════════════════════════════════════════════════
+           NAVIGATION — chỉnh sửa text chương học trực tiếp tại đây
+           Thêm chương: copy một thẻ <li> và tăng data-chapter
+           Thêm section: copy một khối <div class="nav-section"> và tăng data-section
+           Cập nhật outline.md tương ứng khi thay đổi cấu trúc.
+      ══════════════════════════════════════════════════════════ -->
+
+      <!-- Section 1 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="1" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          1. Giới thiệu về giảng viên &amp; khoá học
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="1" data-chapter="1">Giới thiệu giảng viên</a></li>
+          <li><a href="#" data-section="1" data-chapter="2">Khoá học này dành cho ai?</a></li>
+          <li><a href="#" data-section="1" data-chapter="3">Nội dung, cấu trúc &amp; mục tiêu khoá học</a></li>
+          <li><a href="#" data-section="1" data-chapter="4">Lưu ý cho học viên &amp; checklist chuẩn bị</a></li>
+          <li><a href="#" data-section="1" data-chapter="5">Tương tác với giảng viên như thế nào?</a></li>
+        </ul>
+      </div>
+<!-- Section 2 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="1" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          2. Hướng dẫn đaw tạo tài khoản AWS và setup ban đầu
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="2" data-chapter="1">Hướng dẫn đaw tạo tài khoản AWS và setup ban đầu</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 3 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="3" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          3. Giới thiệu về DevOps &amp; CICD
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="3" data-chapter="1">DevOps là gì? Hiểu đúng &amp; hiểu sai về DevOps</a></li>
+          <li><a href="#" data-section="3" data-chapter="2">Các nguyên tắc của DevOps &amp; CICD</a></li>
+          <li><a href="#" data-section="3" data-chapter="3">DevOps thay đổi cách làm việc &amp; vai trò DevOps Engineer</a></li>
+          <li><a href="#" data-section="3" data-chapter="4">Ma trận DevOps tools &amp; CICD</a></li>
+          <li><a href="#" data-section="3" data-chapter="5">Trở thành DevOps Engineer: kiến thức cần có &amp; cơ hội việc làm</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 4 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="4" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          4. Giới thiệu &amp; ôn lại kiến thức AWS
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="4" data-chapter="1">Giới thiệu về Amazon Web Services (AWS)</a></li>
+          <li><a href="#" data-section="4" data-chapter="2">Hệ thống chứng chỉ AWS</a></li>
+          <li><a href="#" data-section="4" data-chapter="3">Hạ tầng toàn cầu: Region, AZ, Local Zone, Edge Location</a></li>
+          <li><a href="#" data-section="4" data-chapter="4">Tổng quan các dịch vụ chính trên AWS</a></li>
+          <li><a href="#" data-section="4" data-chapter="5">Ôn tập: IAM, VPC &amp; Networking, Load Balancer</a></li>
+          <li><a href="#" data-section="4" data-chapter="6">Ôn tập: S3, RDS &amp; CloudFront (CDN)</a></li>
+          <li><a href="#" data-section="4" data-chapter="7">Ôn tập: Serverless, Container, Monitoring &amp; Messaging</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 5 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="5" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          5. Infra as Code sử dụng Terraform
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="5" data-chapter="1">Infra as Code (IaC) là gì? Tại sao cần IaC</a></li>
+          <li><a href="#" data-section="5" data-chapter="2">Các công cụ Infra as Code thường dùng</a></li>
+          <li><a href="#" data-section="5" data-chapter="3">Giới thiệu Terraform: thành phần &amp; cơ chế hoạt động</a></li>
+          <li><a href="#" data-section="5" data-chapter="4">Lab 1: Cài đặt môi trường làm việc với Terraform</a></li>
+          <li><a href="#" data-section="5" data-chapter="5">Lab 2: Template Terraform đầu tiên – EC2 &amp; Security Group</a></li>
+          <li><a href="#" data-section="5" data-chapter="6">Lab 3: Variable, Map &amp; Variable file</a></li>
+          <li><a href="#" data-section="5" data-chapter="7">Lab 4: Terraform Output</a></li>
+          <li><a href="#" data-section="5" data-chapter="8">Lab 5: Chia module &amp; liên kết module bằng Output</a></li>
+          <li><a href="#" data-section="5" data-chapter="9">Lab 6: Deploy một VPC hoàn chỉnh + resources</a></li>
+          <li><a href="#" data-section="5" data-chapter="10">Lab 7: Sử dụng module có sẵn từ Terraform Registry</a></li>
+          <li><a href="#" data-section="5" data-chapter="11">Lab 8: Bài tập cuối chương – ALB, Auto Scaling &amp; MongoDB</a></li>
+          <li><a href="#" data-section="5" data-chapter="12">Terraform State &amp; các phương án quản lý State</a></li>
+          <li><a href="#" data-section="5" data-chapter="13">Lab 9: Sử dụng S3 để quản lý Terraform State</a></li>
+          <li><a href="#" data-section="5" data-chapter="14">Lab 10: Triển khai Multi-environment, Multi-region</a></li>
+          <li><a href="#" data-section="5" data-chapter="15">Tổng kết section &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 6 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="6" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          6. Thao tác cơ bản với Linux
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="6" data-chapter="1">Giới thiệu Linux &amp; các bản phân phối (Distro)</a></li>
+          <li><a href="#" data-section="6" data-chapter="2">Lab 1: Tạo EC2 Linux, kết nối SSH &amp; các lệnh cơ bản</a></li>
+          <li><a href="#" data-section="6" data-chapter="3">Lab 2: Làm quen với trình soạn thảo Vim &amp; Nano</a></li>
+          <li><a href="#" data-section="6" data-chapter="4">User, Group &amp; phân quyền trong Linux</a></li>
+          <li><a href="#" data-section="6" data-chapter="5">Lab 3: Quản lý User, Group &amp; quyền sudo</a></li>
+          <li><a href="#" data-section="6" data-chapter="6">Lab 4: Phân quyền &amp; thay đổi owner của File/Folder</a></li>
+          <li><a href="#" data-section="6" data-chapter="7">Process &amp; Service trong Linux</a></li>
+          <li><a href="#" data-section="6" data-chapter="8">Lab 5: Quản lý Process</a></li>
+          <li><a href="#" data-section="6" data-chapter="9">Lab 6: Quản lý Service với systemctl</a></li>
+          <li><a href="#" data-section="6" data-chapter="10">Lab 7: EBS Volume – Partition, Mount &amp; mở rộng dung lượng</a></li>
+          <li><a href="#" data-section="6" data-chapter="11">Lab 8: Lập lịch tác vụ với Cron job</a></li>
+          <li><a href="#" data-section="6" data-chapter="12">Lab 9: Thêm SSH key cho thành viên dự án</a></li>
+          <li><a href="#" data-section="6" data-chapter="13">Tổng kết, lệnh thường dùng khác &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 7 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="7" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          7. Thao tác cơ bản với Git
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="7" data-chapter="1">Giới thiệu Git &amp; hệ thống quản lý phiên bản (VCS)</a></li>
+          <li><a href="#" data-section="7" data-chapter="2">Kiến trúc &amp; vòng đời (life cycle) của Git</a></li>
+          <li><a href="#" data-section="7" data-chapter="3">Lab 1: Cài đặt Git, SourceTree &amp; clone repository đầu tiên</a></li>
+          <li><a href="#" data-section="7" data-chapter="4">Lab 2: Tạo repository trên GitHub &amp; cấu hình SSH key</a></li>
+          <li><a href="#" data-section="7" data-chapter="5">Lab 3: Tạo nhánh develop, commit &amp; push</a></li>
+          <li><a href="#" data-section="7" data-chapter="6">Các mô hình Git Workflow &amp; chiến lược quản lý branch</a></li>
+          <li><a href="#" data-section="7" data-chapter="7">Lab 4: Protect branch, nhánh feature &amp; Pull Request</a></li>
+          <li><a href="#" data-section="7" data-chapter="8">Lab 5: Nhánh release, merge vào main &amp; đánh tag</a></li>
+          <li><a href="#" data-section="7" data-chapter="9">Lab 6: Git log, show &amp; revert</a></li>
+          <li><a href="#" data-section="7" data-chapter="10">Lab 7: Giả lập &amp; xử lý conflict trên Git</a></li>
+          <li><a href="#" data-section="7" data-chapter="11">Merge vs Rebase vs Squash &amp; các lệnh stash, reset</a></li>
+          <li><a href="#" data-section="7" data-chapter="12">Lab 8: Sử dụng AWS CodeCommit</a></li>
+          <li><a href="#" data-section="7" data-chapter="13">Best practice khi sử dụng Git, tổng kết &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 8 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="8" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          8. Thao tác cơ bản với Docker
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="8" data-chapter="1">Container là gì? Tại sao cần Container?</a></li>
+          <li><a href="#" data-section="8" data-chapter="2">Docker là gì? Kiến trúc &amp; các thành phần cơ bản</a></li>
+          <li><a href="#" data-section="8" data-chapter="3">Lab 1: Cài đặt Docker &amp; Docker Compose, đăng ký Docker Hub</a></li>
+          <li><a href="#" data-section="8" data-chapter="4">Lab 2: Thao tác cơ bản với Image &amp; Container</a></li>
+          <li><a href="#" data-section="8" data-chapter="5">Dockerfile &amp; các chỉ thị cơ bản</a></li>
+          <li><a href="#" data-section="8" data-chapter="6">Lab 3: Build &amp; Run container đơn giản với Dockerfile</a></li>
+          <li><a href="#" data-section="8" data-chapter="7">Lab 4: Phân biệt CMD và ENTRYPOINT</a></li>
+          <li><a href="#" data-section="8" data-chapter="8">Lab 5: Multi-stage Dockerfile</a></li>
+          <li><a href="#" data-section="8" data-chapter="9">Docker Compose – giới thiệu &amp; cú pháp</a></li>
+          <li><a href="#" data-section="8" data-chapter="10">Lab 6: Docker Compose – ứng dụng Node.js đơn giản</a></li>
+          <li><a href="#" data-section="8" data-chapter="11">Lab 7: Docker Compose – Multi container (Node.js, Redis, MySQL)</a></li>
+          <li><a href="#" data-section="8" data-chapter="12">Lab 8: Docker Compose – Load Balancer với NGINX</a></li>
+          <li><a href="#" data-section="8" data-chapter="13">Giới thiệu Amazon ECR &amp; Amazon ECS</a></li>
+          <li><a href="#" data-section="8" data-chapter="14">Lab 9: Push image lên ECR &amp; chạy container trên ECS Fargate</a></li>
+          <li><a href="#" data-section="8" data-chapter="15">Docker cheat sheet, tổng kết &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 9 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="9" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          9. CI/CD với AWS CodePipeline
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="9" data-chapter="1">Giới thiệu AWS Developer Tools: CodeCommit, CodeBuild, CodeDeploy, CodePipeline</a></li>
+          <li><a href="#" data-section="9" data-chapter="2">AWS CodeBuild &amp; file buildspec.yml</a></li>
+          <li><a href="#" data-section="9" data-chapter="3">Lab 1: Chuẩn bị source code trên GitHub &amp; tạo kết nối GitHub</a></li>
+          <li><a href="#" data-section="9" data-chapter="4">Lab 2: CodeBuild – Build Java project, lưu artifact lên S3</a></li>
+          <li><a href="#" data-section="9" data-chapter="5">Lab 3: CodeBuild – Build Node.js (Webpack), upload file tĩnh lên S3</a></li>
+          <li><a href="#" data-section="9" data-chapter="6">Lab 4: CodeBuild – Build Docker image &amp; push lên ECR</a></li>
+          <li><a href="#" data-section="9" data-chapter="7">AWS CodePipeline &amp; AWS CodeDeploy</a></li>
+          <li><a href="#" data-section="9" data-chapter="8">Lab 5: CodePipeline – GitHub → CodeBuild → Elastic Beanstalk</a></li>
+          <li><a href="#" data-section="9" data-chapter="9">Các chiến lược deployment: Rolling, Blue/Green, Canary, Linear</a></li>
+          <li><a href="#" data-section="9" data-chapter="10">Lab 6: CodePipeline deploy lên ECS (Rolling update)</a></li>
+          <li><a href="#" data-section="9" data-chapter="11">Lab 7: Blue/Green deployment lên ECS với CodeDeploy</a></li>
+          <li><a href="#" data-section="9" data-chapter="12">Lab 8: Canary deployment lên ECS với CodeDeploy</a></li>
+          <li><a href="#" data-section="9" data-chapter="13">Lab 9: Manual approval &amp; notification trong CodePipeline</a></li>
+          <li><a href="#" data-section="9" data-chapter="14">Tổng kết section &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 10 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="10" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          10. CI/CD sử dụng Jenkins
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="10" data-chapter="1">Giới thiệu Jenkins &amp; CI/CD với Jenkins</a></li>
+          <li><a href="#" data-section="10" data-chapter="2">Lab 1: Cài đặt Jenkins server trên EC2 (Ubuntu)</a></li>
+          <li><a href="#" data-section="10" data-chapter="3">Lab 2: Làm quen giao diện &amp; tạo job Freestyle đầu tiên</a></li>
+          <li><a href="#" data-section="10" data-chapter="4">Lab 3: Biến (Variable), Parameter &amp; Credential trong Jenkins</a></li>
+          <li><a href="#" data-section="10" data-chapter="5">Jenkins Pipeline: Jenkinsfile, Declarative vs Scripted</a></li>
+          <li><a href="#" data-section="10" data-chapter="6">Lab 4: Build Java project (Maven) &amp; upload artifact lên S3</a></li>
+          <li><a href="#" data-section="10" data-chapter="7">Lab 5: Build Node.js (Vue + Webpack) &amp; upload lên S3</a></li>
+          <li><a href="#" data-section="10" data-chapter="8">Lab 6: Build Docker image &amp; push lên Amazon ECR</a></li>
+          <li><a href="#" data-section="10" data-chapter="9">Lab 7: Job deploy lên Amazon ECS (Terraform stack)</a></li>
+          <li><a href="#" data-section="10" data-chapter="10">Lab 8: Pipeline from SCM &amp; private repository (SSH key)</a></li>
+          <li><a href="#" data-section="10" data-chapter="11">Lab 9: Tự động trigger job từ GitHub webhook</a></li>
+          <li><a href="#" data-section="10" data-chapter="12">Lab 10: Job release theo Git tag &amp; tham số ACTION</a></li>
+          <li><a href="#" data-section="10" data-chapter="13">Lab 11: Scripted Pipeline</a></li>
+          <li><a href="#" data-section="10" data-chapter="14">Lab 12: Gửi notification kết quả job sang Slack</a></li>
+          <li><a href="#" data-section="10" data-chapter="15">Tổng kết section &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 11 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="11" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          11. Chiến lược deployment
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="11" data-chapter="1">Tại sao cần chiến lược deployment?</a></li>
+          <li><a href="#" data-section="11" data-chapter="2">In-place (All at once) &amp; Rolling update</a></li>
+          <li><a href="#" data-section="11" data-chapter="3">Blue/Green deployment</a></li>
+          <li><a href="#" data-section="11" data-chapter="4">Blue/Green cho database: Amazon RDS Blue/Green Deployments</a></li>
+          <li><a href="#" data-section="11" data-chapter="5">Canary deployment (&amp; Linear)</a></li>
+          <li><a href="#" data-section="11" data-chapter="6">Lab 1: Job Build theo Git tag &amp; Terraform stack Blue/Green</a></li>
+          <li><a href="#" data-section="11" data-chapter="7">Lab 2: Job Deploy lên môi trường idle &amp; kiểm thử qua test listener</a></li>
+          <li><a href="#" data-section="11" data-chapter="8">Lab 3: Job Switch traffic &amp; rollback</a></li>
+          <li><a href="#" data-section="11" data-chapter="9">Lab 4: Job Clear resource &amp; quy trình release Blue/Green hoàn chỉnh</a></li>
+          <li><a href="#" data-section="11" data-chapter="10">Lab 5: Canary deployment với ALB weighted target group</a></li>
+          <li><a href="#" data-section="11" data-chapter="11">Tổng kết section &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 12 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="17" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          12. CI/CD sử dụng GitHub Actions
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="12" data-chapter="1">GitHub Actions là gì?</a></li>
+          <li><a href="#" data-section="12" data-chapter="2">Lab: Sử dụng GitHub Actions để implement Blue-Green deployment</a></li>
+          <li><a href="#" data-section="12" data-chapter="3">Tổng kết &amp; Clear resources</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 13 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="12" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          13. Serverless Application Model (SAM)
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="13" data-chapter="1">Serverless và AWS SAM là gì?</a></li>
+          <li><a href="#" data-section="13" data-chapter="2">Cấu trúc template SAM &amp; các lệnh SAM CLI</a></li>
+          <li><a href="#" data-section="13" data-chapter="3">Lab 1: Cài đặt SAM CLI &amp; ứng dụng Hello World</a></li>
+          <li><a href="#" data-section="13" data-chapter="4">Lab 2: Triển khai ứng dụng URL Shortener bằng SAM</a></li>
+          <li><a href="#" data-section="13" data-chapter="5">Lab 3: Test ở local, xem log &amp; cập nhật nhanh với sam sync</a></li>
+          <li><a href="#" data-section="13" data-chapter="6">Lambda version, alias &amp; Safe deployment với CodeDeploy</a></li>
+          <li><a href="#" data-section="13" data-chapter="7">Lab 4: Canary deployment cho Lambda với SAM &amp; CodeDeploy</a></li>
+          <li><a href="#" data-section="13" data-chapter="8">Tổng kết section &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 14 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="13" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          14. Kubernetes (k8s) cơ bản
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="14" data-chapter="1">Container Orchestration &amp; Giới thiệu Kubernetes</a></li>
+          <li><a href="#" data-section="14" data-chapter="2">Kiến trúc Kubernetes cluster: Control Plane, Worker Node &amp; kubectl</a></li>
+          <li><a href="#" data-section="14" data-chapter="3">Các khái niệm cơ bản &amp; Pod</a></li>
+          <li><a href="#" data-section="14" data-chapter="4">Lab 1: Cài đặt Minikube &amp; chạy Pod đầu tiên</a></li>
+          <li><a href="#" data-section="14" data-chapter="5">Namespace trong Kubernetes</a></li>
+          <li><a href="#" data-section="14" data-chapter="6">ReplicaSet: đảm bảo số lượng Pod</a></li>
+          <li><a href="#" data-section="14" data-chapter="7">Deployment: update &amp; rollback</a></li>
+          <li><a href="#" data-section="14" data-chapter="8">Service: NodePort, ClusterIP, LoadBalancer</a></li>
+          <li><a href="#" data-section="14" data-chapter="9">Lab 2: Tạo NodePort Service</a></li>
+          <li><a href="#" data-section="14" data-chapter="10">Lab 3: Tạo ClusterIP Service</a></li>
+          <li><a href="#" data-section="14" data-chapter="11">Ingress: định tuyến HTTP/HTTPS</a></li>
+          <li><a href="#" data-section="14" data-chapter="12">Persistent Volume &amp; Storage Class</a></li>
+          <li><a href="#" data-section="14" data-chapter="13">ConfigMap</a></li>
+          <li><a href="#" data-section="14" data-chapter="14">Secret</a></li>
+          <li><a href="#" data-section="14" data-chapter="15">StatefulSet</a></li>
+          <li><a href="#" data-section="14" data-chapter="16">Lab 4: Tạo Kubernetes cluster bằng kops</a></li>
+          <li><a href="#" data-section="14" data-chapter="17">Lab 5: Triển khai ứng dụng mẫu lên Kubernetes</a></li>
+          <li><a href="#" data-section="14" data-chapter="18">Tổng kết section &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 15 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="14" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          15. Elastic Kubernetes Service (EKS)
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="15" data-chapter="1">Giới thiệu về Amazon EKS</a></li>
+          <li><a href="#" data-section="15" data-chapter="2">Lab 1: Tạo một EKS Cluster và kết nối</a></li>
+          <li><a href="#" data-section="15" data-chapter="3">LoadBalancer trong EKS</a></li>
+          <li><a href="#" data-section="15" data-chapter="4">Lab 2: LoadBalancer trong EKS – Part 1</a></li>
+          <li><a href="#" data-section="15" data-chapter="5">Lab 2: LoadBalancer trong EKS – Part 2</a></li>
+          <li><a href="#" data-section="15" data-chapter="6">Storage trong EKS</a></li>
+          <li><a href="#" data-section="15" data-chapter="7">Lab 3: Volume trong EKS</a></li>
+          <li><a href="#" data-section="15" data-chapter="8">Autoscaling cho EKS</a></li>
+          <li><a href="#" data-section="15" data-chapter="9">Security for EKS</a></li>
+          <li><a href="#" data-section="15" data-chapter="10">Lab 4: Add new IAM User to EKS Cluster</a></li>
+          <li><a href="#" data-section="15" data-chapter="11">Tổng kết &amp; dọn dẹp resource</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 16 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="15" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          15. Monitoring for Kubernetes/EKS
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="16" data-chapter="1">Các yếu tố cần quan tâm khi giám sát K8s/EKS</a></li>
+          <li><a href="#" data-section="16" data-chapter="2">Các giải pháp Open Source cho Monitoring</a></li>
+          <li><a href="#" data-section="16" data-chapter="3">Giải pháp Managed Service cho Monitoring EKS</a></li>
+          <li><a href="#" data-section="16" data-chapter="4">Giải pháp SaaS cho Monitoring EKS</a></li>
+          <li><a href="#" data-section="16" data-chapter="5">Lab 1: Metrics and Alert</a></li>
+          <li><a href="#" data-section="16" data-chapter="6">Lab 2: Log</a></li>
+          <li><a href="#" data-section="16" data-chapter="7">Lab 3: Request Tracing</a></li>
+          <li><a href="#" data-section="16" data-chapter="8">Tổng kết</a></li>
+        </ul>
+      </div>
+
+      <!-- Section 17 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="16" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          17. CICD for Kubernetes/EKS
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="17" data-chapter="1">Tổng quan flow CI-CD cho Kubernetes/EKS</a></li>
+          <li><a href="#" data-section="17" data-chapter="2">Các phương án implement CICD cho Kubernetes/EKS</a></li>
+          <li><a href="#" data-section="17" data-chapter="3">Lab 1: Tạo một EKS Cluster và kết nối</a></li>
+          <li><a href="#" data-section="17" data-chapter="4">Lab 2: Implement CICD using CodePipeline</a></li>
+          <li><a href="#" data-section="17" data-chapter="5">Lab 3: Implement CICD using GithubAction</a></li>
+          <li><a href="#" data-section="17" data-chapter="6">Giới thiệu GitOps</a></li>
+          <li><a href="#" data-section="17" data-chapter="7">Lab 4: Implement GitOps với GithubAction + ArgoCD</a></li>
+        </ul>
+      </div>
+
+
+      <!-- Section 18 -->
+      <div class="nav-section">
+        <div class="nav-section-title" data-section="18" role="button" tabindex="0">
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.586a1 1 0 01.707.293L7.5 4H13.5A1 1 0 0114.5 5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5z" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          18. Final Assignment
+        </div>
+        <ul class="nav-chapters">
+          <li><a href="#" data-section="18" data-chapter="1">Final assignment: Đề bài</a></li>
+          <li><a href="#" data-section="18" data-chapter="2">Final assignment: Đáp án mẫu phần thiết kế</a></li>
+          <li><a href="#" data-section="18" data-chapter="3">Final assignment: Hướng dẫn phần triển khai lên AWS</a></li>
+        </ul>
+      </div>
+
+    </nav>
+
+    <div class="content-area">
+      <iframe
+        id="content-frame"
+        src="welcome.html"
+        title="Chapter content"
+        allowfullscreen>
+      </iframe>
+    </div>
+  </div>
+
+  <script>
+    let activeSection = null;
+    let activeChapter = null;
+
+    function navigateTo(sectionId, chapterId, updateHash = true) {
+      document.querySelectorAll('.nav-section-title').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-chapters a').forEach(el => el.classList.remove('active'));
+
+      activeSection = sectionId;
+      activeChapter = chapterId;
+
+      const sectionEl = document.querySelector(`.nav-section-title[data-section="${sectionId}"]`);
+
+      if (chapterId) {
+        const chapterEl = document.querySelector(
+          `.nav-chapters a[data-section="${sectionId}"][data-chapter="${chapterId}"]`
+        );
+        if (chapterEl) {
+          chapterEl.classList.add('active');
+          chapterEl.scrollIntoView({ block: 'nearest' });
+        }
+        const frame = document.getElementById('content-frame');
+        if (frame) frame.src = `sections/section_${sectionId}/chapter_${chapterId}.html`;
+
+        if (updateHash) {
+          history.replaceState(null, '', `#${sectionId}.${chapterId}`);
+        }
+      }
+
+      if (sectionEl) sectionEl.classList.add('active');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.nav-section-title').forEach(el => {
+        el.addEventListener('click', () => navigateTo(parseInt(el.dataset.section), 0));
+        el.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') navigateTo(parseInt(el.dataset.section), 0);
+        });
+      });
+
+      document.querySelectorAll('.nav-chapters a').forEach(el => {
+        el.addEventListener('click', e => {
+          e.preventDefault();
+          navigateTo(parseInt(el.dataset.section), parseInt(el.dataset.chapter));
+        });
+      });
+
+      const hashMatch = window.location.hash.match(/^#(\d+)\.(\d+)$/);
+      if (hashMatch) {
+        navigateTo(parseInt(hashMatch[1]), parseInt(hashMatch[2]), false);
+      }
+    });
+  </script>
+</body>
+</html>

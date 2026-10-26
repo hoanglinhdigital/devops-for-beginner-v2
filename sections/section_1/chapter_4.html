@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lưu ý cho học viên &amp; checklist chuẩn bị – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">1. Giới thiệu về giảng viên &amp; khoá học</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lưu ý cho học viên &amp; checklist chuẩn bị</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Khoảng 70% thời lượng khoá học là thực hành trực tiếp trên AWS, vì vậy bạn cần nắm một số nguyên tắc quan trọng — đặc biệt là về
+    <strong>chi phí</strong> và <strong>bảo mật</strong> — và chuẩn bị sẵn công cụ, tài khoản trước khi bắt đầu các bài lab.
+  </p>
+
+  <h2 class="section-heading">Phong cách &amp; phạm vi khoá học</h2>
+  <ul class="feature-list">
+    <li><strong>Phong cách giảng dạy</strong> mang hơi hướng Architect một chút (do giảng viên là Solution Architect): luôn giải thích <em>tại sao</em> thiết kế như vậy, không chỉ <em>làm thế nào</em>.</li>
+    <li><strong>Thực tế:</strong> khoá học không dạy những gì ít được sử dụng trong dự án thực tế.</li>
+    <li><strong>Phạm vi:</strong> khoá học không bao gồm kiến thức liên quan đến On-premise cũng như các cloud provider khác (Azure &amp; Google Cloud).</li>
+    <li><strong>Môi trường thật 100%:</strong> sử dụng account AWS chính chủ của bạn thay vì môi trường Sandbox hay Online IDE.</li>
+    <li>
+      <strong>Kiên trì:</strong> thời lượng thực hành chiếm phần lớn, đòi hỏi bạn cần kiên trì theo đuổi đến cùng. Trong quá trình làm lab không thể tránh khỏi những trouble,
+      hãy chịu khó tự tìm hiểu (Google, tài liệu, công cụ AI) — giảng viên sẽ cố gắng hỗ trợ nhiều nhất có thể.
+    </li>
+  </ul>
+
+  <h2 class="section-heading">Lưu ý khi làm lab</h2>
+  <ul class="feature-list">
+    <li><strong>Không skip bài lab</strong> trừ khi bạn đã biết làm rồi — các bài lab sau thường dùng kết quả của bài lab trước.</li>
+    <li>
+      <strong>Chi phí:</strong> hầu hết các bài lab sử dụng resource nằm trong <strong>free-tier</strong> của AWS, tuy nhiên có một vài dịch vụ mất phí (không nhiều), cụ thể sẽ được nói rõ trong từng bài lab.
+      <br/><em>*Bạn tự chịu trách nhiệm nếu tạo các resource không nằm trong nội dung khoá học và bị charge phí (ví dụ: Shield Advanced $3000/tháng).</em>
+    </li>
+    <li><strong>Luôn xoá resource (hoặc stop tạm thời) sau mỗi bài lab</strong> theo hướng dẫn, tránh để server/database chạy sau bài lab dẫn đến tốn tiền. Giảng viên không chịu trách nhiệm nếu bạn quên xoá/stop server.</li>
+    <li><strong>Không sử dụng account công ty cấp, account đi mượn, account Sandbox</strong> để làm lab.</li>
+    <li><strong>Giao diện AWS Console thay đổi liên tục:</strong> rất có thể ngay khi bạn xem video, giao diện đã khác. Hãy thông báo cho giảng viên để cập nhật (record lại video) nhanh nhất có thể.</li>
+  </ul>
+
+  <div class="alert alert-warning">
+    <strong>Chi phí (Cost):</strong> Một số dịch vụ AWS tính phí theo giờ ngay cả khi không có traffic — đặc biệt
+    <strong>EKS Cluster, NAT Gateway, Application Load Balancer, RDS</strong> và các EC2 instance chạy Jenkins.
+    Luôn thực hiện bước <em>Dọn dẹp resource</em> ở cuối mỗi bài lab (với Terraform: <code>terraform destroy</code>) và thiết lập
+    <strong>AWS Budget alert</strong> để nhận email cảnh báo khi chi phí vượt ngưỡng.
+  </div>
+  <div class="alert alert-danger">
+    <strong>Bảo mật (Security):</strong> Tuyệt đối không commit Access Key, Secret Key, mật khẩu database, file <code>terraform.tfstate</code>
+    hay <code>terraform.tfvars</code> lên Github hoặc bất kỳ nơi công khai nào. Với pipeline CICD, hãy lưu secret trong Credentials của Jenkins,
+    Github Secrets hoặc AWS Secrets Manager. Key AWS bị lộ có thể bị bot quét và dùng để tạo tài nguyên đào coin chỉ trong vài phút.
+  </div>
+
+  <h2 class="section-heading">Mô hình môi trường thực hành</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Local["💻 Máy local của học viên"]
+          Dev["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/><b>Học viên</b>"]
+          IDE["<img src='../../assets/svg-icon/ide.svg' style='width:32px;height:32px;'/><br/><b>VS Code</b><br/>Git · AWS CLI · Terraform · Kubectl"]
+          Docker["<img src='../../assets/svg-icon/docker.svg' style='width:32px;height:32px;'/><br/><b>Docker</b>"]
+          Dev --> IDE
+          Dev --> Docker
+      end
+      Github["<img src='../../assets/svg-icon/github.svg' style='width:32px;height:32px;'/><br/><b>Github</b><br/>Source code · Github Actions"]
+      Console["<img src='../../assets/aws-svg/browser.svg' style='width:32px;height:32px;'/><br/><b>AWS Management Console</b><br/>(trình duyệt)"]
+      AWS["<img src='../../assets/aws-svg/aws-logo.svg' style='width:32px;height:32px;'/><br/><b>AWS Account cá nhân</b><br/>EC2 · ECR · CodePipeline · Lambda · EKS..."]
+      Dev -->|"thao tác trên giao diện"| Console
+      Console --> AWS
+      IDE -->|"git push"| Github
+      IDE -->|"AWS CLI / Terraform"| AWS
+      Github -->|"CICD deploy"| AWS
+  </div>
+  <p class="arch-caption">Học viên viết code &amp; hạ tầng trên máy local, đẩy lên Github; pipeline CICD tự động build và deploy lên AWS account cá nhân.</p>
+
+  <h2 class="section-heading">Công cụ cần chuẩn bị</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Công cụ</th><th>Dùng để làm gì</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Git</strong> &amp; tài khoản <strong>Github</strong></td><td>Quản lý source code, trigger pipeline CICD (Jenkins, Github Actions, CodePipeline)</td></tr>
+      <tr><td><strong>VS Code</strong></td><td>Soạn thảo code, file cấu hình và chạy command trong terminal tích hợp</td></tr>
+      <tr><td><strong>AWS CLI</strong></td><td>Thao tác với các service của AWS bằng command, cấu hình credential cho Terraform</td></tr>
+      <tr><td><strong>Terraform</strong></td><td>Provision hạ tầng AWS bằng code (Infra as Code)</td></tr>
+      <tr><td><strong>Docker</strong></td><td>Build và chạy container image, làm quen với Docker Compose</td></tr>
+      <tr><td><strong>AWS SAM CLI</strong></td><td>Build &amp; deploy ứng dụng Serverless (Lambda, API Gateway)</td></tr>
+      <tr><td><strong>kubectl</strong></td><td>Thao tác với Kubernetes cluster (EKS)</td></tr>
+      <tr><td><strong>MySQL Workbench</strong></td><td>Kết nối và kiểm tra database (RDS) của ứng dụng demo</td></tr>
+      <tr><td><strong>DrawIO</strong></td><td>Vẽ sơ đồ kiến trúc hệ thống &amp; luồng CICD</td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Việc cài đặt chi tiết từng công cụ sẽ được hướng dẫn ở chương cài đặt công cụ và ở đầu các chương liên quan.</p>
+
+  <h2 class="section-heading">Checklist chuẩn bị</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>☐</th><th>Hạng mục</th><th>Ghi chú</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>☐</td><td><strong>AWS Account cá nhân</strong></td><td>Có video hướng dẫn đăng ký; không dùng account công ty, account mượn hoặc Sandbox</td></tr>
+      <tr><td>☐</td><td><strong>Thẻ thanh toán quốc tế</strong> (Visa/Mastercard/JCB)</td><td>Bắt buộc để đăng ký AWS Account</td></tr>
+      <tr><td>☐</td><td><strong>Tài khoản Github</strong></td><td>Dùng để lưu source code và chạy Github Actions</td></tr>
+      <tr><td>☐</td><td><strong>Kiến thức nền tảng</strong></td><td>AWS cơ bản, Linux, Git — xem lại chương <em>Khoá học này dành cho ai?</em></td></tr>
+      <tr><td>☐</td><td><strong>Công cụ trên máy local</strong></td><td>Git, VS Code, AWS CLI, Terraform, Docker, AWS SAM CLI, kubectl, MySQL Workbench, DrawIO</td></tr>
+      <tr><td>☐</td><td><strong>Thiết lập cảnh báo chi phí</strong> (Budget alert)</td><td>Làm ngay sau khi tạo account</td></tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-info">
+    Luôn xoá resource sau mỗi bài lab để tránh phát sinh chi phí ngoài ý muốn.
+  </div>
+
+</body>
+</html>

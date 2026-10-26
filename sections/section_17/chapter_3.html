@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Tạo một EKS Cluster và kết nối – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CICD for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Tạo một EKS Cluster và kết nối</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo một <strong>EKS Cluster</strong> (kèm node group) bằng <strong>eksctl</strong>.</li>
+    <li>Kết nối tới cluster từ máy local bằng <code>kubectl</code>.</li>
+    <li>Cài đặt các thành phần cần thiết cho các lab sau: <strong>OIDC provider</strong>, <strong>AWS Load Balancer Controller</strong> (để tạo ALB) và <strong>EBS CSI Driver</strong> (để dùng storage cho MongoDB).</li>
+    <li>Kiểm thử nhanh bằng cách deploy ứng dụng mẫu <strong>2048 game</strong> và truy cập qua ALB.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Local["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>Máy local</b><br/>aws cli + eksctl + kubectl"]
+      EKS["<img src='../../assets/aws-svg/EKS.svg' style='width:44px;height:44px;'/><br/><b>EKS Cluster</b><br/>devops-test-cluster"]
+      NG["🖥️ Node group<br/>2 x t3.medium"]
+      ALBC["⚖️ AWS Load Balancer<br/>Controller"]
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:40px;height:40px;'/><br/><b>ALB</b>"]
+      EBS["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:34px;height:34px;'/><br/><b>EBS CSI Driver</b>"]
+      Local -->|"eksctl create cluster"| EKS
+      EKS --- NG
+      EKS --- ALBC
+      ALBC -->|"tạo ALB từ Ingress"| ALB
+      EKS --- EBS
+  </div>
+  <p class="arch-caption">Từ máy local dùng eksctl tạo cluster + node group, rồi cài thêm ALB Controller (cho Ingress/ALB) và EBS CSI Driver (cho storage).</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Máy local đã cài: <strong>AWS CLI</strong>, <strong>kubectl</strong>, <strong>eksctl</strong> và <strong>helm</strong> (nên dùng <em>chocolatey</em> để cài cho Windows).</li>
+    <li>IAM user có quyền tạo EKS Cluster (kiểm tra bằng <code>aws sts get-caller-identity</code>).</li>
+    <li>Đã tham khảo bài tạo EKS Cluster ở <strong>Section 14 – Lab 1</strong> (phần tạo cluster tương tự, bài này bổ sung thêm ALB Controller &amp; EBS CSI Driver).</li>
+    <li>Source code lab nằm tại <code>sourcecode/section_16_cicd_for_eks/lab1_create_eks_cluster/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Kiểm tra công cụ và quyền</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws --version
+kubectl version --client
+eksctl version
+helm version --short</code></pre>
+        <p>Xác nhận IAM user đang dùng có đủ quyền:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws sts get-caller-identity</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo EKS Cluster (mất khoảng 10 phút)</strong>
+        <p>Chỉnh sửa file <code>cluster-config.yaml</code> nếu muốn đổi tên cluster, region, số node hay instance type, sau đó tạo cluster:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create cluster -f cluster-config.yaml</code></pre>
+        <p>Chạy lệnh sau để <strong>disable extended support</strong> cho EKS (giúp tiết kiệm chi phí):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws eks update-cluster-config --name devops-test-cluster --upgrade-policy supportType=STANDARD</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cập nhật kubeconfig và kiểm tra node</strong>
+        <p>Cập nhật file config (Windows: <code>C:\Users\{username}\.kube\config</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws eks update-kubeconfig --region ap-southeast-1 --name devops-test-cluster</code></pre>
+        <p>Kiểm tra context và thông tin cluster:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl config get-contexts
+kubectl cluster-info</code></pre>
+        <p>Đợi khoảng 5 phút rồi kiểm tra node đã sẵn sàng (Ready):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get nodes</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cài OIDC provider cho cluster</strong>
+        <p>OIDC cho phép pod dùng <em>IAM Role for Service Account</em> (IRSA) — cần thiết cho ALB Controller và EBS CSI Driver.</p>
+        <p>Tham khảo guide chính thức: <a href="https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html" target="_blank" rel="noopener">enable IAM roles for service accounts</a>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Cài AWS Load Balancer Controller</strong>
+        <p>Tham khảo: <a href="https://docs.aws.amazon.com/eks/latest/userguide/aws-load-balancer-controller.html" target="_blank" rel="noopener">AWS Load Balancer Controller</a>.</p>
+        <p>Tạo IAM policy cho LB Controller (dùng file <code>iam_policy.json</code> trong thư mục source):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam_policy.json</code></pre>
+        <p>Tạo IRSA cho LB Controller (thay <code>&lt;AWS_ACCOUNT_ID&gt;</code> bằng Account ID của bạn):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create iamserviceaccount \
+  --cluster=devops-test-cluster \
+  --namespace=kube-system \
+  --name=aws-load-balancer-controller \
+  --attach-policy-arn=arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:policy/AWSLoadBalancerControllerIAMPolicy \
+  --override-existing-serviceaccounts \
+  --region ap-southeast-1 \
+  --approve</code></pre>
+        <p>Cài LB Controller bằng Helm:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=devops-test-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --version 1.14.0</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Deploy ứng dụng mẫu 2048 game và kiểm tra ALB</strong>
+        <p>Tham khảo: <a href="https://docs.aws.amazon.com/eks/latest/userguide/alb-ingress.html#application-load-balancer-sample-application" target="_blank" rel="noopener">ALB sample application</a>.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.14.1/docs/examples/2048/2048_full.yaml</code></pre>
+        <p>Kiểm tra ALB được tạo ra (đợi vài phút), lấy DNS của ALB và truy cập thử game 2048 (lưu ý thêm <code>http://</code> trước DNS).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Cài EBS CSI Driver (cho storage của MongoDB)</strong>
+        <p>Tạo IAM Role cho EBS CSI Driver:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create iamserviceaccount \
+  --name ebs-csi-controller-sa \
+  --namespace kube-system \
+  --cluster devops-test-cluster \
+  --role-name AmazonEKS_EBS_CSI_DriverRole \
+  --role-only \
+  --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+  --approve</code></pre>
+        <p>Đợi khoảng 3 phút, sau đó cài add-on (thay <code>&lt;AWS_ACCOUNT_ID&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create addon \
+  --name aws-ebs-csi-driver \
+  --cluster devops-test-cluster \
+  --service-account-role-arn arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:role/AmazonEKS_EBS_CSI_DriverRole \
+  --force</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Dọn dẹp ứng dụng 2048</strong>
+        <p>Sau khi kiểm tra ALB hoạt động, xoá ứng dụng 2048 để giữ cluster gọn gàng cho các lab sau:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.14.1/docs/examples/2048/2048_full.yaml</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get nodes</code> hiển thị 2 node ở trạng thái <strong>Ready</strong>.</li>
+      <li>Pod của <code>aws-load-balancer-controller</code> chạy trong namespace <code>kube-system</code>.</li>
+      <li>Deploy 2048 game tạo ra một <strong>ALB</strong>, truy cập DNS của ALB thấy giao diện game 2048.</li>
+      <li>Add-on <code>aws-ebs-csi-driver</code> ở trạng thái <strong>ACTIVE</strong> (kiểm tra trên AWS Console hoặc <code>eksctl get addon</code>).</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>kubectl</code> không kết nối được tới cluster</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> chưa chạy <code>update-kubeconfig</code>, hoặc current context không đúng.<br/><strong>Giải pháp:</strong> chạy lại <code>aws eks update-kubeconfig</code> rồi <code>kubectl config use-context devops-test-cluster</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Deploy Ingress nhưng không thấy ALB được tạo</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> LB Controller chưa được cài, hoặc IRSA/role thiếu quyền.<br/><strong>Giải pháp:</strong> kiểm tra pod <code>aws-load-balancer-controller</code>, xem log bằng <code>kubectl logs -n kube-system deployment/aws-load-balancer-controller</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">PVC của MongoDB bị <code>Pending</code> (không có volume)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> EBS CSI Driver chưa được cài hoặc add-on chưa ACTIVE.<br/><strong>Giải pháp:</strong> kiểm tra <code>eksctl get addon --cluster devops-test-cluster</code> và chờ add-on về trạng thái ACTIVE.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">EKS Cluster có phí theo giờ (control plane) và node EC2 tính phí liên tục. Chỉ giữ cluster khi đang làm các lab tiếp theo; xoá ngay khi hoàn thành toàn bộ chương.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Implement CICD using CodePipeline – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CICD for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Implement CICD using CodePipeline</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Dùng bộ <strong>AWS Developer Tools</strong> (CodeCommit + CodeBuild + CodePipeline) để dựng pipeline CI/CD hoàn chỉnh cho ứng dụng monorepo.</li>
+    <li><strong>Build Docker image</strong> cho frontend &amp; backend, push lên <strong>ECR</strong>.</li>
+    <li>Tự động <strong>deploy lên EKS</strong> khi có code thay đổi (kích hoạt bằng push lên CodeCommit).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      CC["<img src='../../assets/aws-svg/CodeCommit.svg' style='width:40px;height:40px;'/><br/><b>CodeCommit</b><br/>todo-app-monorepo"]
+      subgraph Pipe["CodePipeline"]
+          direction TB
+          Src["Source<br/>(Full clone)"]
+          Bld["Build<br/>CodeBuild + buildspec.yml"]
+          Dep["Deploy<br/>Amazon EKS<br/>(kubectl)"]
+          Src --> Bld --> Dep
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:40px;height:40px;'/><br/><b>ECR</b><br/>frontend / backend"]
+      EKS["<img src='../../assets/aws-svg/EKS.svg' style='width:44px;height:44px;'/><br/><b>EKS</b><br/>devops-test-cluster"]
+      CC -->|"trigger khi push"| Pipe
+      Bld -->|"docker build + push"| ECR
+      ECR -.->|"pull image"| EKS
+      Dep -->|"kubectl apply aws-eks.yaml"| EKS
+  </div>
+  <p class="arch-caption">CodeCommit lưu mã nguồn, CodePipeline điều phối Source → Build → Deploy; CodeBuild build image push lên ECR, Deploy stage dùng kubectl apply manifest lên EKS.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã có <strong>EKS cluster</strong> <code>devops-test-cluster</code> và kết nối được (Lab 1).</li>
+    <li>Ứng dụng mẫu (monorepo frontend/backend/mongo): <a href="https://github.com/hoanglinhdigital/react-express-mongodb" target="_blank" rel="noopener">github.com/hoanglinhdigital/react-express-mongodb</a>.</li>
+    <li>Source code bài lab nằm tại <code>sourcecode/section_16_cicd_for_eks/lab2_cicd_codepipeline/</code>.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section16/lab2-codepipeline-repo.png" alt="Repository ứng dụng mẫu react-express-mongodb dùng cho bài Lab 2" />
+    <div class="figure-title">Repository ứng dụng mẫu (monorepo) dùng cho bài Lab 2</div>
+  </div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo repository trên CodeCommit và push code</strong>
+        <p>Tạo repository <code>todo-app-monorepo</code> trên <strong>CodeCommit</strong>, rồi clone về local và copy toàn bộ code (thư mục <code>frontend/</code>, <code>backend/</code> và file <code>aws-eks.yaml</code>) vào:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git clone https://git-codecommit.&lt;region&gt;.amazonaws.com/v1/repos/todo-app-monorepo
+git add .
+git commit -m "Initial commit for EKS deployment"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo 2 ECR repository</strong>
+        <p>Tạo 2 repository trên <strong>ECR</strong> để chứa Docker image của frontend và backend:</p>
+        <ul class="feature-list">
+          <li><code>todo-app-frontend</code></li>
+          <li><code>todo-app-backend</code></li>
+        </ul>
+        <p>Đồng thời tạo file <code>buildspec.yml</code> ở thư mục gốc repository để hướng dẫn CodeBuild build và push image (xem nội dung trong thư mục source).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo CodePipeline</strong>
+        <p>Vào <strong>CodePipeline</strong> → Create Pipeline với tên <code>todo-app-eks-pipeline</code>, cấu hình các stage:</p>
+        <ul class="feature-list">
+          <li><strong>Source stage:</strong> Provider = <strong>CodeCommit</strong>, repository <code>todo-app-monorepo</code>, branch <code>main</code>, Output artifact format = <strong>Full clone</strong> (bắt buộc để dùng lệnh git trong CodeBuild).</li>
+          <li><strong>Build stage:</strong> Provider = <strong>CodeBuild</strong>, Project <code>todo-app-build-stage</code>. Bật <strong>Privileged</strong> để build Docker image; thêm biến môi trường <code>AWS_ACCOUNT_ID</code> và <code>AWS_DEFAULT_REGION</code>; dùng file <code>buildspec.yml</code>.</li>
+          <li><strong>Deploy stage:</strong> Provider = <strong>Amazon EKS</strong>, chọn cluster <code>devops-test-cluster</code>, Deploy configuration = <strong>kubectl</strong>, Manifest file paths = <code>aws-eks.yaml</code>, chọn các <strong>Private Subnet</strong> (KHÔNG chọn public subnet) và Security Group của cluster.</li>
+        </ul>
+        <div class="alert alert-warning"><strong>Lưu ý:</strong> ở Deploy stage, chỉ chọn <strong>Private Subnet</strong>; chọn public subnet sẽ gây lỗi kết nối khi CodePipeline deploy.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Thêm IAM policy cho Service Role</strong>
+        <p>Thêm các policy sau cho <strong>CodeBuild Service Role</strong>:</p>
+        <ul class="feature-list">
+          <li><code>AmazonEC2ContainerRegistryFullAccess</code></li>
+          <li><code>AWSCodeCommitFullAccess</code></li>
+        </ul>
+        <p>Thêm các policy sau cho <strong>CodePipeline Service Role</strong>:</p>
+        <ul class="feature-list">
+          <li><code>AmazonEC2ContainerRegistryFullAccess</code>, <code>AWSCodeCommitFullAccess</code>, <code>AWSCodeBuildDeveloperAccess</code>, <code>CloudWatchLogsFullAccess</code>, <code>AmazonEC2FullAccess</code></li>
+          <li>Một custom policy cho phép <code>eks:DescribeCluster</code>.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Gán quyền truy cập cluster cho CodePipeline Service Role</strong>
+        <p>Tạo access entry và gán policy quyền admin cho CodePipeline Service Role (thay <code>&lt;AWS_ACCOUNT_ID&gt;</code> và ARN của role cho đúng):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws eks create-access-entry \
+  --cluster-name devops-test-cluster \
+  --principal-arn arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:role/service-role/&lt;CodePipeline-Service-Role&gt; \
+  --type STANDARD
+
+aws eks associate-access-policy \
+  --cluster-name devops-test-cluster \
+  --principal-arn arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:role/service-role/&lt;CodePipeline-Service-Role&gt; \
+  --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+  --access-scope type=cluster</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Sửa code để kích hoạt CI/CD</strong>
+        <p>Sửa nội dung code backend &amp; frontend rồi commit/push lên CodeCommit để pipeline tự chạy:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add .
+git commit -m "Update TODO app backend and frontend v2"
+git push origin master</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Cải thiện trong dự án thực tế</h2>
+  <p class="body-text">
+    Pipeline ở trên đủ chạy nhưng còn khá "thô". Trong dự án thật, người ta thường tách nhỏ và bổ sung thêm để kiểm soát tốt hơn:
+  </p>
+  <div class="figure-centered">
+    <img src="../../images/section16/lab2-codepipeline-improvement.png" alt="Các cải thiện cho pipeline CodePipeline trong dự án thực tế" />
+    <div class="figure-title">Các cải thiện CI/CD trong dự án thực tế</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Phần CI:</strong> tách build Docker image thành 2 pipeline riêng cho Backend và Frontend; thêm biến <code>VERSION</code> (vd <code>v1.0.1</code>) để làm tag cho ECR image; checkout theo git <em>tag</em> thay vì commit hash.</li>
+    <li><strong>Phần CD:</strong> tách riêng pipeline deploy cho backend/frontend; thêm biến <code>BE_VERSION</code>/<code>FE_VERSION</code> để biết deploy version nào lên EKS; thêm bước <strong>Manual Approve</strong> bởi Leader trước khi deploy.</li>
+    <li><strong>Khác:</strong> thêm <strong>Notification</strong> qua SNS/EventBridge để báo kết quả pipeline.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Pipeline <code>todo-app-eks-pipeline</code> chạy thành công cả 3 stage khi push code.</li>
+      <li>2 image mới xuất hiện trên ECR (tag theo commit hash).</li>
+      <li><code>kubectl get deployments/pods/svc</code> thấy frontend, backend và mongo đang chạy.</li>
+      <li>Truy cập ứng dụng qua DNS của ALB (từ <code>kubectl get ingress</code>) thấy bản code mới.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">CodeBuild không build được Docker image</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> chưa bật <strong>Privileged</strong> mode.<br/><strong>Giải pháp:</strong> bật Privileged trong cấu hình environment của CodeBuild project.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Deploy stage báo lỗi không kết nối được cluster</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> chọn <em>public subnet</em> thay vì private subnet, hoặc CodePipeline Service Role chưa có access entry.<br/><strong>Giải pháp:</strong> chọn lại private subnet và thực hiện đúng Bước 5 (create-access-entry + associate-access-policy).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pipeline chạy nhưng pod lỗi <code>ImagePullBackOff</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> image tag trong <code>aws-eks.yaml</code> sai, hoặc node không pull được image từ ECR.<br/><strong>Giải pháp:</strong> kiểm tra tag image trong manifest, đảm bảo node có quyền ECR (thêm <code>AmazonEC2ContainerRegistryReadOnly</code> cho node role).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Nếu chuyển sang Lab 3, bạn có thể giữ EKS cluster và ECR, chỉ cần xoá CodePipeline/CodeBuild/CodeCommit. Nếu kết thúc cả chương, xoá toàn bộ theo <code>clear-resources.sh</code>.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

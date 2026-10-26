@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các nguyên tắc của DevOps &amp; CICD – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">3. Giới thiệu về DevOps &amp; CICD</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các nguyên tắc của DevOps &amp; CICD</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Nếu DevOps là triết lý, thì các <strong>nguyên tắc</strong> dưới đây là cách triết lý đó được áp dụng vào công việc hằng ngày.
+    Trong số đó, <strong>CICD</strong> là khái niệm luôn được nhắc đến khi nói về DevOps — nó chiếm phần lớn nội dung và thời lượng công việc
+    của một DevOps Engineer, và cũng là trọng tâm của khoá học này.
+  </p>
+
+  <h2 class="section-heading">5 nguyên tắc của DevOps</h2>
+  <ul class="feature-list">
+    <li><strong>Tự động hoá (Automation):</strong> tự động hoá quy trình phát triển, kiểm thử, triển khai và quản lý hệ thống để giảm thiểu can thiệp thủ công và lỗi do con người (human mistake).</li>
+    <li><strong>Tích hợp liên tục (Continuous Integration – CI):</strong> tích hợp liên tục mã nguồn từ nhiều developer và chạy test tự động để đảm bảo tính ổn định của ứng dụng.</li>
+    <li><strong>Triển khai liên tục (Continuous Deployment – CD):</strong> tự động triển khai các phiên bản mới của ứng dụng lên môi trường một cách nhanh chóng và an toàn.</li>
+    <li><strong>Theo dõi và phản hồi (Monitoring &amp; Feedback):</strong> theo dõi hoạt động của ứng dụng và hệ thống theo thời gian thực để phát hiện và khắc phục lỗi nhanh chóng.</li>
+    <li><strong>Tự phục vụ (Self-service):</strong> cung cấp công cụ cho nhóm Dev và Ops để họ làm việc độc lập, hiệu quả — ví dụ developer tự tạo môi trường test bằng một pipeline thay vì phải chờ Ops.</li>
+  </ul>
+
+  <h2 class="section-heading">CICD là gì?</h2>
+  <p class="body-text">
+    <strong>CI/CD</strong> là viết tắt của <strong>Continuous Integration</strong> và <strong>Continuous Deployment</strong> (hoặc <strong>Continuous Delivery</strong>).
+    Đây là phương pháp tổ chức quy trình phát triển phần mềm để build, test và triển khai ứng dụng một cách <strong>tự động</strong> và <strong>liên tục</strong>,
+    giúp tối ưu hoá quá trình phát triển, kiểm tra và triển khai phần mềm hiện đại.
+  </p>
+
+  <div class="concept-grid">
+    <div class="concept-card">
+      <div class="label">CI – Continuous Integration</div>
+      <p>Mỗi khi developer push code, hệ thống tự động <strong>build</strong> và chạy <strong>test</strong>. Lỗi được phát hiện ngay, thay vì dồn đến cuối dự án mới merge code.</p>
+    </div>
+    <div class="concept-card">
+      <div class="label">CD – Continuous Delivery</div>
+      <p>Artifact sau CI luôn ở trạng thái <strong>sẵn sàng deploy</strong>. Deploy lên Production vẫn cần một bước <strong>phê duyệt thủ công</strong> (manual approval).</p>
+    </div>
+    <div class="concept-card">
+      <div class="label">CD – Continuous Deployment</div>
+      <p>Mọi thay đổi vượt qua tất cả các bước test sẽ được <strong>tự động deploy lên Production</strong>, không cần con người can thiệp.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Mô hình kiến trúc: một CICD pipeline điển hình</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/svg-icon/developer.svg' style='width:36px;height:36px;'/><br/><b>Developer</b>"]
+      Repo["<img src='../../assets/svg-icon/github.svg' style='width:36px;height:36px;'/><br/><b>Source Repo</b><br/>Git"]
+      subgraph CI["🔁 Continuous Integration"]
+          direction LR
+          Build["🔨 <b>Build</b><br/>Compile · Package"]
+          UT["🧪 <b>Unit Test</b>"]
+          Scan["🛡️ <b>Code / Security Scan</b>"]
+          Artifact["📦 <b>Artifact</b><br/>.jar · Docker image"]
+          Build --> UT --> Scan --> Artifact
+      end
+      subgraph CD["🚀 Continuous Delivery / Deployment"]
+          direction LR
+          DevEnv["🧩 <b>Deploy Dev/Test</b>"]
+          Stg["🧪 <b>Deploy Staging</b><br/>Integration Test"]
+          Approve{"✋ Manual<br/>approval?"}
+          Prod["<img src='../../assets/aws-svg/aws-logo.svg' style='width:32px;height:32px;'/><br/><b>Production</b>"]
+          DevEnv --> Stg --> Approve --> Prod
+      end
+      Mon["📈 <b>Monitoring</b><br/>Log · Metric · Alert"]
+      Dev -->|"git push"| Repo -->|"Trigger"| Build
+      Artifact --> DevEnv
+      Prod --> Mon
+      Mon -.->|"Feedback"| Dev
+  </div>
+  <p class="arch-caption">
+    Với <strong>Continuous Delivery</strong>, bước “Manual approval” là bắt buộc trước khi lên Production. Với <strong>Continuous Deployment</strong>, bước này được bỏ qua và pipeline tự động deploy.
+  </p>
+
+  <h2 class="section-heading">Trade-off: Continuous Delivery vs Continuous Deployment</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>Continuous Delivery</th><th>Continuous Deployment</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Deploy lên Production</td><td>Cần người phê duyệt</td><td>Hoàn toàn tự động</td></tr>
+      <tr><td>Tốc độ release</td><td>Nhanh</td><td>Rất nhanh (nhiều lần/ngày)</td></tr>
+      <tr><td>Yêu cầu về test tự động</td><td>Cao</td><td>Rất cao — test phải đủ tin cậy để thay con người</td></tr>
+      <tr><td>Rủi ro</td><td>Thấp hơn, có người kiểm soát</td><td>Cao hơn nếu test chưa đủ tốt</td></tr>
+      <tr><td>Phù hợp với</td><td>Hầu hết dự án, đặc biệt là ngân hàng, tài chính, dự án outsource cần khách hàng xác nhận</td><td>Sản phẩm web/SaaS có hệ thống test, monitoring và rollback trưởng thành</td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-info">
+    Trong khoá học này, chúng ta sẽ xây dựng cả hai kiểu pipeline: tự động deploy lên môi trường Dev/Staging, và có bước <strong>approval</strong> trước khi lên Production
+    (ví dụ với AWS CodePipeline, Jenkins, Github Actions ở các section sau).
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>CI cho team nhiều developer</h4>
+      <p>Mỗi Pull Request đều được build và chạy unit test tự động. Code chỉ được merge vào nhánh chính khi pipeline “xanh”.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Continuous Delivery cho dự án outsource</h4>
+      <p>Phiên bản mới được tự động deploy lên Staging để khách hàng kiểm tra (UAT); sau khi khách hàng đồng ý, Ops bấm approve để deploy lên Production.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Continuous Deployment cho web app</h4>
+      <p>Mỗi commit vào nhánh <code>main</code> vượt qua toàn bộ test sẽ được deploy thẳng lên Production; nếu monitoring phát hiện lỗi, pipeline tự rollback.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-tip">
+    <strong>Mẹo:</strong> khi đọc tài liệu hoặc tin tuyển dụng, “CD” có thể mang nghĩa Delivery hoặc Deployment tuỳ ngữ cảnh. Hãy để ý xem quy trình có bước phê duyệt thủ công trước Production hay không.
+  </div>
+  <div class="alert alert-info">
+    <strong>Tiếp theo:</strong> chương sau so sánh quy trình làm việc của dự án <strong>khi không có</strong> và <strong>khi có</strong> DevOps, để thấy rõ CICD và sự hợp tác thay đổi công việc hằng ngày như thế nào.
+  </div>
+
+</body>
+</html>

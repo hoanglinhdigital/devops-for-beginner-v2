@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Canary deployment cho Lambda với SAM &amp; CodeDeploy – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Canary deployment cho Lambda với SAM &amp; CodeDeploy</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Bật <code>AutoPublishAlias</code> và <code>DeploymentPreference</code> cho <code>GetUrlFunction</code> của ứng dụng URL Shortener.</li>
+    <li>Release <strong>v2</strong> theo Canary 10% trong 5 phút và quan sát tỷ lệ traffic giữa v1 / v2.</li>
+    <li>Release <strong>v3 cố tình lỗi</strong> và xem CloudWatch Alarm kích hoạt CodeDeploy <strong>tự động rollback</strong> về v2.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/developer.svg' style='width:36px;height:36px;'/><br/>Local PC<br/>sam deploy"]
+      CFN["<img src='../../assets/aws-svg/CloudFormation.svg' style='width:34px;height:34px;'/><br/>CloudFormation<br/>url-shorten-app"]
+      CD["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:34px;height:34px;'/><br/>CodeDeploy<br/>Canary10Percent5Minutes"]
+      APIGW["<img src='../../assets/aws-svg/API-Gateway.svg' style='width:34px;height:34px;'/><br/>API Gateway"]
+      ALIAS["Alias live"]
+      OLD["<img src='../../assets/aws-svg/Lambda.svg' style='width:30px;height:30px;'/><br/>version cũ 90%"]
+      NEW["<img src='../../assets/aws-svg/Lambda.svg' style='width:30px;height:30px;'/><br/>version mới 10%"]
+      ALARM["<img src='../../assets/svg-icon/Alarm.svg' style='width:30px;height:30px;'/><br/>Alarm Errors"]
+      PC -->|"sam deploy"| CFN
+      CFN --> CD
+      CD -->|"chuyển traffic"| ALIAS
+      APIGW --> ALIAS
+      ALIAS --> OLD
+      ALIAS --> NEW
+      NEW -.-> ALARM
+      ALARM -.->|"rollback"| CD
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 2</strong>: stack <code>url-shorten-app</code> đã deploy; có <code>ApiUrl</code> và ít nhất một <code>short_url_code</code> (tạo lại bằng POST nếu cần). Lab 3 không bắt buộc, nhưng hãy đảm bảo <code>sam sync --watch</code> đã tắt.</li>
+    <li>Terminal dạng bash (Git Bash, WSL, macOS / Linux) để chạy vòng lặp <code>curl</code>. Trên Windows PowerShell thay <code>curl</code> bằng <code>curl.exe</code> và viết lại vòng lặp tương ứng.</li>
+    <li>Source code: <code>sourcecode/section_12_serverless_application_model/lab4_canary_deployment/</code> (<code>template.yaml</code>, <code>get_url_v2.py</code>, <code>get_url_v3_broken.py</code>).</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Lưu ý:</strong> Mỗi lần <code>sam deploy</code> có DeploymentPreference sẽ chờ CodeDeploy hoàn tất (khoảng 6–8 phút với Canary 5 phút). Chuẩn bị 30–40 phút cho cả lab. Phiên bản lỗi v3 chỉ ảnh hưởng ~10% request trong vài phút.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị dữ liệu thử nghiệm</strong>
+        <p>Lấy <code>ApiUrl</code> và tạo một short URL để dùng xuyên suốt lab:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam list stack-outputs --stack-name url-shorten-app
+curl -X POST "&lt;ApiUrl&gt;/generate-short-url" -H "Content-Type: application/json" -d '{"url": "https://aws.amazon.com/serverless/sam/"}'</code></pre>
+        <p>Ghi lại <code>short_url_code</code> trả về.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Thay template bằng template có Canary</strong>
+        <p>Copy <code>lab4_canary_deployment/template.yaml</code> đè lên <code>lab2_url_shorten_app/template.yaml</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_12_serverless_application_model
+cp lab4_canary_deployment/template.yaml lab2_url_shorten_app/template.yaml
+cd lab2_url_shorten_app</code></pre>
+        <p>Những điểm khác so với template Lab 2 – chỉ nằm ở <code>GetUrlFunction</code> và một alarm mới:</p>
+        <pre class="code-block"><code class="language-yaml">  GetUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # ... như Lab 2 ...
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+        Alarms:
+          - !Ref GetUrlCanaryErrorsAlarm
+
+  GetUrlCanaryErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: Resource
+          Value: !Sub "${GetUrlFunction}:live"
+        - Name: FunctionName
+          Value: !Ref GetUrlFunction
+        - Name: ExecutedVersion
+          Value: !GetAtt GetUrlFunction.Version.Version   # chỉ đo version mới nhất</code></pre>
+        <p>Alarm sẽ ở trạng thái <em>ALARM</em> nếu version đang được canary có ít nhất 1 lỗi trong 1 phút.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Deploy baseline (v1)</strong>
+        <p>Code <code>get_url/app.py</code> hiện tại trả header <code>X-App-Version: v1</code>. Deploy để tạo alias <code>live</code>, CodeDeploy application / deployment group và alarm:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam build
+sam deploy</code></pre>
+        <p>Xem change set: <em>Add</em> cho Alias, Version, CodeDeploy Application, DeploymentGroup, IAM Role, Alarm; <em>Modify</em> cho API Gateway và permission (giờ gọi qua alias). Nhập <strong>y</strong>. Lần này chưa có canary vì chưa có version cũ.</p>
+        <p>Trên Console kiểm tra:</p>
+        <ul class="feature-list">
+          <li><strong>Lambda</strong> → <code>GetUrlFunction</code> → tab <em>Aliases</em>: alias <code>live</code> trỏ <strong>version 1</strong>.</li>
+          <li><strong>CodeDeploy</strong> → Applications: có application tên dạng <code>ServerlessDeploymentApplication-xxxx</code> với deployment group <code>GetUrlFunctionDeploymentGroup-xxxx</code>.</li>
+        </ul>
+        <p>Kiểm tra response header (kết quả <code>x-app-version: v1</code>):</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">curl -s -o /dev/null -D - "&lt;ApiUrl&gt;/link/&lt;short_url_code&gt;" | grep -i x-app-version
+x-app-version: v1</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Release v2 theo Canary 10% / 5 phút</strong>
+        <p>Thay code của <code>GetUrlFunction</code> bằng v2 (chỉ đổi header thành <code>X-App-Version: v2</code>) rồi deploy:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cp ../lab4_canary_deployment/get_url_v2.py get_url/app.py
+sam build
+sam deploy</code></pre>
+        <p>Nhập <strong>y</strong> ở change set. Lệnh sẽ đứng chờ ở trạng thái <em>UPDATE_IN_PROGRESS</em> trong khi CodeDeploy chuyển traffic – <strong>giữ nguyên terminal này</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Quan sát traffic được chia</strong>
+        <p>Mở terminal thứ hai, gửi 30 request và đếm số lần mỗi version phản hồi (kỳ vọng khoảng 90% v1 và 10% v2, số liệu thực tế dao động):</p>
+        <pre class="command-line" data-prompt="$" data-output="2,3"><code class="language-bash">for i in $(seq 1 30); do curl -s -o /dev/null -D - "&lt;ApiUrl&gt;/link/&lt;short_url_code&gt;" | grep -i x-app-version; done | sort | uniq -c
+     27 x-app-version: v1
+      3 x-app-version: v2</code></pre>
+        <p>Đồng thời quan sát trên Console:</p>
+        <ul class="feature-list">
+          <li><strong>CodeDeploy</strong> → Deployments → deployment mới nhất: trạng thái <em>In progress</em>, thanh tiến trình <em>Traffic shifting</em> (10% rồi 100%).</li>
+          <li><strong>Lambda</strong> → <code>GetUrlFunction</code> → Aliases → <code>live</code>: hiển thị 2 version với trọng số (version 1 = 90%, version 2 = 10%).</li>
+        </ul>
+        <p>Sau 5 phút CodeDeploy chuyển 100% sang v2 và <code>sam deploy</code> kết thúc. Chạy lại vòng lặp: toàn bộ response là <code>v2</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Release v3 bị lỗi và quan sát rollback tự động</strong>
+        <p>Thay code bằng v3 (mọi request đều ném exception) và deploy:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cp ../lab4_canary_deployment/get_url_v3_broken.py get_url/app.py
+sam build
+sam deploy</code></pre>
+        <p>Nhập <strong>y</strong>. Ngay khi deployment bắt đầu (CodeDeploy status <em>In progress</em>), mở terminal thứ hai và tạo traffic liên tục để version mới có dữ liệu lỗi (khoảng 3–4 phút):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">for i in $(seq 1 200); do curl -s -o /dev/null -w "%{http_code}\n" "&lt;ApiUrl&gt;/link/&lt;short_url_code&gt;"; sleep 1; done | sort | uniq -c</code></pre>
+        <p>Sẽ thấy phần lớn request vẫn trả <code>308</code> (v2) và vài request trả <code>502</code> (v3 lỗi). Theo dõi trên Console:</p>
+        <ul class="feature-list">
+          <li><strong>CloudWatch</strong> → Alarms → <code>GetUrlCanaryErrorsAlarm</code>: chuyển sang <strong>In alarm</strong>.</li>
+          <li><strong>CodeDeploy</strong> → Deployments: deployment <strong>Stopped / Rolled back</strong>, kèm lý do <em>alarm</em>.</li>
+          <li><strong>CloudFormation</strong> → stack: update thất bại và stack quay về <code>UPDATE_ROLLBACK_COMPLETE</code>; terminal <code>sam deploy</code> báo lỗi.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Xác nhận hệ thống vẫn chạy v2</strong>
+        <p>Chạy lại vòng lặp đếm header:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">for i in $(seq 1 10); do curl -s -o /dev/null -D - "&lt;ApiUrl&gt;/link/&lt;short_url_code&gt;" | grep -i x-app-version; done | sort | uniq -c
+     10 x-app-version: v2</code></pre>
+        <p>Người dùng chỉ bị ảnh hưởng bởi một phần nhỏ request trong vài phút; hệ thống tự quay về v2 mà không cần ai can thiệp. Khôi phục code v2 trong thư mục project để không deploy nhầm v3 lần sau:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cp ../lab4_canary_deployment/get_url_v2.py get_url/app.py</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Alias <code>live</code> của <code>GetUrlFunction</code> có thể trỏ tới nhiều version; sau v2 trỏ vào version 2.</li>
+      <li>Trong lúc canary v2, tỷ lệ response ~90% <code>v1</code> / ~10% <code>v2</code>; sau 5 phút 100% <code>v2</code>.</li>
+      <li>Với v3 lỗi: alarm vào trạng thái <em>In alarm</em>, CodeDeploy rollback, stack về <code>UPDATE_ROLLBACK_COMPLETE</code>, API tiếp tục trả <code>v2</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Deploy v3 xong nhưng không rollback, 100% traffic chuyển sang v3 (API trả toàn <code>502</code>)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Không có (đủ) traffic trong lúc canary nên alarm không có dữ liệu để kích hoạt (<code>TreatMissingData: notBreaching</code>).<br/><strong>Giải pháp:</strong> Luôn chạy vòng lặp <code>curl</code> ngay khi deployment bắt đầu. Để khôi phục, copy lại <code>get_url_v2.py</code> vào <code>get_url/app.py</code> rồi <code>sam build</code> và <code>sam deploy</code> (đây cũng là cách rollback thủ công).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Stack bị kẹt ở <code>UPDATE_FAILED</code> sau khi rollback, <code>sam deploy</code> không chạy lại được</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Bật <code>Disable rollback = y</code> trong <code>samconfig.toml</code> nên CloudFormation giữ nguyên trạng thái lỗi.<br/><strong>Giải pháp:</strong> Sửa <code>disable_rollback = false</code> trong <code>samconfig.toml</code> (hoặc chạy <code>sam deploy --guided</code> lại và chọn <strong>n</strong>), sau đó deploy lại. Trên CloudFormation Console có thể chọn <em>Stack actions → Continue update rollback</em>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Template format error: ... Version.Version</code> hoặc "Invalid value for AutoPublishAlias"</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thiếu <code>AutoPublishAlias</code> trên function, hoặc gõ sai <code>!GetAtt GetUrlFunction.Version.Version</code>.<br/><strong>Giải pháp:</strong> Dùng đúng template của lab và chạy <code>sam validate --lint</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Response vẫn là <code>v1</code> sau khi deploy v2 xong</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Quên <code>sam build</code> sau khi copy code (SAM deploy bản build cũ trong <code>.aws-sam/build</code>).<br/><strong>Giải pháp:</strong> Chạy <code>sam build</code> rồi <code>sam deploy</code> lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Xoá stack khi học xong để xoá API Gateway, Lambda, DynamoDB, CodeDeploy application và CloudWatch Alarm. Phần tổng kết có checklist đầy đủ.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">sam delete --stack-name url-shorten-app</code></pre>
+
+</body>
+</html>

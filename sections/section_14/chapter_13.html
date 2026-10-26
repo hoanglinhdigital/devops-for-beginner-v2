@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ConfigMap – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">ConfigMap</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>ConfigMap</strong> là một đối tượng API dùng để lưu trữ các <strong>cấu hình không nhạy cảm</strong> dưới dạng key-value.
+    Nó giúp tách cấu hình ra khỏi code và container, khiến ứng dụng dễ cấu hình và dễ di chuyển giữa các môi trường mà không phải sửa image.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Key-value:</strong> lưu cấu hình dạng chuỗi (vd <code>name: "Linh"</code>, <code>age: "20"</code>).</li>
+    <li><strong>Không nhạy cảm:</strong> chỉ dành cho cấu hình thường; dữ liệu nhạy cảm (mật khẩu, token) nên dùng <strong>Secret</strong>.</li>
+    <li><strong>Tách khỏi code:</strong> thay đổi cấu hình mà không cần build lại image.</li>
+    <li><strong>3 cách sử dụng:</strong> biến môi trường, command-line argument, hoặc mount thành file trong volume.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      CM["<img src='../../assets/svg-icon/eks-configmap.svg' style='width:34px;height:34px;'/><br/>ConfigMap<br/>MYSQL_ROOT_PASSWORD: 123456789"]
+      Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:32px;height:32px;'/><br/>Pod"]
+      subgraph C["3 cách truyền vào"]
+          E["Biến môi trường"]
+          A["Command-line arg"]
+          F["File trong volume"]
+      end
+      CM --> Pod
+      Pod --> E
+      Pod --> A
+      Pod --> F
+  </div>
+  <p class="arch-caption">ConfigMap lưu cấu hình và được truyền vào Pod theo 3 cách: như biến môi trường, như đối số dòng lệnh, hoặc mount thành file trong volume (mỗi cặp key:value thành một file).</p>
+
+  <h2 class="section-heading">Ví dụ ConfigMap</h2>
+  <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-configmap
+data:
+  MYSQL_ROOT_PASSWORD: "123456789"
+  name: "Linh"
+  age: "20"</code></pre>
+  <p class="body-text">Đưa ConfigMap vào Pod dưới dạng biến môi trường:</p>
+  <pre class="code-block"><code class="language-yaml">spec:
+  containers:
+    - name: mysql
+      image: mysql
+      envFrom:
+        - configMapRef:
+            name: my-configmap</code></pre>
+
+  <h2 class="section-heading">Thực hành: Tạo ConfigMap</h2>
+  <p class="body-text">Tạo ConfigMap lưu các key:value đơn giản, truyền vào Pod MySQL (NodePort) dưới dạng biến môi trường (<code>envFrom</code>), sau đó kết nối MySQL bằng thông tin trong ConfigMap.</p>
+  <div class="mermaid">
+  flowchart LR
+      CM["<img src='../../assets/svg-icon/eks-configmap.svg' style='width:32px;height:32px;'/><br/>ConfigMap<br/>my-configmap"]
+      Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:32px;height:32px;'/><br/>mysql Pod<br/>(envFrom configMapRef)"]
+      CM -->|"env"| Pod
+  </div>
+  <p class="arch-caption">Deployment dùng <code>envFrom.configMapRef</code> để nạp toàn bộ key:value của ConfigMap thành biến môi trường cho container MySQL.</p>
+
+  <h3 class="sub-heading">Yêu cầu trước khi bắt đầu</h3>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong> (Minikube chạy), có <strong>MySQL Workbench</strong>.</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/configmap/</code>.</li>
+  </ul>
+
+  <h3 class="sub-heading">Các bước thực hành</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo file cấu hình ConfigMap + MySQL</strong>
+        <p>Tạo file <code>configmap-simple.yaml</code>:</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-configmap
+data:
+  MYSQL_ROOT_PASSWORD: "123456789"
+  name: "Linh"
+  age: "20"
+---
+# ... (PersistentVolume + PVC + Service NodePort giống phần thực hành Persistent Volume)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          envFrom:
+            - configMapRef:
+                name: my-configmap
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: mysql-persistent-storage
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: mysql-persistent-storage
+          persistentVolumeClaim:
+            claimName: my-pvc</code></pre>
+        <p class="code-note">💡 <code>envFrom.configMapRef</code> nạp toàn bộ key của ConfigMap thành biến môi trường, trong đó <code>MYSQL_ROOT_PASSWORD</code> sẽ được image MySQL tự động dùng làm mật khẩu root.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Apply và kiểm tra ConfigMap</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f configmap-simple.yaml
+kubectl get configmap my-configmap -o yaml
+kubectl get pods</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kiểm tra biến môi trường trong Pod</strong>
+        <p>Xem nội dung Pod để xác nhận env đã được nạp:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods mysql-deployment-&lt;xxxx&gt; -o yaml</code></pre>
+        <p>(thay <code>&lt;xxxx&gt;</code> bằng đuôi Pod thực tế)</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Kết nối MySQL bằng thông tin trong ConfigMap</strong>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">minikube service mysql-service --url
+http://127.0.0.1:&lt;port&gt;</code></pre>
+        <p>Mở MySQL Workbench, kết nối với password <code>123456789</code> (giá trị trong ConfigMap) để xác nhận thành công.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Xoá resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f configmap-simple.yaml</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sub-heading">Kiểm tra kết quả</h3>
+  <div class="verify-box">
+    <h4>✅ Thực hành thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get configmap my-configmap -o yaml</code> hiển thị 3 key:value.</li>
+      <li>MySQL khởi động và kết nối được với mật khẩu <code>123456789</code> từ ConfigMap.</li>
+    </ul>
+  </div>
+
+  <h3 class="sub-heading">Troubleshoot</h3>
+  <div class="troubleshoot-item">
+    <div class="err">MySQL không khởi động, báo lỗi password</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> ConfigMap không có key <code>MYSQL_ROOT_PASSWORD</code> hoặc Pod chưa nạp env.<br/><strong>Giải pháp:</strong> kiểm tra lại <code>data</code> trong ConfigMap và <code>envFrom</code> trong Deployment.</div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Xem ConfigMap:</strong> <code>kubectl get configmap my-configmap -o yaml</code>.</li>
+    <li><strong>Mỗi key thành một file:</strong> khi mount ConfigMap vào volume, mỗi cặp key:value trở thành một file (tên file = key, nội dung = value).</li>
+    <li><strong>Best practice:</strong> dùng ConfigMap cho mọi cấu hình không nhạy cảm; kết hợp với biến môi trường đã học ở phần Docker/ECS.</li>
+    <li><strong>Giới hạn:</strong> ConfigMap không mã hoá; không đặt mật khẩu, key, token vào đây.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giải pháp SaaS cho Monitoring EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giải pháp SaaS cho Monitoring EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Ngoài tự cài Open Source hoặc dùng Managed Service của AWS, còn có lựa chọn thứ ba: <strong>SaaS (Software as a Service)</strong> — các nền tảng giám sát thương mại như
+    <strong>DataDog, NewRelic, Dynatrace, Grafana Cloud</strong>. Bạn chỉ cần cài một <em>agent</em> lên cluster, mọi dữ liệu (metrics, log, trace) được gửi về cloud của nhà cung cấp,
+    và bạn quan sát qua giao diện web của họ. Đây là lựa chọn <strong>nhanh nhất và nhiều tính năng nhất</strong>, nhưng cũng tốn chi phí nhất.
+  </p>
+
+  <h2 class="section-heading">Phân loại giải pháp SaaS</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Mục đích</th><th>Một số giải pháp SaaS thường dùng</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Full Stack Observability</td><td>DataDog, NewRelic, Dynatrace, Grafana Cloud</td></tr>
+      <tr><td>Thu thập / lưu trữ / phân tích log</td><td>Sumo Logic, Logz.io</td></tr>
+      <tr><td>Application Performance Monitor (APM)</td><td>NewRelic, Dynatrace, DataDog APM, AppDynamics</td></tr>
+      <tr><td>Service Mesh, Tracing</td><td>Istio, Honeycomb, Lightstep</td></tr>
+      <tr><td>Resource Provisioning</td><td>Cast.ai, Zesty, Karpenter (cloud managed), Spacelift, Terraform Cloud</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">NewRelic</h2>
+  <p class="body-text">
+    <strong>NewRelic</strong> là nền tảng observability nổi tiếng với khả năng APM (giám sát hiệu năng ứng dụng) mạnh. Trên AWS, bạn thường dùng một
+    <em>agent/collector</em> thu thập dữ liệu từ EKS rồi gửi về tài khoản NewRelic để phân tích.
+  </p>
+  <div class="figure-centered">
+    <img src="../../images/section15/newrelic-architecture.png" alt="Khái quát kiến trúc monitor hệ thống trên AWS sử dụng NewRelic" />
+    <div class="figure-title">Khái quát kiến trúc monitor hệ thống trên AWS sử dụng NewRelic</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section15/newrelic-dashboard.jpeg" alt="NewRelic Dashboard - giao diện theo dõi hiệu năng ứng dụng" />
+    <div class="figure-title">NewRelic Dashboard</div>
+  </div>
+
+  <h2 class="section-heading">DataDog</h2>
+  <p class="body-text">
+    <strong>DataDog</strong> là một trong những nền tảng full-stack observability phổ biến nhất: gom cả metrics, log, trace, APM, RUM vào một nơi.
+    DataDog Agent (cài dạng DaemonSet trên mỗi node) tự động khám phá và thu thập dữ liệu từ pod/service của EKS.
+  </p>
+  <div class="figure-centered">
+    <img src="../../images/section15/datadog-architecture.jpeg" alt="Khái quát kiến trúc monitor hệ thống trên AWS sử dụng DataDog" />
+    <div class="figure-title">Khái quát kiến trúc monitor hệ thống trên AWS sử dụng DataDog</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section15/datadog-dashboard.jpeg" alt="DataDog Dashboard - giao diện giám sát tổng hợp" />
+    <div class="figure-title">DataDog Dashboard</div>
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Triển khai nhanh, vài phút là có dashboard đầy đủ.</li>
+        <li>Tính năng rất phong phú: APM, tracing, log, RUM, alert, AI detection...</li>
+        <li>Không cần đội ngũ vận hành hệ thống giám sát.</li>
+        <li>Multi-cloud, giám sát đồng bộ cả AWS lẫn on-premise.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Chi phí cao và tăng nhanh theo khối lượng dữ liệu (per host / per GB).</li>
+        <li>Dữ liệu nằm ở bên thứ ba — cần cân nhắc bảo mật và compliance.</li>
+        <li>Phụ thuộc nhà cung cấp (vendor lock-in ở mức dữ liệu &amp; thói quen dùng).</li>
+      </ul>
+    </div>
+  </div>
+  <p class="body-text">
+    <strong>Khi nào nên dùng:</strong> doanh nghiệp cần observability toàn diện ngay lập tức, có ngân sách, đội ngũ nhỏ hoặc vận hành multi-cloud.
+    <strong>Khi nào không nên:</strong> ngân sách hạn chế, dữ liệu nhạy cảm không được phép ra ngoài, hoặc quy mô nhỏ không cần nhiều tính năng.
+  </p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Observability "full-stack" cho startup</h4>
+      <p>Startup cần giám sát app EKS ngay mà không có DevOps chuyên trách — dùng DataDog/NewRelic cho gọn.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>APM cho ứng dụng kinh doanh</h4>
+      <p>Theo dõi hiệu năng giao dịch (transaction), tỷ lệ lỗi và trải nghiệm người dùng ở mức độ chi tiết cao.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Giám sát multi-cloud tập trung</h4>
+      <p>Một dashboard duy nhất cho cả EKS (AWS), GKE (GCP) và server on-premise.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-warning">
+    <strong>Lưu ý chi phí:</strong> SaaS thường tính phí theo <em>host/container</em> hoặc theo <em>GB dữ liệu</em>. Với cluster EKS nhiều node, chi phí có thể vượt cả chi phí hạ tầng — hãy kiểm soát kỹ lượng dữ liệu gửi lên (sampling, filter).
+  </div>
+  <ul class="feature-list">
+    <li><strong>Tham khảo:</strong> <a href="https://docs.datadoghq.com/" target="_blank" rel="noopener">DataDog Docs</a>, <a href="https://docs.newrelic.com/" target="_blank" rel="noopener">NewRelic Docs</a>.</li>
+  </ul>
+
+</body>
+</html>

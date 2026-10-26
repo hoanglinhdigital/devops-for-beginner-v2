@@ -1,0 +1,9 @@
+region             = "ap-southeast-1"
+availability_zones = ["ap-southeast-1a", "ap-southeast-1b"]
+cidr_block         = "10.40.0.0/16"
+public_subnet_ips  = ["10.40.1.0/24", "10.40.2.0/24"]
+
+# Thay 123456789012 bằng AWS Account ID của bạn; v2.0.0 là image tag đã build bằng job bluegreen-job1-build (Lab 1)
+ecr_image_uri = "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:v2.0.0"
+
+desired_count = 2

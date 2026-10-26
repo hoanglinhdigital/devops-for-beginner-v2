@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Monitoring for Kubernetes – Request Tracing – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Monitoring for Kubernetes – Request Tracing</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Làm quen với khái niệm <strong>Request Tracing (Distributed Tracing)</strong>.</li>
+    <li>Cài đặt các công cụ để hiện thực hoá request tracing bằng <strong>OpenTelemetry</strong> và <strong>Jaeger</strong>.</li>
+    <li>Theo dõi hành trình của một request đi qua frontend → backend → MongoDB.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu nhanh về 2 công cụ</h2>
+  <div class="two-col">
+    <div class="card">
+      <h4>OpenTelemetry (OTel)</h4>
+      <p>Chuẩn chung để <strong>thu thập</strong> dữ liệu quan sát (traces, metrics, logs). Đóng vai trò "người trung gian": thay vì sửa mã nguồn mỗi khi đổi công cụ theo dõi, bạn chỉ cần dùng OTel rồi gửi dữ liệu tới bất kỳ backend nào.</p>
+      <p><strong>Đặc điểm:</strong> vendor-agnostic — gửi tới Jaeger, Prometheus hay DataDog mà không cần đổi code.</p>
+    </div>
+    <div class="card">
+      <h4>Jaeger</h4>
+      <p>Công cụ chuyên dụng để <strong>lưu trữ, visualize và phân tích</strong> distributed traces. Giúp bạn theo dõi hành trình của một request đi qua nhiều service.</p>
+      <p><strong>Giải quyết vấn đề:</strong> khi tính năng bị chậm/lỗi, Jaeger chỉ đích danh: <em>"Lỗi nằm ở Service A, tại bước query Mongo, mất 1500ms"</em>.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/lab3-architecture.png" alt="Sơ đồ thực tế hệ thống Lab 3: app → OTel Collector → Jaeger" />
+    <div class="figure-title">Sơ đồ thực tế hệ thống của bài Lab 3</div>
+  </div>
+  <p class="body-text">
+    OTel Operator dùng <em>auto-instrumentation</em> tự nhúng thư viện tracing vào pod (không cần sửa code).
+    App gửi trace tới <strong>OpenTelemetry Collector</strong>, Collector chuyển tiếp sang <strong>Jaeger All-in-one</strong> để lưu và visualize.
+  </p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong>: đã có Minikube và ứng dụng TODO (frontend/backend/mongo) đang chạy.</li>
+    <li>Source code bài lab nằm tại <code>sourcecode/section_15_monitoring_for_eks/lab3_request_tracing/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt các Operator cần thiết</strong>
+        <p>Cấu hình tracing dùng các Custom Resource Definition (CRD) như <code>Jaeger</code>, <code>Instrumentation</code>, <code>OpenTelemetryCollector</code>, nên cần cài Operator tương ứng trước.</p>
+        <p>Cài <strong>cert-manager</strong> (yêu cầu bởi OpenTelemetry Operator):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f cert-manager.yaml
+kubectl get pods -n cert-manager</code></pre>
+        <p>Cài <strong>Jaeger Operator</strong>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl create namespace observability
+kubectl apply -f jaeger-operator.yaml -n observability
+kubectl get all -n observability
+kubectl get pods -n observability</code></pre>
+        <p>Đợi cert-manager sẵn sàng (~1 phút) rồi cài <strong>OpenTelemetry Operator</strong>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f opentelemetry-operator.yaml
+kubectl get all -n opentelemetry-operator-system
+kubectl get pods -n opentelemetry-operator-system</code></pre>
+        <div class="alert alert-info">Hãy cho các operator pod vài phút để khởi động hoàn tất trước khi sang bước tiếp theo.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Áp dụng cấu hình tracing</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f tracing.yaml
+kubectl get pods -n monitoring</code></pre>
+        <p>File <code>tracing.yaml</code> triển khai Jaeger All-in-one, cấu hình Auto-Instrumentation cho Node.js và OpenTelemetry Collector.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Thêm annotation auto-instrument và rollout</strong>
+        <p>Thêm annotation (đã có sẵn trong file <code>todo-app-minikube-local-with-mongo-exporter.yaml</code> của Lab 3):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-yaml"># Dòng quan trọng: Inject cấu hình tracing cho Node.js
+instrumentation.opentelemetry.io/inject-nodejs: "monitoring/nodejs-instrumentation"</code></pre>
+        <p>Apply và rollout lại ứng dụng:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f todo-app-minikube-local-with-mongo-exporter.yaml
+
+kubectl rollout restart deployment/backend-deployment -n default
+kubectl rollout restart deployment/frontend-deployment -n default
+
+kubectl rollout status deployment/backend-deployment -n default
+kubectl rollout status deployment/frontend-deployment -n default
+
+kubectl get pods
+kubectl describe pod &lt;pod-name&gt; -n default</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Truy cập Jaeger UI</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube service jaeger-all-in-one-query -n monitoring</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Sinh trace và xem dữ liệu</strong>
+        <ul class="feature-list">
+          <li>Mở ứng dụng TODO (frontend), tạo/xoá vài todo.</li>
+          <li>Trong Jaeger UI, mục <strong>Service</strong> (khung trái) chọn <code>frontend</code> hoặc <code>backend</code> → bấm <strong>Find Traces</strong>.</li>
+          <li>Bấm vào từng trace để xem các span chi tiết (thời gian xử lý ở từng service, query MongoDB...).</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Các Operator (cert-manager, Jaeger, OpenTelemetry) chạy đúng namespace.</li>
+      <li>Jaeger All-in-one và OpenTelemetry Collector chạy trong namespace <code>monitoring</code>.</li>
+      <li>Pod frontend/backend được inject auto-instrumentation (xem <code>kubectl describe pod</code> thấy init container/annotation).</li>
+      <li>Jaeger UI hiển thị service <code>frontend</code>/<code>backend</code> và tìm được trace khi thao tác trên app.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Không thấy service trong Jaeger UI</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Annotation auto-instrument chưa được inject, hoặc app chưa được rollout lại.<br/><strong>Giải pháp:</strong> Kiểm tra annotation đúng tên <code>monitoring/nodejs-instrumentation</code>; chạy <code>kubectl rollout restart</code> và đợi pod mới; sinh lại request trên app.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">OpenTelemetry Operator không lên</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> cert-manager chưa sẵn sàng khi cài OTel Operator.<br/><strong>Giải pháp:</strong> Xoá và cài lại OTel Operator sau khi <code>kubectl get pods -n cert-manager</code> cho thấy cert-manager đã Running.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Trace không tới được Jaeger</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Endpoint của Collector sai namespace, hoặc Collector chưa kết nối tới Jaeger.<br/><strong>Giải pháp:</strong> Kiểm tra endpoint <code>http://otel-collector-collector.monitoring.svc.cluster.local:4318</code> trong <code>tracing.yaml</code>; xem log pod collector và jaeger.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Bài lab chạy trên Minikube local, không phát sinh chi phí cloud.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f tracing.yaml
+kubectl delete -f opentelemetry-operator.yaml
+kubectl delete -f jaeger-operator.yaml -n observability
+kubectl delete -f cert-manager.yaml</code></pre>
+
+</body>
+</html>

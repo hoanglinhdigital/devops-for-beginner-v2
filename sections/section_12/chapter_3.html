@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết &amp; Clear resources – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CI/CD sử dụng GitHub Actions</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết &amp; Clear resources</span>
+  </div>
+
+  <h2 class="section-heading">Tổng kết section</h2>
+  <div class="mermaid">
+  flowchart LR
+      T1["📘 <b>GitHub Actions</b><br/>là gì?"] --> T2["📘 <b>Khái niệm</b><br/>workflow · event<br/>job · step · action"]
+      T2 --> L1["🧪 <b>Lab 1</b><br/>Build &amp; push ECR"]
+      L1 --> L2["🧪 <b>Lab 2</b><br/>Deploy ECS<br/>(Terraform stack)"]
+      L2 --> L3["🧪 <b>Lab 3</b><br/>Switch traffic"]
+      L3 --> L4["🧪 <b>Lab 4</b><br/>Clear resource"]
+      L4 --> L5["🧪 <b>Lab 5</b><br/>Pipeline tổng thể<br/>+ manual approval"]
+      L5 --> L6["🧪 <b>Lab 6</b><br/>Test trên develop"]
+  </div>
+
+  <table class="compare-table">
+    <thead><tr><th>Chương</th><th>Nội dung</th><th>Kiến thức chính</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>GitHub Actions là gì?</td><td>6 khái niệm (workflow, event, job, step, action, runner), cấu trúc file YAML, pricing, trade-off</td></tr>
+      <tr><td>2 (Lab 1)</td><td>Build Docker image &amp; push lên ECR</td><td><code>actions/checkout</code>, <code>configure-aws-credentials</code>, <code>amazon-ecr-login</code>; trigger bằng push và thủ công theo tag</td></tr>
+      <tr><td>2 (Lab 2)</td><td>Deploy lên ECS Cluster</td><td>Terraform stack Blue/Green (2 cluster, 2 Target Group, listener <code>:80</code>/<code>:81</code>), <code>register-task-definition</code> + <code>update-service</code></td></tr>
+      <tr><td>2 (Lab 3)</td><td>Switch traffic trên ALB</td><td>Tìm ALB theo tên, listener theo port, <code>modify-listener</code> hoán đổi Target Group; chạy lại = rollback</td></tr>
+      <tr><td>2 (Lab 4)</td><td>Clear old resources</td><td>Scale ECS Service về 0 task</td></tr>
+      <tr><td>2 (Lab 5)</td><td>Kết hợp tất cả trong 1 workflow</td><td>Reusable workflow (<code>workflow_call</code>), <code>needs</code>, <code>if</code>, <code>environment</code> + required reviewer</td></tr>
+      <tr><td>2 (Lab 6)</td><td>Thêm bước test trên nhánh develop</td><td>Trigger theo <code>pull_request</code>, <code>setup-node</code>, health check bằng curl</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">GitHub Actions vs Jenkins vs CodePipeline</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>GitHub Actions</th><th>Jenkins (Section 10)</th><th>AWS CodePipeline (Section 9)</th></tr></thead>
+    <tbody>
+      <tr><td>Nơi chạy</td><td>Runner do GitHub quản lý (hoặc self-hosted)</td><td>Server EC2 tự dựng và vận hành</td><td>Dịch vụ AWS quản lý</td></tr>
+      <tr><td>Định nghĩa pipeline</td><td>File YAML trong repo</td><td>Jenkinsfile (Groovy)</td><td>Cấu hình trên Console / CloudFormation</td></tr>
+      <tr><td>Tích hợp hệ sinh thái</td><td>Gắn liền GitHub</td><td>Plugin phong phú, trung lập</td><td>Gắn liền AWS</td></tr>
+      <tr><td>Chi phí</td><td>Miễn phí cho public repo; private có hạn mức</td><td>Trả tiền EC2 (cố định)</td><td>Trả theo phút build (CodeBuild)</td></tr>
+      <tr><td>Vận hành</td><td>Gần như không phải lo</td><td>Phải bảo trì, cập nhật, scale server</td><td>Không phải lo hạ tầng</td></tr>
+      <tr><td>Phù hợp</td><td>Source trên GitHub, muốn CI/CD nhanh gọn</td><td>Cần tự chủ, tuỳ biến sâu, trung lập vendor</td><td>Hệ thống thuần AWS, cần tích hợp sâu dịch vụ AWS</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Checklist dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Các resource tính phí theo giờ</strong> cần xoá ngay: ALB <code>udemy-devops-alb</code>, 4 task Fargate, Public IPv4 của task. ECR và CloudWatch Logs tính phí theo dung lượng. Không xoá sẽ phát sinh chi phí kể cả khi không dùng.</div>
+  <ol class="step-list">
+    <li><div><p><strong>Terraform stack:</strong> xoá VPC, ALB, Target Group, 2 ECS Cluster/Service, IAM Role, log group:</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_17_cicd_using_github_action/terraform
+terraform destroy --var-file "terraform.tfvars"</code></pre></div></li>
+    <li><div><p><strong>Task definition còn sót:</strong> các revision do workflow <code>Deploy to ECS</code> đăng ký không do Terraform quản lý — deregister nếu muốn danh sách sạch (không tính phí):</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecs list-task-definitions --family-prefix nodejs-task-definition --region ap-southeast-1 --query 'taskDefinitionArns[]' --output text | tr '\t' '\n' | xargs -I {} aws ecs deregister-task-definition --task-definition {} --region ap-southeast-1 --query 'taskDefinition.taskDefinitionArn'</code></pre></div></li>
+    <li><div><p><strong>ECR:</strong> xoá các image <code>latest</code>, <code>v1.0.0</code>, <code>v1.0.1</code>, <code>v1.0.2</code> hoặc xoá cả repository nếu không dùng ở các section sau:</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr batch-delete-image --repository-name nodejs-random-color --image-ids imageTag=latest imageTag=v1.0.0 imageTag=v1.0.1 imageTag=v1.0.2 --region ap-southeast-1</code></pre></div></li>
+    <li><div><p><strong>IAM User:</strong> nếu IAM User <code>PowerUserAccess</code> chỉ dùng cho bài lab, xoá Access Key hoặc xoá cả User để tránh lộ key (least privilege).</p></div></li>
+    <li><div><p><strong>GitHub:</strong> gỡ các secret <code>AWS_ACCESS_KEY_ID</code> / <code>AWS_SECRET_ACCESS_KEY</code> (Settings → Secrets → Actions) và xoá Environment <code>production-approval</code> nếu không dùng nữa; có thể xoá repository đã fork.</p></div></li>
+    <li><div><p><strong>Kiểm tra lại</strong> trên Console (region Singapore): EC2 → Load Balancers, Target Groups, Elastic IPs, NAT Gateways, Volumes không dùng; ECS → Clusters. Không còn resource có tiền tố <code>udemy-devops</code>.</p></div></li>
+  </ol>
+
+  <h2 class="section-heading">Best practice</h2>
+  <ul class="feature-list">
+    <li><strong>Không commit secret:</strong> Access Key chỉ lưu trong GitHub Secrets; trong workflow tham chiếu qua <code>${{ secrets.* }}</code> và không in ra log.</li>
+    <li><strong>Một artifact cho mọi môi trường:</strong> build một lần theo Git tag, cùng image đi qua các bước deploy; không build lại khi rollback.</li>
+    <li><strong>Guardrail trong pipeline:</strong> chặn deploy lên môi trường đang nhận traffic, dùng <code>environment</code> + required reviewer cho production.</li>
+    <li><strong>Least privilege cho IAM:</strong> thực tế nên viết policy hẹp (chỉ ECR/ECS/ELB cần thiết) thay vì <code>PowerUserAccess</code>.</li>
+    <li><strong>Tái sử dụng workflow:</strong> tách các công việc nhỏ thành workflow riêng và gọi bằng <code>workflow_call</code> (như Lab 5) để dễ bảo trì.</li>
+    <li><strong>Pin version action:</strong> dùng tag như <code>@v4</code>, <code>@v2</code> (hoặc commit SHA trong production) để tránh bị thay đổi bất ngờ.</li>
+    <li><strong>Hạ tầng là code:</strong> Terraform quản lý hạ tầng, workflow quản lý trạng thái deploy — dùng <code>ignore_changes</code> để 2 bên không ghi đè nhau.</li>
+  </ul>
+
+  <h2 class="section-heading">Tài liệu tham khảo</h2>
+  <ul class="feature-list">
+    <li>GitHub Docs – <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">Understanding GitHub Actions</a>: workflow, event, job, step, action, runner.</li>
+    <li>GitHub Docs – <a href="https://docs.github.com/en/actions/using-workflows/reusing-workflows" target="_blank" rel="noopener">Reusing workflows</a> và <a href="https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/managing-environments-for-deployment" target="_blank" rel="noopener">Using environments for deployment</a>.</li>
+    <li>GitHub Marketplace – các action chính thức của AWS: <code>aws-actions/configure-aws-credentials</code>, <code>aws-actions/amazon-ecr-login</code>.</li>
+    <li>Amazon ECS Developer Guide – <em>Deploy Amazon ECS services by replacing tasks</em>, <em>Update a service</em>.</li>
+    <li>Elastic Load Balancing – <em>Listeners for your Application Load Balancers</em> (forward action).</li>
+    <li>Amazon ECR – <em>Pushing a Docker image</em>.</li>
+  </ul>
+
+  <h2 class="section-heading">Chủ đề nên tìm hiểu thêm</h2>
+  <ul class="feature-list">
+    <li><strong>OIDC thay cho Access Key:</strong> dùng GitHub Actions OIDC provider để cấp quyền AWS tạm thời, không cần lưu Access Key dài hạn.</li>
+    <li><strong>GitHub Actions + CodeDeploy:</strong> Blue/Green deployment bản "native" với task set, auto rollback theo CloudWatch alarm.</li>
+    <li><strong>Matrix build:</strong> build cùng lúc nhiều phiên bản (vd nhiều Node.js version) bằng <code>strategy.matrix</code>.</li>
+    <li><strong>Self-hosted runner &amp; cache:</strong> cache <code>npm</code>/Docker layer để build nhanh hơn, runner tự quản cho môi trường riêng.</li>
+    <li><strong>GitOps với Argo CD:</strong> hướng deploy theo khai báo (declarative) cho Kubernetes — một hướng tiếp cận khác với pipeline push-based.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Tạo ClusterIP Service – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Tạo ClusterIP Service</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo Service kiểu <strong>ClusterIP</strong> cho MongoDB – chỉ truy cập được từ bên trong cluster.</li>
+    <li>Hiểu cách một ứng dụng nội bộ (database) được expose cho các Pod khác mà không ra Internet.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Backend["<img src='../../assets/svg-icon/container.svg' style='width:30px;height:30px;'/><br/>Backend Pod<br/>(trong cluster)"]
+      SVC["Service ClusterIP<br/>mongo-service<br/>port:27017"]
+      Mongo["<img src='../../assets/svg-icon/eks-pod.svg' style='width:30px;height:30px;'/><br/>Mongo Pod<br/>containerPort:27017"]
+      Backend -->|"mongo-service:27017"| SVC --> Mongo
+  </div>
+  <p class="arch-caption">ClusterIP Service cung cấp một IP/DNS nội bộ ổn định (<code>mongo-service</code>) để các Pod khác trong cluster kết nối tới MongoDB, không cần biết Pod Mongo nằm ở đâu.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong> (Minikube chạy).</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/lab3_service_clusterip/</code>.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Lưu ý:</strong> lab chỉ mang tính chất demo. Trong thực tế, ứng dụng database như MongoDB đòi hỏi cơ chế quản lý state phức tạp (StatefulSet, PersistentVolume) – sẽ học ở chương StatefulSet.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo file cấu hình ClusterIP Service</strong>
+        <p>Tạo file <code>mongo-cluster.yaml</code>:</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-service
+spec:
+  type: ClusterIP
+  selector:
+    app: mongo
+  ports:
+    - protocol: TCP
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo
+          ports:
+            - containerPort: 27017</code></pre>
+        <p class="code-note">💡 Không chỉ định <code>type</code> thì mặc định cũng là <code>ClusterIP</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Apply và kiểm tra</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f mongo-cluster.yaml
+kubectl get service
+kubectl get service mongo-service -o wide
+kubectl describe service mongo-service
+kubectl get deployment
+kubectl get pods -o wide</code></pre>
+        <p>Quan sát: <code>TYPE = ClusterIP</code>, <code>CLUSTER-IP</code> là một IP nội bộ, <code>PORT(S) = 27017/TCP</code> (không có nodePort).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Xoá resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f mongo-cluster.yaml</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get service mongo-service</code> hiển thị <code>TYPE = ClusterIP</code>.</li>
+      <li>Service có <code>CLUSTER-IP</code> (dạng <code>10.x.x.x</code>) và không có <code>EXTERNAL-IP</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Không kết nối được tới <code>mongo-service:27017</code> từ trong cluster</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> selector không khớp label Pod, hoặc Pod chưa Ready.<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl get pods</code> và <code>kubectl describe service mongo-service</code> (mục Endpoints phải có IP Pod).</div>
+  </div>
+
+</body>
+</html>

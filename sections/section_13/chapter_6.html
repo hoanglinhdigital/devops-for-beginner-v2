@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lambda version, alias &amp; Safe deployment với CodeDeploy – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lambda version, alias &amp; Safe deployment với CodeDeploy</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Mặc định mỗi lần deploy, Lambda code mới thay thế code cũ và nhận <strong>100% traffic ngay lập tức</strong> – nếu có bug, mọi người dùng đều bị ảnh hưởng.
+    Ở Section 11 bạn đã học Canary / Linear trên ECS. Với Lambda, SAM tích hợp sẵn <strong>AWS CodeDeploy</strong> để làm điều tương tự (<em>gradual deployment / safe deployment</em>):
+    chuyển traffic dần dần từ version cũ sang version mới thông qua <strong>alias</strong>, theo dõi bằng CloudWatch Alarm và <strong>tự động rollback</strong> khi có lỗi.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Version:</strong> bản chụp bất biến (immutable) của code + cấu hình function, đánh số 1, 2, 3... <code>$LATEST</code> là bản đang chỉnh sửa, không cố định.</li>
+    <li><strong>Alias:</strong> con trỏ có tên (ví dụ <code>live</code>) trỏ tới một version; có thể chia traffic theo trọng số cho hai version cùng lúc (<em>weighted alias</em>).</li>
+    <li><strong><code>AutoPublishAlias</code>:</strong> SAM tự publish version mới mỗi khi code đổi và cập nhật alias; các event (API Gateway...) gọi function qua alias.</li>
+    <li><strong><code>DeploymentPreference</code>:</strong> chọn kiểu chuyển traffic (Canary, Linear, AllAtOnce); SAM tự tạo CodeDeploy Application, Deployment Group và IAM Role.</li>
+    <li><strong>Alarms:</strong> danh sách CloudWatch Alarm được CodeDeploy giám sát trong lúc chuyển traffic; alarm ở trạng thái <em>ALARM</em> → rollback.</li>
+    <li><strong>Hooks:</strong> <code>PreTraffic</code> / <code>PostTraffic</code> – hai Lambda function chạy kiểm tra (smoke test) trước và sau khi chuyển traffic.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">Alias chia traffic giữa hai version</h3>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>End-users"]
+      APIGW["<img src='../../assets/aws-svg/API-Gateway.svg' style='width:34px;height:34px;'/><br/>API Gateway"]
+      ALIAS["Alias: live<br/>weighted"]
+      V1["<img src='../../assets/aws-svg/Lambda.svg' style='width:32px;height:32px;'/><br/>Version 1<br/>90%"]
+      V2["<img src='../../assets/aws-svg/Lambda.svg' style='width:32px;height:32px;'/><br/>Version 2 (canary)<br/>10%"]
+      CD["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:34px;height:34px;'/><br/>CodeDeploy<br/>điều khiển trọng số"]
+      ALARM["<img src='../../assets/svg-icon/Alarm.svg' style='width:30px;height:30px;'/><br/>CloudWatch Alarm<br/>Errors của version 2"]
+      User --> APIGW --> ALIAS
+      ALIAS -->|"90%"| V1
+      ALIAS -->|"10%"| V2
+      CD -->|"đổi trọng số"| ALIAS
+      V2 -.->|"metric"| ALARM
+      ALARM -.->|"ALARM → rollback"| CD
+  </div>
+  <p class="arch-caption">CodeDeploy giữ 10% traffic cho version 2 trong thời gian quy định rồi chuyển 100%; nếu alarm kích hoạt, trọng số quay về 100% version 1.</p>
+
+  <h3 class="section-subheading">Cấu hình trong template</h3>
+  <pre class="code-block"><code class="language-yaml">GetUrlFunction:
+  Type: AWS::Serverless::Function
+  Properties:
+    CodeUri: get_url/
+    Handler: app.lambda_handler
+    AutoPublishAlias: live                       # bắt buộc để dùng DeploymentPreference
+    DeploymentPreference:
+      Type: Canary10Percent5Minutes              # 10% trong 5 phút rồi 100%
+      Alarms:
+        - !Ref GetUrlCanaryErrorsAlarm           # alarm kích hoạt rollback
+      # Hooks:
+      #   PreTraffic: !Ref PreTrafficFunction    # (tuỳ chọn) smoke test trước khi chuyển traffic</code></pre>
+
+  <h3 class="section-subheading">Các kiểu deployment cho Lambda</h3>
+  <table class="compare-table">
+    <thead><tr><th>Type</th><th>Cách chuyển traffic</th><th>Ví dụ</th></tr></thead>
+    <tbody>
+      <tr><td>Canary</td><td>Chuyển 1 phần nhỏ trước, hết thời gian chờ thì chuyển phần còn lại</td><td><code>Canary10Percent5Minutes</code>, <code>Canary10Percent10Minutes</code>, <code>Canary10Percent15Minutes</code>, <code>Canary10Percent30Minutes</code></td></tr>
+      <tr><td>Linear</td><td>Tăng đều theo từng nấc sau mỗi khoảng thời gian</td><td><code>Linear10PercentEvery1Minute</code>, <code>Linear10PercentEvery2Minutes</code>, <code>Linear10PercentEvery3Minutes</code>, <code>Linear10PercentEvery10Minutes</code></td></tr>
+      <tr><td>AllAtOnce</td><td>Chuyển 100% ngay, nhưng vẫn có alarm &amp; hook để rollback</td><td><code>AllAtOnce</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Giảm blast radius: lỗi chỉ ảnh hưởng một phần nhỏ request.</li>
+        <li>Rollback tự động, không cần can thiệp thủ công.</li>
+        <li>Cấu hình chỉ vài dòng trong template; không phải tự dựng CodeDeploy.</li>
+        <li>Version cũ vẫn tồn tại → rollback gần như tức thì, không cần build lại.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Deploy lâu hơn (phải chờ hết thời gian canary/linear).</li>
+        <li>Cần alarm tốt – alarm sai/thiếu thì rollback không hoạt động; cần có đủ traffic để alarm có dữ liệu.</li>
+        <li>Hai version chạy song song → phải tương thích ngược (DB schema, API contract).</li>
+        <li>Không áp dụng được cho <code>sam sync</code> (sync bỏ qua CodeDeploy).</li>
+      </ul>
+    </div>
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Tình huống</th><th>Gợi ý</th></tr></thead>
+    <tbody>
+      <tr><td>Môi trường dev, cần feedback nhanh</td><td>Không dùng <code>DeploymentPreference</code> (deploy trực tiếp)</td></tr>
+      <tr><td>Production, API có nhiều người dùng</td><td>Canary 10% + alarm lỗi 5xx / Errors</td></tr>
+      <tr><td>Thay đổi lớn, muốn tăng tải từ từ</td><td>Linear 10% mỗi vài phút</td></tr>
+      <tr><td>Cần kiểm tra trước khi nhận traffic thật</td><td>PreTraffic hook chạy smoke test</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>API thanh toán / đặt hàng</h4>
+      <p>Canary 10% trong 10 phút với alarm trên <code>Errors</code> và độ trễ; bug trong logic mới chỉ ảnh hưởng một lượng nhỏ đơn hàng và được rollback tự động.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Hàm xử lý dữ liệu quan trọng</h4>
+      <p>PreTraffic hook gọi thử function mới với dữ liệu mẫu; chỉ khi pass mới bắt đầu chuyển traffic.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Pipeline CI/CD cho serverless</h4>
+      <p>Pipeline chạy <code>sam deploy</code> lên production với <code>DeploymentPreference</code> để deploy mỗi ngày mà vẫn an toàn.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Chỉ áp dụng khi cập nhật:</strong> lần deploy đầu tiên (tạo function) không có version cũ nên không có canary. Từ lần deploy thứ hai trở đi mới chuyển traffic dần.</li>
+    <li><strong>CloudFormation chờ CodeDeploy:</strong> lệnh <code>sam deploy</code> chỉ kết thúc khi deployment hoàn tất (hoặc rollback), nên thời gian chạy bằng thời gian canary cộng thêm.</li>
+    <li><strong>Rollback ảnh hưởng stack:</strong> khi CodeDeploy rollback, CloudFormation đánh dấu update là thất bại và đưa stack về trạng thái trước đó. Đừng bật <code>Disable rollback</code> trong <code>sam deploy</code> khi dùng tính năng này.</li>
+    <li><strong>Metric của alias:</strong> dùng dimension <code>Resource = &lt;function&gt;:&lt;alias&gt;</code> và <code>ExecutedVersion</code> để chỉ theo dõi riêng version mới đang nhận canary.</li>
+    <li><strong>Chi phí:</strong> CodeDeploy cho Lambda không tính phí; chỉ trả tiền CloudWatch Alarm (rất nhỏ).</li>
+    <li><strong>Dọn dẹp version:</strong> mỗi lần deploy tạo thêm một version; Lambda giữ các version cũ (tính vào dung lượng code 75 GB của account). Nên dọn định kỳ nếu deploy rất nhiều.</li>
+  </ul>
+
+</body>
+</html>

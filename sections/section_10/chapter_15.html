@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết section &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết section &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Tổng kết section</h2>
+  <div class="mermaid">
+  flowchart LR
+      T1["📘 <b>Jenkins</b><br/>controller · agent<br/>job · plugin"] --> L1["🧪 <b>Lab 1–3</b><br/>Cài đặt · Freestyle<br/>Variable · Credential"]
+      L1 --> T2["📘 <b>Pipeline</b><br/>Declarative · Scripted"]
+      T2 --> L2["🧪 <b>Lab 4–6</b><br/>Java · Node.js · Docker<br/>→ S3 · ECR"]
+      L2 --> L3["🧪 <b>Lab 7</b><br/>Deploy ECS"]
+      L3 --> L4["🧪 <b>Lab 8–10</b><br/>SCM · Webhook<br/>Release by tag"]
+      L4 --> L5["🧪 <b>Lab 11–12</b><br/>Scripted · Slack"]
+  </div>
+
+  <table class="compare-table">
+    <thead><tr><th>Chương</th><th>Nội dung</th><th>Kiến thức chính</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Giới thiệu Jenkins</td><td>Jenkins là gì, controller/agent/executor/job/workspace/plugin/credential, so sánh với CodePipeline &amp; GitHub Actions</td></tr>
+      <tr><td>2</td><td>Lab 1: Cài đặt Jenkins</td><td>EC2 Ubuntu 24.04 <code>t3.medium</code>, IAM Role, Java 21, Jenkins LTS, suggested plugins, AWS CLI v2, jq</td></tr>
+      <tr><td>3–4</td><td>Lab 2–3: Freestyle, Variable</td><td>Execute shell, Console Output, workspace, Build periodically; built-in/global variable, parameter, credential binding &amp; masking</td></tr>
+      <tr><td>5</td><td>Jenkins Pipeline</td><td>CI/CD concept, Declarative (agent, tools, environment, stages, when, post), Scripted, các phương án quản lý job</td></tr>
+      <tr><td>6–8</td><td>Lab 4–6: Build</td><td>Tools JDK/Maven, <code>aws s3 cp/sync</code>, <code>archiveArtifacts</code>, <code>junit</code>; Node.js 22; Docker group, ECR login, tag <code>ver-N</code></td></tr>
+      <tr><td>9</td><td>Lab 7: Deploy ECS</td><td>Terraform stack, parameter <code>IMAGE_TAG</code>, register task definition bằng <code>jq</code>, <code>update-service</code>, <code>wait services-stable</code>, rollback</td></tr>
+      <tr><td>10–12</td><td>Lab 8–10: Git integration</td><td>Deploy key + SSH credential, Pipeline from SCM, GitHub webhook trên nhánh <code>develop</code>, release theo tag + <code>when</code></td></tr>
+      <tr><td>13–14</td><td>Lab 11–12</td><td><code>node {}</code>, try/catch/finally, <code>withEnv</code>; Slack App, <code>slackSend</code> trong <code>post</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Luồng CI/CD hoàn chỉnh đã xây dựng</h3>
+  <div class="mermaid">
+  flowchart LR
+      F["🌿 feature/*"] -->|"Pull Request"| D["🌿 develop"]
+      D -->|"webhook → Lab 9<br/>build + deploy tự động"| DEV["🧪 Môi trường Dev"]
+      D -->|"merge"| M["🌿 master"]
+      M -->|"git tag v1.x.x"| TAG["🏷️ Tag"]
+      TAG -->|"Lab 10: bấm tay<br/>BuildAndDeploy / OnlyDeploy"| PROD["🚀 Production"]
+      DEV -.->|"Slack"| N["🔔 Notify"]
+      PROD -.->|"Slack"| N
+  </div>
+  <p class="arch-caption">Trong lab, Dev và Production dùng chung một ECS service để tiết kiệm chi phí; thực tế mỗi môi trường là một stack riêng (Section 5 – Lab 10: multi-environment).</p>
+
+  <h2 class="section-heading">Cheat sheet: các step Jenkins Pipeline đã dùng</h2>
+  <table class="req-table">
+    <thead><tr><th>Step / directive</th><th>Ví dụ</th><th>Lab</th></tr></thead>
+    <tbody>
+      <tr><td><code>git</code></td><td><code>git branch: 'master', url: "${GIT_REPO}", credentialsId: 'github-ssh-key'</code></td><td>4 → 6, 11, 12</td></tr>
+      <tr><td><code>checkout scmGit</code></td><td><code>checkout scmGit(branches: [[name: "refs/tags/${params.VERSION}"]], userRemoteConfigs: [[url: ..., credentialsId: ...]])</code></td><td>10</td></tr>
+      <tr><td><code>sh</code></td><td><code>sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'</code>, <code>sh '''...'''</code> nhiều dòng</td><td>Mọi lab</td></tr>
+      <tr><td><code>withCredentials</code></td><td><code>withCredentials([usernamePassword(credentialsId: 'dblogin', ...)]) { }</code></td><td>3</td></tr>
+      <tr><td><code>tools</code></td><td><code>tools { jdk 'JDK21'; maven 'M3' }</code></td><td>4</td></tr>
+      <tr><td><code>junit</code>, <code>archiveArtifacts</code></td><td><code>junit 'target/surefire-reports/*.xml'</code>, <code>archiveArtifacts 'target/*.jar'</code></td><td>4</td></tr>
+      <tr><td><code>options</code></td><td><code>timeout(time: 15, unit: 'MINUTES')</code>, <code>disableConcurrentBuilds()</code></td><td>7, 9, 10</td></tr>
+      <tr><td><code>when</code></td><td><code>when { expression { params.ACTION in ['BuildAndDeploy', 'OnlyDeploy'] } }</code></td><td>10</td></tr>
+      <tr><td><code>post</code></td><td><code>post { always { sh 'docker image prune -f' } }</code></td><td>4, 6 → 12</td></tr>
+      <tr><td><code>withEnv</code>, <code>readFile</code></td><td><code>withEnv(["AWS_REGION=${awsRegion}"]) { }</code>, <code>readFile('file.txt').trim()</code></td><td>11</td></tr>
+      <tr><td><code>slackSend</code></td><td><code>slackSend channel: '#jenkins-notification', color: 'good', message: '...'</code></td><td>12</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Checklist dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Các resource tính phí theo giờ</strong> cần xoá ngay: EC2 Jenkins server (<code>t3.medium</code>), Public IPv4 / Elastic IP, ALB, task Fargate. Các resource lưu trữ (EBS, S3, ECR, CloudWatch Logs) tính phí theo dung lượng.</div>
+  <ol class="step-list">
+    <li><div><p><strong>ECS stack:</strong> chạy <code>terraform destroy</code> nếu chưa xoá (Lab 7 → Lab 10):</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_10_cicd_with_jenkins/terraform_ecs_stack
+terraform destroy</code></pre></div></li>
+    <li><div><p><strong>Task definition còn sót:</strong> các revision do Jenkins đăng ký không do Terraform quản lý – deregister nếu muốn danh sách sạch (không tính phí):</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecs list-task-definitions --family-prefix jenkins-lab-nodejs-task --region ap-southeast-1 --query 'taskDefinitionArns[]' --output text | tr '\t' '\n' | xargs -I {} aws ecs deregister-task-definition --task-definition {} --region ap-southeast-1 --query 'taskDefinition.taskDefinitionArn'</code></pre></div></li>
+    <li><div><p><strong>ECR:</strong> xoá bớt image hoặc xoá repository <code>nodejs-random-color</code> (nếu không còn dùng cho các section sau):</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr delete-repository --repository-name nodejs-random-color --force --region ap-southeast-1</code></pre></div></li>
+    <li><div><p><strong>S3:</strong> làm rỗng và xoá bucket artifact (và bucket website nếu còn):</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 rb s3://jenkins-artifact-&lt;your-suffix&gt; --force
+aws s3 rb s3://jenkins-web-&lt;your-suffix&gt; --force</code></pre></div></li>
+    <li><div><p><strong>Jenkins server:</strong> nếu còn học tiếp các section sau, chỉ cần <strong>Stop instance</strong>. Nếu không dùng nữa: terminate instance <code>jenkins-server</code> (EBS root volume tự xoá), release Elastic IP (nếu có), xoá Security Group <code>jenkins-sg</code>, key pair <code>jenkins-key</code>, IAM Role <code>jenkins-server-role</code>.</p></div></li>
+    <li><div><p><strong>Kiểm tra lại</strong> trên Console (region Singapore): EC2 instances, Load Balancers, Target Groups, Elastic IPs, NAT Gateways, ECS clusters – không còn resource của lab.</p></div></li>
+    <li><div><p><strong>CloudWatch Logs:</strong> xoá log group <code>/ecs/jenkins-lab-nodejs</code> nếu còn (Terraform đã xoá khi destroy).</p></div></li>
+    <li><div><p><strong>GitHub &amp; Slack:</strong> xoá webhook (Lab 9) và Deploy key <code>jenkins-server</code> (Lab 8) trên repository; xoá Slack App (Lab 12). Có thể chuyển repository về Public nếu muốn.</p></div></li>
+    <li><div><p><strong>Máy local:</strong> xoá key <code>~/.ssh/jenkins_github</code>, <code>~/.ssh/jenkins_github.pub</code> nếu không dùng nữa.</p></div></li>
+  </ol>
+
+  <h2 class="section-heading">Best practice khi vận hành Jenkins thật</h2>
+  <ul class="feature-list">
+    <li><strong>Tách agent khỏi controller:</strong> đặt số executor của built-in node = 0, build trên agent EC2 / Docker / Kubernetes (plugin <em>EC2</em>, <em>Kubernetes</em>) – controller chỉ điều phối.</li>
+    <li><strong>Bảo mật:</strong> Jenkins sau ALB + HTTPS hoặc VPN, không public port 8080; bật phân quyền (Matrix / Role-based), cập nhật core &amp; plugin định kỳ, gỡ plugin không dùng.</li>
+    <li><strong>Least privilege:</strong> IAM Role chỉ đủ quyền cho đúng bucket, repository, cluster; secret lưu trong Jenkins Credentials hoặc AWS Secrets Manager.</li>
+    <li><strong>Backup <code>JENKINS_HOME</code>:</strong> snapshot EBS định kỳ (AWS Backup hoặc Data Lifecycle Manager), hoặc cấu hình bằng code (<em>Jenkins Configuration as Code – JCasC</em>) để dựng lại server nhanh.</li>
+    <li><strong>Pipeline as Code:</strong> mọi job dùng <code>Jenkinsfile</code> trong repository, Multibranch Pipeline cho nhiều nhánh, Shared Library cho đoạn code dùng chung.</li>
+    <li><strong>Giữ server gọn:</strong> <em>Discard old builds</em>, dọn Docker image/cache định kỳ, theo dõi dung lượng đĩa.</li>
+  </ul>
+
+  <h2 class="section-heading">Tài liệu tham khảo</h2>
+  <ul class="feature-list">
+    <li>Jenkins User Handbook – <em>Installing Jenkins on Linux</em>, <em>Pipeline</em>, <em>Pipeline Syntax</em>, <em>Using credentials</em>.</li>
+    <li>Jenkins Plugins – <em>Git</em>, <em>GitHub</em>, <em>Credentials Binding</em>, <em>Slack Notification</em>.</li>
+    <li>Docker Docs – <em>Install Docker Engine on Ubuntu</em>.</li>
+    <li>AWS CLI Command Reference – <code>aws ecs register-task-definition</code>, <code>update-service</code>, <code>wait services-stable</code>.</li>
+    <li>GitHub Docs – <em>Managing deploy keys</em>, <em>About webhooks</em>, <em>About GitHub's IP addresses</em>.</li>
+  </ul>
+
+  <h2 class="section-heading">Chủ đề nên tìm hiểu thêm</h2>
+  <ul class="feature-list">
+    <li><strong>Multibranch Pipeline</strong> &amp; <strong>GitHub Branch Source</strong>: tự build mọi nhánh/PR, báo trạng thái build ngược lại GitHub.</li>
+    <li><strong>Docker agent</strong> (<code>agent { docker { image 'node:22' } }</code>): mỗi build chạy trong container sạch, không cần cài tool lên server.</li>
+    <li>Tích hợp chất lượng code: <strong>SonarQube</strong>, quét lỗ hổng image bằng <strong>ECR scanning</strong> / Trivy, lưu artifact trên <strong>Nexus</strong> / <strong>CodeArtifact</strong>.</li>
+    <li>Kết hợp Jenkins với <strong>CodeDeploy</strong> để có Blue/Green, Canary (Section 9) thay vì rolling update.</li>
+    <li>So sánh với công cụ CI/CD tiếp theo của khoá học: <strong>GitHub Actions</strong> – cùng khái niệm CI/CD, khác công cụ.</li>
+  </ul>
+
+</body>
+</html>

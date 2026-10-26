@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 8: Sử dụng AWS CodeCommit – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 8: Sử dụng AWS CodeCommit</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo Git repository trên <strong>AWS CodeCommit</strong> – dịch vụ Git managed của AWS.</li>
+    <li>Tạo IAM User với quyền CodeCommit và upload <strong>SSH public key</strong> cho IAM User.</li>
+    <li>Cấu hình <code>~/.ssh/config</code>, clone repository, tạo branch, commit và push.</li>
+    <li>Tạo, review và merge <strong>Pull Request</strong> trên CodeCommit Console.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph PC["💻 PC Local"]
+          direction TB
+          KEY["🔑 <b>~/.ssh/codecommit_rsa</b><br/>private key"]
+          CFG["⚙️ <b>~/.ssh/config</b><br/>User = SSH key ID"]
+          GIT["⌨️ <b>Git Bash</b>"]
+      end
+      subgraph AWS["☁️ AWS · ap-southeast-1"]
+          direction TB
+          IAM["<img src='../../assets/aws-svg/IAM.svg' style='width:40px;height:40px;'/><br/><b>IAM User</b><br/>codecommit-lab-user<br/>+ SSH public key"]
+          CC["<img src='../../assets/aws-svg/CodeCommit.svg' style='width:40px;height:40px;'/><br/><b>CodeCommit</b><br/>demo-codecommit"]
+          IAM -.->|"xác thực &amp; phân quyền"| CC
+      end
+      GIT ==>|"SSH · git-codecommit.ap-southeast-1.amazonaws.com"| CC
+  </div>
+  <p class="arch-caption">Khác với GitHub (key gắn với tài khoản GitHub), CodeCommit xác thực qua <strong>IAM</strong>: SSH public key được gắn với IAM User, quyền thao tác repository do IAM Policy quyết định.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Tài khoản AWS, đăng nhập Console bằng IAM User có quyền quản trị (không dùng root user cho thao tác hằng ngày).</li>
+    <li>Đã hoàn thành Lab 2 (biết cách sinh SSH key) và Lab 4 (hiểu Pull Request).</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab8_codecommit/</code> (<code>commands.sh</code>, <code>ssh_config</code>).</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Lưu ý về CodeCommit:</strong> từ 07/2024 AWS tạm ngừng cho phép tài khoản mới tạo repository CodeCommit; đến 11/2025 AWS thông báo CodeCommit hoạt động trở lại đầy đủ và mở cho khách hàng mới. Nếu tài khoản của bạn vẫn không tạo được repository, hãy đọc qua lab để nắm cách làm – các section sau có phương án dùng GitHub thay thế.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo repository trên CodeCommit</strong>
+        <p>Trên AWS Console, mở dịch vụ <strong>CodeCommit</strong>, tạo repository với thông số:</p>
+        <ul class="feature-list">
+          <li>Region: <strong>Asia Pacific (Singapore) ap-southeast-1</strong></li>
+          <li>Repository name: <code>demo-codecommit</code></li>
+          <li>Description: <code>Lab 8 - Section 7</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo IAM User cho CodeCommit</strong>
+        <p>Trên IAM Console, tạo user với thông số:</p>
+        <ul class="feature-list">
+          <li>User name: <code>codecommit-lab-user</code></li>
+          <li>Console access: <strong>không cần</strong></li>
+          <li>Permissions: Attach policies directly → <code>AWSCodeCommitPowerUser</code></li>
+        </ul>
+        <p class="code-note">💡 Root user không dùng được SSH key cho CodeCommit. <code>AWSCodeCommitPowerUser</code> cho phép thao tác mọi repository nhưng không được xoá repository – phù hợp nguyên tắc least privilege cho developer.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Sinh SSH key RSA trên PC Local</strong>
+        <p>IAM chỉ chấp nhận SSH public key dạng <strong><code>ssh-rsa</code></strong> (tối thiểu 2048 bit), <strong>không</strong> hỗ trợ <code>ed25519</code> như GitHub. Sinh một key riêng cho CodeCommit (Enter để bỏ qua passphrase):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh-keygen -t rsa -b 4096 -C "codecommit-lab-user" -f ~/.ssh/codecommit_rsa
+cat ~/.ssh/codecommit_rsa.pub
+clip &lt; ~/.ssh/codecommit_rsa.pub</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Upload public key cho IAM User</strong>
+        <p>Trên IAM Console, mở user <code>codecommit-lab-user</code> → tab <strong>Security credentials</strong> → mục <strong>SSH public keys for AWS CodeCommit</strong> → upload với nội dung file <code>codecommit_rsa.pub</code>.</p>
+        <p>Sau khi upload, ghi lại <strong>SSH key ID</strong> (dạng <code>APKAxxxxxxxxxxxxxxxx</code>) – đây sẽ là “username” khi kết nối SSH tới CodeCommit.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Cấu hình ~/.ssh/config</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">code ~/.ssh/config</code></pre>
+        <p>Thêm nội dung trong file <code>ssh_config</code> của source code vào cuối file (thay <code>&lt;SSH_KEY_ID&gt;</code>), lưu lại:</p>
+        <pre class="code-block"><code class="language-bash">Host git-codecommit.*.amazonaws.com
+    User &lt;SSH_KEY_ID&gt;
+    IdentityFile ~/.ssh/codecommit_rsa</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Kiểm tra kết nối</strong>
+        <p>Lần đầu gõ <code>yes</code> để chấp nhận fingerprint:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">ssh git-codecommit.ap-southeast-1.amazonaws.com
+You have successfully authenticated over SSH. You can use Git to interact with AWS CodeCommit. Interactive shells are not supported.Connection to git-codecommit.ap-southeast-1.amazonaws.com closed by remote host.</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Clone repository</strong>
+        <p>Lấy URL ở mục <strong>Clone URL → Clone SSH</strong> trên trang repository:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs
+git clone ssh://git-codecommit.ap-southeast-1.amazonaws.com/v1/repos/demo-codecommit
+cd demo-codecommit</code></pre>
+        <p>Git báo <em>warning: You appear to have cloned an empty repository</em> – bình thường vì repository chưa có commit nào.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Commit đầu tiên trên main &amp; tạo nhánh feature</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">echo "# demo-codecommit" &gt; README.md
+git add README.md
+git commit -m "chore: init repository"
+git branch -M main
+git push -u origin main</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout -b feature/F001
+echo "&lt;h1&gt;Hello from CodeCommit&lt;/h1&gt;" &gt; index.html
+git add index.html
+git commit -m "feat(F001): add index page"
+git push -u origin feature/F001</code></pre>
+        <p>Trên CodeCommit Console, mục <strong>Branches</strong> giờ có <code>main</code> và <code>feature/F001</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Tạo, review &amp; merge Pull Request trên Console</strong>
+        <p>Trong repository <code>demo-codecommit</code>, tạo Pull Request với thông số:</p>
+        <ul class="feature-list">
+          <li>Destination: <code>main</code> · Source: <code>feature/F001</code></li>
+          <li>Title: <code>F001 - Add index page</code></li>
+        </ul>
+        <p>Ở tab <strong>Changes</strong> xem diff và thử thêm comment. Merge PR với tuỳ chọn <strong>Fast forward merge</strong> và đánh dấu xoá source branch sau khi merge. CodeCommit hỗ trợ 3 kiểu merge: <em>Fast forward</em>, <em>Squash and merge</em>, <em>3-way merge</em> – tương ứng các khái niệm ở chương trước.</p>
+        <p class="code-note">💡 Muốn bắt buộc review như Ruleset của GitHub: dùng <strong>Approval rule templates</strong> (số người approve tối thiểu) và IAM Policy <em>Deny</em> <code>codecommit:GitPush</code> vào branch <code>main</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 10: Cập nhật main ở local</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout main
+git pull origin main
+git log --oneline --graph -5</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>ssh git-codecommit.ap-southeast-1.amazonaws.com</code> trả về <em>You have successfully authenticated over SSH</em>.</li>
+      <li>Repository <code>demo-codecommit</code> trên Console có file <code>README.md</code> và <code>index.html</code> trên branch <code>main</code>.</li>
+      <li>Mục <strong>Pull requests</strong> (lọc <em>Closed</em>) có PR <em>F001 - Add index page</em> ở trạng thái <strong>Merged</strong>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Permission denied (publickey).</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai SSH key ID trong <code>~/.ssh/config</code> (nhầm với Access Key ID <code>AKIA...</code>), sai đường dẫn <code>IdentityFile</code>, hoặc public key chưa ở trạng thái Active.<br/><strong>Giải pháp:</strong> Kiểm tra lại SSH key ID dạng <code>APKA...</code> trên IAM; chạy <code>ssh -v git-codecommit.ap-southeast-1.amazonaws.com</code> để xem key nào được dùng.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unable to negotiate with ... no matching host key type found. Their offer: ssh-rsa</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> OpenSSH bản mới tắt mặc định thuật toán <code>ssh-rsa</code> (SHA-1).<br/><strong>Giải pháp:</strong> Thêm 2 dòng vào block <code>Host git-codecommit.*.amazonaws.com</code> trong <code>~/.ssh/config</code>: <code>HostkeyAlgorithms +ssh-rsa</code> và <code>PubkeyAcceptedAlgorithms +ssh-rsa</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Upload SSH key lên IAM báo lỗi định dạng key không hợp lệ</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Upload key <code>ed25519</code> hoặc dán nhầm private key.<br/><strong>Giải pháp:</strong> Sinh key RSA như bước 3 và chỉ dán nội dung file <code>.pub</code> (bắt đầu bằng <code>ssh-rsa</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>fatal: unable to access ... The requested URL returned error: 403</code> khi dùng URL HTTPS</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Clone bằng URL HTTPS nhưng chưa có <em>HTTPS Git credentials</em> cho IAM User.<br/><strong>Giải pháp:</strong> Dùng URL SSH như lab, hoặc tạo HTTPS Git credentials tại tab Security credentials của IAM User, hoặc dùng công cụ <code>git-remote-codecommit</code> với AWS CLI profile.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">CodeCommit miễn phí cho 5 active user đầu tiên mỗi tháng (kèm 50 GB lưu trữ, 10.000 Git request), nên lab gần như không phát sinh chi phí. Tuy vậy, hãy dọn dẹp để tránh để lại IAM User và SSH key không dùng tới – đây là rủi ro bảo mật.</div>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Xoá resource trên AWS</strong>
+        <ul class="feature-list">
+          <li>CodeCommit: xoá repository <code>demo-codecommit</code> (Settings → Delete repository).</li>
+          <li>IAM: xoá SSH public key của <code>codecommit-lab-user</code>, sau đó xoá user.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Xoá file ở PC Local</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">rm -rf ~/git-labs/demo-codecommit
+rm ~/.ssh/codecommit_rsa ~/.ssh/codecommit_rsa.pub</code></pre>
+        <p>Xoá block <code>Host git-codecommit.*.amazonaws.com</code> trong <code>~/.ssh/config</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+</body>
+</html>

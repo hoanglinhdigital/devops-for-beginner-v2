@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Cài đặt môi trường làm việc với Terraform – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Cài đặt môi trường làm việc với Terraform</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt và kiểm tra version của AWS CLI v2.</li>
+    <li>Cấu hình credential để AWS CLI và Terraform có quyền truy cập tài khoản AWS.</li>
+    <li>Cài đặt và kiểm tra version của Terraform.</li>
+    <li>Cài đặt extension Terraform cho VS Code.</li>
+    <li>Làm quen với tài liệu chính thức của Terraform và cách tra cứu.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph PC["💻 PC Local"]
+          direction TB
+          VSC["<img src='../../assets/svg-icon/ide.svg' style='width:40px;height:40px;'/><br/><b>VS Code</b><br/>+ Terraform extension"]
+          TF["<img src='../../assets/svg-icon/terraform.svg' style='width:40px;height:40px;'/><br/><b>Terraform CLI</b>"]
+          CLI["⌨️ <b>AWS CLI v2</b><br/>~/.aws/credentials"]
+          VSC --> TF
+          TF -->|"dùng chung credential"| CLI
+      end
+      IAM["<img src='../../assets/aws-svg/IAM.svg' style='width:44px;height:44px;'/><br/><b>IAM User</b><br/>Access Key"]
+      AWS["<img src='../../assets/svg-icon/aws-logo.png' style='width:56px;height:34px;'/><br/><b>AWS API</b>"]
+      CLI -->|"HTTPS"| AWS
+      IAM -.->|"cấp quyền"| AWS
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Tài khoản AWS và một <strong>IAM User</strong> có quyền <code>AdministratorAccess</code> (dùng cho lab, không dùng root user).</li>
+    <li>Đã cài <strong>VS Code</strong> và <strong>Git</strong>. Người dùng Windows nên dùng <strong>Git Bash</strong> làm terminal cho toàn bộ section này; người dùng Mac dùng <strong>Terminal</strong>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt AWS CLI v2</strong>
+        <p>Tải bộ cài từ trang chính thức: <a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" target="_blank" rel="noopener">Install AWS CLI v2</a> (Windows: file <code>.msi</code>, Mac: file <code>.pkg</code>). Sau khi cài xong, mở terminal mới và kiểm tra version:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">aws --version
+aws-cli/2.x.x Python/3.x.x Windows/10 exe/AMD64</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo Access Key và cấu hình AWS CLI</strong>
+        <p>Trên AWS Console, vào <strong>IAM → Users → (user của bạn) → Security credentials</strong> và tạo <strong>Access key</strong> với use case <em>Command Line Interface (CLI)</em>. Lưu lại Access key ID và Secret access key.</p>
+        <p>Chạy lệnh sau và nhập thông tin khi được hỏi:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws configure</code></pre>
+        <ul class="feature-list">
+          <li>AWS Access Key ID: access key vừa tạo</li>
+          <li>AWS Secret Access Key: secret key vừa tạo</li>
+          <li>Default region name: <code>ap-southeast-1</code></li>
+          <li>Default output format: <code>json</code></li>
+        </ul>
+        <p>Kiểm tra credential hoạt động:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws sts get-caller-identity</code></pre>
+        <div class="alert alert-danger"><strong>Bảo mật:</strong> Không chia sẻ, không commit Access Key lên Git. Terraform sẽ tự đọc credential từ file <code>~/.aws/credentials</code>, bạn <strong>không cần</strong> ghi access key vào file <code>.tf</code>.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cài đặt Terraform</strong>
+        <p>Hướng dẫn chính thức: <a href="https://developer.hashicorp.com/terraform/install" target="_blank" rel="noopener">developer.hashicorp.com/terraform/install</a>. Khoá học yêu cầu <strong>Terraform &gt;= 1.10</strong>.</p>
+        <p><strong>Windows</strong> (PowerShell hoặc Git Bash):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">winget install --id Hashicorp.Terraform -e</code></pre>
+        <p><strong>MacOS</strong> (Homebrew):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">brew tap hashicorp/tap
+brew install hashicorp/tap/terraform</code></pre>
+        <p>Hoặc tải file zip, giải nén và thêm thư mục chứa <code>terraform</code> vào biến môi trường <code>PATH</code>. Mở terminal mới và kiểm tra:</p>
+        <pre class="command-line" data-prompt="$" data-output="2,3"><code class="language-bash">terraform -version
+Terraform v1.13.x
+on windows_amd64</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cài đặt Terraform extension cho VS Code</strong>
+        <p>Trong VS Code, mở tab <strong>Extensions</strong>, tìm và cài extension <strong>HashiCorp Terraform</strong> (publisher: HashiCorp). Extension hỗ trợ tô màu cú pháp, gợi ý thuộc tính (auto-complete), format code khi lưu và nhảy tới định nghĩa variable/module.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo thư mục làm việc cho các bài lab</strong>
+        <p>Tạo một thư mục chứa toàn bộ lab của section này. Mỗi bài lab sẽ là một thư mục con, keypair dùng chung đặt trong thư mục <code>keypair</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/keypair
+cd ~/terraform-labs</code></pre>
+        <pre class="file-tree"><span class="dir">terraform-labs/</span>
+├── <span class="dir">keypair/</span>          <span class="desc"># keypair dùng chung (tạo ở Lab 2)</span>
+├── <span class="dir">lab2_ec2_basic/</span>
+├── <span class="dir">lab3_variables/</span>
+└── <span class="note">...</span></pre>
+        <p>Source code đầy đủ của các lab nằm trong repository khoá học tại <code>sourcecode/section_5_IaC_using_Terraform/</code> với cùng cấu trúc thư mục.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Làm quen với tài liệu Terraform</strong>
+        <p>Hai trang bạn sẽ dùng nhiều nhất:</p>
+        <ul class="feature-list">
+          <li><a href="https://developer.hashicorp.com/terraform/language" target="_blank" rel="noopener">Terraform Language</a>: cú pháp variable, output, module, function, backend...</li>
+          <li><a href="https://registry.terraform.io/providers/hashicorp/aws/latest/docs" target="_blank" rel="noopener">AWS Provider docs</a>: tìm resource theo tên, ví dụ gõ <code>aws_instance</code> vào ô tìm kiếm. Mỗi trang có <em>Example Usage</em> (code mẫu), <em>Argument Reference</em> (tham số đầu vào) và <em>Attribute Reference</em> (giá trị có thể lấy ra để dùng cho resource khác hoặc output).</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>aws --version</code> hiển thị <code>aws-cli/2.x</code>.</li>
+      <li><code>aws sts get-caller-identity</code> trả về Account ID và ARN của IAM user.</li>
+      <li><code>terraform -version</code> hiển thị version &gt;= 1.10.</li>
+      <li>Mở một file <code>.tf</code> bất kỳ trong VS Code có tô màu cú pháp.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>terraform: command not found</code> / <code>'terraform' is not recognized</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thư mục chứa terraform chưa nằm trong <code>PATH</code>, hoặc terminal được mở trước khi cài.<br/><strong>Giải pháp:</strong> Đóng và mở lại terminal/VS Code; nếu cài bằng file zip, thêm thư mục chứa <code>terraform.exe</code> vào biến môi trường <code>PATH</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unable to locate credentials</code> hoặc <code>InvalidClientTokenId</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa chạy <code>aws configure</code> hoặc nhập sai/copy thừa khoảng trắng ở access key.<br/><strong>Giải pháp:</strong> Chạy lại <code>aws configure</code>; kiểm tra access key còn trạng thái <em>Active</em> trong IAM.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Version Terraform cũ hơn 1.10</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Máy đã cài sẵn bản cũ (ví dụ qua Chocolatey).<br/><strong>Giải pháp:</strong> Nâng cấp (<code>winget upgrade Hashicorp.Terraform</code>, <code>brew upgrade hashicorp/tap/terraform</code> hoặc <code>choco upgrade terraform</code>), kiểm tra <code>which terraform</code> để chắc chắn terminal đang dùng đúng bản mới.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo resource nào trên AWS nên không phát sinh chi phí. Hãy giữ nguyên các công cụ đã cài để dùng cho các lab tiếp theo.</div>
+
+</body>
+</html>

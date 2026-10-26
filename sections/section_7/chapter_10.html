@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 7: Giả lập &amp; xử lý conflict trên Git – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 7: Giả lập &amp; xử lý conflict trên Git</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Giả lập tình huống 2 developer (<strong>Dev A</strong>, <strong>Dev B</strong>) cùng sửa một dòng code dẫn tới <strong>conflict</strong>.</li>
+    <li>Hiểu vì sao người tạo Pull Request <strong>sau</strong> bị conflict.</li>
+    <li>Đọc và xử lý các dấu conflict <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code>, <code>=======</code>, <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> bằng VS Code.</li>
+    <li>Cập nhật lại Pull Request sau khi resolve và merge thành công.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  gitGraph
+      commit id: "test.txt"
+      branch feature/devA
+      checkout main
+      branch feature/devB
+      checkout feature/devA
+      commit id: "A: Hoàn thành"
+      checkout feature/devB
+      commit id: "B: Đang kiểm thử"
+      checkout main
+      merge feature/devB id: "PR devB ✅"
+      checkout feature/devA
+      merge main id: "A resolve conflict"
+      checkout main
+      merge feature/devA id: "PR devA ✅"
+  </div>
+  <p class="arch-caption">Trong sơ đồ, nhánh chính đại diện cho <code>develop</code>. Dev B merge trước nên không conflict. Lúc Dev A merge, <code>develop</code> đã chứa nội dung của Dev B chứ không còn là <code>develop</code> lúc Dev A checkout → conflict. Dev A phải merge <code>develop</code> mới nhất vào branch của mình và resolve.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 4 → Lab 6 trên repository <code>demo-git</code> (<code>develop</code> được bảo vệ, merge qua PR).</li>
+    <li>Dev A làm việc ở thư mục <code>~/git-labs/demo-git</code>; Dev B dùng một bản clone thứ 2 <code>~/git-labs/demo-git-devB</code> (giả lập máy tính khác).</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab7_resolve_conflict/</code> (<code>commands.sh</code>, <code>test.txt</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị file test.txt trên develop</strong>
+        <p>Copy file <code>test.txt</code> từ source code vào repository, đưa vào <code>develop</code> qua Pull Request:</p>
+        <pre class="code-block"><code class="language-text">Danh sách chức năng của hệ thống:
+Chức năng: Đăng nhập
+Trạng thái: Đang phát triển</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout develop
+git pull origin develop
+git checkout -b feature/add-test-file
+git add test.txt
+git commit -m "chore: add test.txt for conflict lab"
+git push -u origin feature/add-test-file</code></pre>
+        <p>Trên GitHub: tạo PR <code>develop</code> ← <code>feature/add-test-file</code> và merge.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Dev A tạo nhánh feature/devA và sửa test.txt</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout develop
+git pull origin develop
+git checkout -b feature/devA</code></pre>
+        <p>Sửa dòng 3 của <code>test.txt</code> thành:</p>
+        <pre class="code-block"><code class="language-text">Trạng thái: Hoàn thành (Dev A)</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add test.txt
+git commit -m "feat(devA): update status in test.txt"
+git push -u origin feature/devA</code></pre>
+        <p><strong>Chưa tạo Pull Request</strong> – giả lập Dev A làm chậm hơn Dev B.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Dev B clone repository, sửa cùng dòng và merge trước</strong>
+        <p>Clone bản thứ 2 vào thư mục khác (thay <code>&lt;GITHUB_USERNAME&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs
+git clone git@github.com:&lt;GITHUB_USERNAME&gt;/demo-git.git demo-git-devB
+cd ~/git-labs/demo-git-devB
+git checkout develop
+git checkout -b feature/devB</code></pre>
+        <p>Sửa dòng 3 của <code>test.txt</code> (trong thư mục <code>demo-git-devB</code>) thành:</p>
+        <pre class="code-block"><code class="language-text">Trạng thái: Đang kiểm thử (Dev B)</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add test.txt
+git commit -m "feat(devB): update status in test.txt"
+git push -u origin feature/devB</code></pre>
+        <p>Trên GitHub: tạo PR <code>develop</code> ← <code>feature/devB</code> và merge – <strong>không conflict</strong> vì Dev B là người merge trước.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Dev A tạo Pull Request → bị conflict</strong>
+        <p>Trên GitHub: tạo PR <code>develop</code> ← <code>feature/devA</code>. GitHub báo:</p>
+        <div class="alert alert-warning"><strong>This branch has conflicts that must be resolved</strong> – Conflicting files: <code>test.txt</code>. Nút Merge bị vô hiệu hoá.</div>
+        <p class="code-note">💡 Với conflict đơn giản, có thể bấm <strong>Resolve conflicts</strong> để sửa trực tiếp trên web. Trong lab này ta resolve ở local – cách làm phổ biến và an toàn hơn vì có thể chạy thử code trước khi push.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Dev A lấy develop mới nhất về branch của mình</strong>
+        <pre class="command-line" data-prompt="$" data-output="4-6,8-14"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout feature/devA
+git pull origin develop
+Auto-merging test.txt
+CONFLICT (content): Merge conflict in test.txt
+Automatic merge failed; fix conflicts and then commit the result.
+git status
+On branch feature/devA
+You have unmerged paths.
+  (fix conflicts and run "git commit")
+  (use "git merge --abort" to abort the merge)
+Unmerged paths:
+  (use "git add &lt;file&gt;..." to mark resolution)
+        both modified:   test.txt</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Resolve conflict bằng VS Code</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">code test.txt</code></pre>
+        <p>Git đã chèn các dấu conflict vào file:</p>
+        <pre class="code-block"><code class="language-text">Danh sách chức năng của hệ thống:
+Chức năng: Đăng nhập
+&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
+Trạng thái: Hoàn thành (Dev A)
+=======
+Trạng thái: Đang kiểm thử (Dev B)
+&gt;&gt;&gt;&gt;&gt;&gt;&gt; 1a2b3c4d...</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Phần</th><th>Ý nghĩa</th><th>Nút trong VS Code</th></tr></thead>
+          <tbody>
+            <tr><td>Từ <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</code> tới <code>=======</code></td><td>Code của branch hiện tại (Dev A)</td><td><strong>Accept Current Change</strong></td></tr>
+            <tr><td>Từ <code>=======</code> tới <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code></td><td>Code từ <code>develop</code> (của Dev B)</td><td><strong>Accept Incoming Change</strong></td></tr>
+            <tr><td>Cả hai</td><td>Giữ cả 2 phần</td><td><strong>Accept Both Changes</strong></td></tr>
+          </tbody>
+        </table>
+        <p>Trong thực tế, Dev A cần <strong>trao đổi với Dev B</strong> để hiểu thay đổi của nhau trước khi quyết định. Giả sử thống nhất nội dung cuối cùng như sau – sửa file và <strong>xoá hết</strong> các dòng đánh dấu:</p>
+        <pre class="code-block"><code class="language-text">Danh sách chức năng của hệ thống:
+Chức năng: Đăng nhập
+Trạng thái: Hoàn thành (Dev A), đã kiểm thử (Dev B)</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Đánh dấu đã resolve, commit &amp; push</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add test.txt
+git commit -m "merge: resolve conflict with develop in test.txt"
+git log --oneline --graph -8
+git push</code></pre>
+        <p>Quay lại Pull Request của Dev A trên GitHub: trạng thái chuyển thành <strong>This branch has no conflicts with the base branch</strong>. Merge PR và xoá branch.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Cập nhật develop ở cả 2 bản clone</strong>
+        <pre class="command-line" data-prompt="$" data-output="4-6"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout develop
+git pull origin develop
+cat test.txt
+Danh sách chức năng của hệ thống:
+Chức năng: Đăng nhập
+Trạng thái: Hoàn thành (Dev A), đã kiểm thử (Dev B)</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs/demo-git-devB
+git checkout develop
+git pull origin develop
+cat test.txt</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Cả 2 PR của Dev A và Dev B đều ở trạng thái <strong>Merged</strong>.</li>
+      <li><code>test.txt</code> trên <code>develop</code> có nội dung đã thống nhất, <strong>không còn</strong> dấu <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code>, <code>=======</code>, <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code>.</li>
+      <li><code>git log --oneline --graph</code> hiển thị merge commit <em>merge: resolve conflict...</em> trên nhánh của Dev A.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>fatal: Need to specify how to reconcile divergent branches.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cấu hình cách <code>git pull</code> hợp nhất thay đổi.<br/><strong>Giải pháp:</strong> <code>git config --global pull.rebase false</code> (như Lab 1) rồi chạy lại <code>git pull origin develop</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Lỡ commit file vẫn còn dấu <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa xoá hết dấu conflict trước khi <code>git add</code>.<br/><strong>Giải pháp:</strong> Sửa lại file, <code>git add</code>, <code>git commit -m "fix: remove conflict markers"</code>, push. Dùng <code>git diff --check</code> hoặc tìm chuỗi <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> trước khi commit.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Rối quá, muốn quay lại trạng thái trước khi pull</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Đang trong quá trình merge bị conflict.<br/><strong>Giải pháp:</strong> <code>git merge --abort</code> – branch trở về như trước khi chạy <code>git pull</code>, sau đó làm lại từ bước 5.</div>
+  </div>
+
+  <div class="tip-box"><strong>Hạn chế conflict khi làm việc chung:</strong>
+    <ul class="tip-box-list">
+      <li>Hạn chế nhiều người cùng code chung một module/file; chia task theo module rõ ràng.</li>
+      <li>Luôn <code>git pull</code> code mới nhất trước khi bắt đầu thay đổi và trước khi tạo Pull Request.</li>
+      <li>Giữ feature branch <strong>ngắn ngày</strong>, merge thường xuyên – branch càng sống lâu, conflict càng lớn.</li>
+      <li>Thống nhất format code (Prettier, ESLint, EditorConfig) để tránh conflict do khác định dạng, khoảng trắng.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Có thể xoá bản clone của Dev B: <code>rm -rf ~/git-labs/demo-git-devB</code>. Giữ repository <code>demo-git</code> để tham khảo; hướng dẫn dọn dẹp toàn bộ ở chương cuối section. Lab không phát sinh chi phí.</div>
+
+</body>
+</html>

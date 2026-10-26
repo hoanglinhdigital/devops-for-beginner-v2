@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevOps là gì? Hiểu đúng &amp; hiểu sai về DevOps – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">3. Giới thiệu về DevOps &amp; CICD</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">DevOps là gì? Hiểu đúng &amp; hiểu sai về DevOps</span>
+  </div>
+
+  <div class="alert alert-tip">
+    <strong>“Không có việc gì khó, chỉ sợ không biết làm!”</strong> — Section này giúp bạn có cái nhìn tổng quan về DevOps &amp; CICD trước khi bắt tay vào các công cụ cụ thể ở những section sau.
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>DevOps</strong> là một phương pháp phát triển phần mềm và quản lý hệ thống, nhằm thúc đẩy sự hợp tác giữa nhóm phát triển
+    (<strong>Dev</strong>elopment) và nhóm quản lý / vận hành hệ thống (<strong>Op</strong>eration<strong>s</strong>). Tên gọi “DevOps” chính là sự kết hợp của hai từ này.
+  </p>
+  <p class="body-text">
+    Mục tiêu của DevOps là cải thiện quy trình phát triển và triển khai phần mềm, để tạo ra sản phẩm và dịch vụ có <strong>chất lượng cao</strong>,
+    <strong>đáng tin cậy</strong> và có khả năng <strong>điều chỉnh nhanh chóng</strong> theo nhu cầu thay đổi của khách hàng.
+  </p>
+
+  <h2 class="section-heading">Công việc hằng ngày của một DevOps Engineer</h2>
+  <div class="figure-centered">
+    <img src="../../assets/images/cong-viec-hang-ngay-cua-devops-engineer.jpg" alt="Công việc hằng ngày của một DevOps Engineer" />
+    <div class="figure-title">Công việc hằng ngày của một DevOps Engineer</div>
+  </div>
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Hợp tác:</strong> phá bỏ “bức tường” giữa Dev và Ops — hai team cùng chịu trách nhiệm cho sản phẩm từ lúc viết code đến khi chạy trên Production.</li>
+    <li><strong>Giảm thời gian &amp; rủi ro:</strong> release nhỏ, thường xuyên thay vì một lần “big bang” mỗi vài tháng.</li>
+    <li><strong>Tự động hoá:</strong> build, test, deploy, tạo hạ tầng... được tự động hoá để giảm thao tác thủ công và lỗi do con người (human mistake).</li>
+    <li><strong>Phản hồi nhanh:</strong> giám sát (monitoring) hệ thống liên tục, phát hiện và khắc phục sự cố sớm.</li>
+    <li><strong>Linh hoạt:</strong> dễ dàng thay đổi để đáp ứng yêu cầu mới của khách hàng và thị trường.</li>
+    <li><strong>Hướng tới mục tiêu kinh doanh:</strong> tạo môi trường làm việc tích hợp giữa các nhóm để đạt mục tiêu chung một cách hiệu quả.</li>
+  </ul>
+
+  <h2 class="section-heading">Vòng đời DevOps (DevOps lifecycle)</h2>
+  <p class="body-text">
+    DevOps thường được biểu diễn bằng biểu tượng vô cực ♾️: một vòng lặp liên tục giữa phía <strong>Dev</strong> (Plan → Code → Build → Test)
+    và phía <strong>Ops</strong> (Release → Deploy → Operate → Monitor). Thông tin thu được từ Monitor lại quay về làm đầu vào cho Plan ở vòng tiếp theo.
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      subgraph DEV["👨‍💻 Development"]
+          direction LR
+          Plan["📝 <b>Plan</b><br/>Yêu cầu, task"]
+          Code["<img src='../../assets/svg-icon/github.svg' style='width:28px;height:28px;'/><br/><b>Code</b><br/>Version control"]
+          Build["🔨 <b>Build</b><br/>Đóng gói artifact"]
+          Test["🧪 <b>Test</b><br/>Unit / Integration"]
+          Plan --> Code --> Build --> Test
+      end
+      subgraph OPS["🛠️ Operations"]
+          direction LR
+          Release["🏷️ <b>Release</b><br/>Phiên bản mới"]
+          Deploy["🚀 <b>Deploy</b><br/>Test · Staging · Prod"]
+          Operate["<img src='../../assets/aws-svg/aws-logo.svg' style='width:28px;height:28px;'/><br/><b>Operate</b><br/>Vận hành hệ thống"]
+          Monitor["📈 <b>Monitor</b><br/>Log · Metric · Alert"]
+          Release --> Deploy --> Operate --> Monitor
+      end
+      Test --> Release
+      Monitor -.->|"Feedback"| Plan
+  </div>
+  <p class="arch-caption">Vòng đời DevOps: Dev và Ops là hai nửa của một vòng lặp liên tục, không phải hai giai đoạn tách rời.</p>
+
+  <h2 class="section-heading">Hiểu đúng &amp; hiểu sai về DevOps</h2>
+  <p class="body-text">Đây là phần rất quan trọng, vì có khá nhiều hiểu lầm về DevOps — kể cả trong các tin tuyển dụng.</p>
+  <div class="compare-grid">
+    <div class="compare-card green">
+      <h4>✅ Hiểu ĐÚNG về DevOps</h4>
+      <ul>
+        <li>DevOps là một <strong>văn hoá, triết lý</strong> trong phát triển và triển khai phần mềm.</li>
+        <li>DevOps là một <strong>cách tiếp cận</strong> và tổ chức quy trình làm việc giữa các nhóm.</li>
+      </ul>
+    </div>
+    <div class="compare-card orange">
+      <h4>❌ Hiểu SAI về DevOps</h4>
+      <ul>
+        <li class="cross">DevOps là tên gọi của một công nghệ.</li>
+        <li class="cross">DevOps là tập hợp các tools (công cụ).</li>
+        <li class="cross">DevOps là tên một chức danh trong công ty / đội dự án.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="alert alert-info">
+    <strong>Vậy “DevOps Engineer” là gì?</strong> Trên thực tế, thị trường vẫn dùng chức danh <em>DevOps Engineer</em> để chỉ người chịu trách nhiệm
+    hiện thực hoá văn hoá DevOps trong dự án: xây dựng CICD, tự động hoá hạ tầng, giám sát hệ thống... Nhưng hãy nhớ: <strong>một người DevOps Engineer
+    không thể “làm DevOps” một mình</strong> — cả team Dev, Tester, PM, Ops đều phải cùng tham gia.
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Ưu điểm khi áp dụng DevOps</th><th>Thách thức / chi phí</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Release nhanh và thường xuyên hơn</td><td>Cần thay đổi tư duy và cách làm việc của cả team — khó hơn nhiều so với cài một tool</td></tr>
+      <tr><td>Giảm lỗi do thao tác thủ công</td><td>Tốn thời gian ban đầu để xây dựng pipeline, script tự động hoá</td></tr>
+      <tr><td>Phát hiện và khắc phục sự cố nhanh</td><td>Đòi hỏi kỹ năng rộng: Cloud, Linux, Network, Container, Scripting...</td></tr>
+      <tr><td>Dev và Ops cùng hiểu hệ thống, ít đổ lỗi cho nhau</td><td>Với dự án rất nhỏ, ngắn hạn, chi phí xây dựng quy trình có thể lớn hơn lợi ích</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Startup cần ra tính năng liên tục</h4>
+      <p>Sản phẩm thay đổi hằng tuần theo phản hồi người dùng. Áp dụng DevOps giúp mỗi thay đổi được build, test và deploy tự động trong vài phút thay vì chờ “ngày release”.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Doanh nghiệp chuyển từ on-premise lên Cloud</h4>
+      <p>Thay vì Ops cài đặt server thủ công, hạ tầng được định nghĩa bằng code (Terraform) và triển khai lên AWS lặp lại được cho nhiều môi trường.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Hệ thống cần độ ổn định cao</h4>
+      <p>Ngân hàng, thương mại điện tử... cần giám sát 24/7, cảnh báo sớm và quy trình rollback nhanh khi phiên bản mới gặp lỗi.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-tip">
+    <strong>Ghi nhớ:</strong> DevOps = <strong>Văn hoá</strong> (hợp tác, cùng chịu trách nhiệm) + <strong>Quy trình</strong> (CICD, release, monitoring) + <strong>Công cụ</strong> (Git, Jenkins, Terraform, Docker...).
+    Công cụ chỉ là phương tiện, đứng cuối cùng trong danh sách. Chương tiếp theo sẽ đi vào các <strong>nguyên tắc của DevOps</strong> và khái niệm quan trọng nhất: <strong>CICD</strong>.
+  </div>
+
+</body>
+</html>

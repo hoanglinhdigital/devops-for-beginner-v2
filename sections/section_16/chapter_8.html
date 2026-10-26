@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết Monitoring for Kubernetes/EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết</span>
+  </div>
+
+  <h2 class="section-heading">3 Trụ cột của Observability</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/observability-3-pillars-wide.png" alt="3 Trụ cột của Observability: Metrics, Logging, Tracing" />
+    <div class="figure-title">3 Trụ cột của Observability</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Metrics:</strong> các con số đo lường (CPU, RAM, request rate, latency) — trả lời <em>"cái gì bất thường?"</em>.</li>
+    <li><strong>Logging:</strong> các sự kiện được ghi lại (lỗi 500, exception, query chậm) — trả lời <em>"chi tiết ra sao?"</em>.</li>
+    <li><strong>Tracing:</strong> hành trình của request xuyên qua nhiều service — trả lời <em>"lỗi nằm ở đâu?"</em>.</li>
+  </ul>
+  <div class="alert alert-info">
+    Ba trụ cột này bổ trợ lẫn nhau. Một hệ thống observability tốt là hệ thống kết hợp được cả ba, không chỉ "xem CPU" đơn thuần.
+  </div>
+
+  <h2 class="section-heading">Mô hình giám sát tổng quát</h2>
+  <div class="mermaid">
+  flowchart TB
+      I["🖥️ Infrastructure<br/>Node Health, Disk I/O, NW Latency"]
+      PC["📦 Pod/Container<br/>Tài nguyên từng ứng dụng"]
+      RP["⚖️ Resource Provisioning<br/>Autoscaling &amp; điều phối tài nguyên"]
+      AL["📋 Application Logs<br/>Thu thập &amp; visualize log"]
+      DT["🔗 Distributed Tracing<br/>Truy vết request qua từng layer"]
+      AM["🔔 Alarming<br/>Cảnh báo tức thời qua Slack, Email"]
+      I --> AM
+      PC --> AM
+      RP --> AM
+      AL --> AM
+      DT --> AM
+  </div>
+  <p class="arch-caption">Mô hình giám sát tổng quát: quan sát từ hạ tầng, pod/container và resource provisioning, thu thập log &amp; trace, rồi cảnh báo kịp thời.</p>
+
+  <h2 class="section-heading">Ba nhóm giải pháp Monitoring</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/monitoring-solutions.png" alt="Các giải pháp monitoring: Open Source, Managed Service, SaaS" />
+    <div class="figure-title">Các giải pháp monitoring</div>
+  </div>
+  <table class="req-table">
+    <thead>
+      <tr><th>Nhóm</th><th>Đại diện</th><th>Đánh đổi chính</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Open Source</strong></td><td>Prometheus + Grafana, ELK, Jaeger, Loki</td><td>Miễn phí, tự chủ nhưng phải tự vận hành</td></tr>
+      <tr><td><strong>Managed Service (AWS)</strong></td><td>CloudWatch, Amazon Managed Prometheus/Grafana, X-Ray</td><td>Ít vận hành, tích hợp AWS tốt, trả phí theo dùng</td></tr>
+      <tr><td><strong>SaaS</strong></td><td>DataDog, NewRelic, Dynatrace, Grafana Cloud</td><td>Nhanh &amp; nhiều tính năng, nhưng chi phí cao</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Lab — Triển khai thực tế</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/lab-deployment.png" alt="Tổng hợp các lab triển khai thực tế: Metrics, Log, Tracing" />
+    <div class="figure-title">Các lab triển khai thực tế</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Lab 1 — Metrics &amp; Alert:</strong> Prometheus + Grafana + AlertManager (kèm Slack).</li>
+    <li><strong>Lab 2 — Log:</strong> ELK stack (Elasticsearch + Logstash + Kibana) + Filebeat.</li>
+    <li><strong>Lab 3 — Request Tracing:</strong> OpenTelemetry + Jaeger (auto-instrumentation).</li>
+  </ul>
+
+  <h2 class="section-heading">Lưu ý quan trọng</h2>
+  <div class="alert alert-warning">
+    <strong>1. Chọn đúng công cụ:</strong> không cần dùng hết tất cả tool — hãy chọn bộ công cụ phù hợp với quy mô dự án.
+  </div>
+  <div class="alert alert-warning">
+    <strong>2. Quan trọng hơn cả giám sát:</strong> là khả năng <strong>phản ứng nhanh</strong> (MTTR — Mean Time To Repair). Giám sát mà không có người xử lý thì chỉ là "bảng điện tử đẹp".
+  </div>
+  <div class="alert alert-warning">
+    <strong>3. Bảo mật dữ liệu giám sát:</strong> đảm bảo log không chứa thông tin nhạy cảm (PII) của người dùng.
+  </div>
+  <div class="alert alert-info">
+    <strong>4. Next Action:</strong> thực hành Lab 1–3 trên môi trường Kubernetes hoặc EKS để nắm vững cách vận hành thực tế.
+  </div>
+
+  <h2 class="section-heading">Tổng kết Section</h2>
+  <ul class="feature-list">
+    <li>Hiểu <strong>3 trụ cột Observability</strong> và các yếu tố cần giám sát trên K8s/EKS (hạ tầng &amp; ứng dụng).</li>
+    <li>Phân biệt <strong>3 nhóm giải pháp</strong>: Open Source, Managed Service của AWS, và SaaS — mỗi nhóm có trade-off riêng.</li>
+    <li>Thực hành xong <strong>3 bài lab</strong> tương ứng với 3 trụ cột: Metrics, Log, Tracing.</li>
+    <li>Sẵn sàng áp dụng kiến thức monitoring cho các section tiếp theo (CI/CD, GitOps, Final Assignment).</li>
+  </ul>
+
+</body>
+</html>

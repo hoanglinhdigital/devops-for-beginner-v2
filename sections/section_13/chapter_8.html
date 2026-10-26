@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết section &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết section &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Tổng kết</h2>
+  <p class="body-text">Trong section này bạn đã đi từ việc hiểu SAM là gì đến triển khai một ứng dụng serverless hoàn chỉnh và release an toàn bằng canary. Lộ trình các bài:</p>
+  <div class="mermaid">
+  flowchart LR
+      T1["Serverless &amp; SAM<br/>(lý thuyết)"] --> T2["Template &amp; SAM CLI<br/>(lý thuyết)"]
+      T2 --> L1["Lab 1<br/>Hello World"]
+      L1 --> L2["Lab 2<br/>URL Shortener"]
+      L2 --> L3["Lab 3<br/>Local · Logs · Sync"]
+      L2 --> T3["Version, Alias &amp;<br/>Safe deployment"]
+      T3 --> L4["Lab 4<br/>Canary &amp; rollback"]
+      L3 --> END["Tổng kết"]
+      L4 --> END
+  </div>
+  <ul class="feature-list">
+    <li>SAM = <strong>CloudFormation + cú pháp rút gọn cho serverless</strong> (<code>Transform: AWS::Serverless-2016-10-31</code>) và SAM CLI cho cả vòng đời phát triển.</li>
+    <li>Cấu trúc template: <code>Globals</code>, <code>Resources</code> (<code>AWS::Serverless::Function / Api / ...</code>), <code>Outputs</code>; quyền dùng <strong>policy templates</strong> để giữ least privilege.</li>
+    <li>Quy trình chuẩn: <code>sam validate</code> → <code>sam build</code> → test local → <code>sam deploy</code> → <code>sam logs</code> → <code>sam delete</code>.</li>
+    <li><code>sam sync --watch</code> chỉ dành cho dev; production luôn qua <code>sam deploy</code> (change set).</li>
+    <li>Release an toàn với <code>AutoPublishAlias</code> + <code>DeploymentPreference</code> (Canary / Linear) + CloudWatch Alarm để tự rollback.</li>
+  </ul>
+
+  <h2 class="section-heading">Cheat sheet lệnh SAM CLI</h2>
+  <table class="compare-table">
+    <thead><tr><th>Nhu cầu</th><th>Lệnh</th></tr></thead>
+    <tbody>
+      <tr><td>Tạo project</td><td><code>sam init</code></td></tr>
+      <tr><td>Kiểm tra template</td><td><code>sam validate --lint</code></td></tr>
+      <tr><td>Build</td><td><code>sam build</code> · <code>sam build --use-container</code></td></tr>
+      <tr><td>Chạy 1 function ở local</td><td><code>sam local invoke &lt;FunctionId&gt; --event events/event.json --env-vars env.json</code></td></tr>
+      <tr><td>Chạy API ở local</td><td><code>sam local start-api --env-vars env.json</code></td></tr>
+      <tr><td>Deploy lần đầu / các lần sau</td><td><code>sam deploy --guided</code> · <code>sam deploy</code></td></tr>
+      <tr><td>Deploy tự động trong CI/CD</td><td><code>sam deploy --no-confirm-changeset --no-fail-on-empty-changeset</code></td></tr>
+      <tr><td>Xem endpoint / outputs</td><td><code>sam list endpoints</code> · <code>sam list stack-outputs --stack-name &lt;stack&gt;</code></td></tr>
+      <tr><td>Xem log</td><td><code>sam logs --stack-name &lt;stack&gt; --name &lt;FunctionId&gt; --tail</code></td></tr>
+      <tr><td>Đồng bộ nhanh (dev)</td><td><code>sam sync --stack-name &lt;stack&gt; --watch</code></td></tr>
+      <tr><td>Xoá stack</td><td><code>sam delete --stack-name &lt;stack&gt;</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Best practice</h2>
+  <ul class="feature-list">
+    <li>Một template cho nhiều môi trường: dùng <code>Parameters</code> và <code>--config-env</code>; không hard-code tên resource, account ID, region.</li>
+    <li>Cấp quyền bằng policy templates hoặc policy tự viết với <code>Resource</code> cụ thể; tránh <code>dynamodb:*</code> trên <code>"*"</code>.</li>
+    <li>Khởi tạo client AWS (boto3...) bên ngoài handler; đặt timeout và memory hợp lý trong <code>Globals</code>.</li>
+    <li>Không commit <code>.aws-sam/</code>, <code>samconfig.toml</code> chứa thông tin cá nhân, <code>env.json</code> hay credential.</li>
+    <li>Production dùng <code>DeploymentPreference</code> kèm alarm; viết unit test và chạy trong pipeline trước <code>sam deploy</code>.</li>
+    <li>Gắn tag, đặt retention cho CloudWatch Log group để kiểm soát chi phí lưu log.</li>
+  </ul>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> các resource của section này chủ yếu tính theo request nên chi phí thấp, nhưng vẫn nên xoá stack khi học xong để tránh lưu dữ liệu và CloudWatch Log không cần thiết.</div>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Xoá stack url-shorten-app</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam delete --stack-name url-shorten-app</code></pre>
+        <p>Trả lời <strong>y</strong> khi được hỏi. Kiểm tra trên CloudFormation Console stack đã biến mất (<code>DELETE_COMPLETE</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Xoá stack sam-app (Lab 1) nếu còn</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam delete --stack-name sam-app</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kiểm tra các resource còn sót</strong>
+        <ul class="feature-list">
+          <li><strong>CloudWatch</strong> → Log groups: xoá các log group <code>/aws/lambda/url-shorten-app-*</code> và <code>/aws/lambda/sam-app-*</code> (Lambda không tự xoá log group).</li>
+          <li><strong>CodeDeploy</strong> → Applications: application <code>ServerlessDeploymentApplication-*</code> đã bị xoá cùng stack.</li>
+          <li><strong>S3</strong>: bucket <code>aws-sam-cli-managed-default-*</code> do SAM tạo, chứa package code. Có thể giữ lại để dùng cho các lab sau (dung lượng rất nhỏ) hoặc xoá thủ công sau khi dọn sạch object (stack <code>aws-sam-cli-managed-default</code> trong CloudFormation).</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Dọn dẹp trên máy local</strong>
+        <p>Xoá thư mục <code>.aws-sam/</code>, <code>samconfig.toml</code>, <code>env.json</code> trong project nếu không cần nữa, và dừng container Docker còn chạy bằng <code>docker ps</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Tài liệu tham khảo</h2>
+  <ul class="feature-list">
+    <li><a href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html" target="_blank" rel="noopener">AWS SAM Developer Guide</a></li>
+    <li><a href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-policy-templates.html" target="_blank" rel="noopener">SAM policy templates</a></li>
+    <li><a href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/automating-updates-to-serverless-apps.html" target="_blank" rel="noopener">Gradual code deployments with SAM &amp; CodeDeploy</a></li>
+    <li><a href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-command-reference.html" target="_blank" rel="noopener">SAM CLI command reference</a></li>
+  </ul>
+
+</body>
+</html>

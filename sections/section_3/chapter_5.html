@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trở thành DevOps Engineer: kiến thức cần có &amp; cơ hội việc làm – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">3. Giới thiệu về DevOps &amp; CICD</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Trở thành DevOps Engineer: kiến thức cần có &amp; cơ hội việc làm</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    DevOps Engineer cần một nền tảng kiến thức khá rộng, trải từ hạ tầng, hệ điều hành đến công cụ tự động hoá và ứng dụng.
+    Tin tốt là bạn không cần học tất cả cùng lúc — chương này liệt kê những mảng kiến thức cần trang bị và chỉ ra phần nào sẽ được học trong khoá học này.
+  </p>
+
+  <h2 class="section-heading">Kiến thức cần trang bị</h2>
+  <ul class="feature-list">
+    <li><strong>Cloud Computing:</strong> AWS, Azure, GCP...</li>
+    <li><strong>Operating System:</strong> Windows Server, Linux (Ubuntu, Redhat, CentOS...).</li>
+    <li><strong>Version Control System:</strong> Github, Gitlab, Bitbucket.</li>
+    <li><strong>Project management tool:</strong> Jira, Trello.</li>
+    <li><strong>Networking, Database, Security</strong> &amp; các managed service khác của Cloud.</li>
+    <li><strong>Automation &amp; CICD tools:</strong> Terraform, Ansible, Jenkins, Gitlab CI, Github Actions, CodePipeline, CircleCI...</li>
+    <li><strong>Framework ứng dụng:</strong> Angular, Node.js, Spring Boot, .NET... — đủ để hiểu cách build và chạy ứng dụng.</li>
+    <li><strong>Docker &amp; Kubernetes.</strong></li>
+    <li><strong>Monitoring, Alert &amp; Notification tools.</strong></li>
+    <li><strong>Kỹ năng mềm:</strong> problem solving, communication skill.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến thức: các lớp nền tảng của DevOps Engineer</h2>
+  <div class="mermaid">
+  flowchart BT
+      subgraph L1["🧱 Nền tảng"]
+          direction LR
+          OS["🐧 Linux / Windows Server"]
+          NET["<img src='../../assets/svg-icon/router.svg' style='width:22px;height:22px;'/> Networking"]
+          GIT["<img src='../../assets/svg-icon/github.svg' style='width:22px;height:22px;'/> Git"]
+          OS --- NET --- GIT
+      end
+      subgraph L2["☁️ Hạ tầng"]
+          direction LR
+          AWS["<img src='../../assets/aws-svg/aws-logo.svg' style='width:22px;height:22px;'/> Cloud – AWS"]
+          DB["<img src='../../assets/svg-icon/database.svg' style='width:22px;height:22px;'/> Database"]
+          SEC["🛡️ Security"]
+
+          AWS --- DB --- SEC 
+      end
+      subgraph L3["⚙️ Tự động hoá"]
+          direction LR
+          IAC["<img src='../../assets/svg-icon/terraform.svg' style='width:22px;height:22px;'/> IaC – Terraform"]
+          CICD["🔁 CICD – Jenkins · CodePipeline · Github Actions"]
+          IAC --- CICD
+      end
+      subgraph L4["📦 Ứng dụng &amp; vận hành"]
+          direction LR
+          CON["<img src='../../assets/svg-icon/docker.svg' style='width:22px;height:22px;'/> Docker · <img src='../../assets/svg-icon/kubernetes.svg' style='width:22px;height:22px;'/> Kubernetes"]
+          MON["<img src='../../assets/svg-icon/grafana.svg' style='width:22px;height:22px;'/> Monitoring · Alert"]
+          CON --- MON
+      end
+      SOFT["🤝 <b>Kỹ năng mềm</b><br/>Problem solving · Communication"]
+      L1 --> L2 --> L3 --> L4
+      SOFT -.- L4
+  </div>
+  <p class="arch-caption">Học từ dưới lên: nền tảng vững (Linux, Network, Git) giúp các lớp phía trên dễ tiếp thu hơn rất nhiều.</p>
+
+  <h3 class="section-subheading">Khoá học này giúp bạn trang bị phần nào?</h3>
+  <table class="req-table">
+    <thead>
+      <tr><th>Mảng kiến thức</th><th>Trong khoá học</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Cloud Computing (AWS), Networking, Database, Security</td><td>✅ Ôn lại kiến thức AWS cần nắm vững</td></tr>
+      <tr><td>Linux, Git, Docker</td><td>✅ Thao tác cơ bản với Linux, Git, Docker</td></tr>
+      <tr><td>Infrastructure as Code</td><td>✅ Terraform</td></tr>
+      <tr><td>CICD tools</td><td>✅ AWS CodePipeline, Jenkins, Github Actions; chiến lược deployment</td></tr>
+      <tr><td>Serverless</td><td>✅ AWS SAM</td></tr>
+      <tr><td>Kubernetes &amp; Monitoring</td><td>✅ Kubernetes cơ bản, EKS, Monitoring &amp; CICD cho EKS</td></tr>
+      <tr><td>Framework ứng dụng, Project management tool</td><td>➖ Không đi sâu — dùng ứng dụng mẫu có sẵn</td></tr>
+    </tbody>
+  </table>
+
+  <div class="alert alert-danger">
+    <strong>QUAN TRỌNG NHẤT:</strong> giữ được thái độ <strong>bình tĩnh</strong> trong mọi tình huống để… không delete nhầm server Production!!! 😅<br/>
+    Khi xử lý sự cố, hãy đọc kỹ lệnh trước khi chạy, kiểm tra mình đang ở đúng môi trường / đúng AWS account, và luôn có backup.
+  </div>
+
+  <h2 class="section-heading">Cơ hội việc làm cho DevOps Engineer</h2>
+  <p class="body-text">
+    DevOps Engineer là một trong những vị trí có mức thu nhập tốt trong ngành IT, nhờ yêu cầu kiến thức rộng và nhu cầu tuyển dụng cao khi doanh nghiệp chuyển lên Cloud.
+  </p>
+  <div class="figure-centered">
+    <img src="../../assets/images/bao-cao-luong-devops-2024-2025.png" alt="Biểu đồ lương trung vị theo vị trí và số năm kinh nghiệm trong ngành IT Việt Nam" />
+    <div class="figure-title">Lương gross trung vị hằng tháng (VND, chưa gồm thưởng) theo vị trí và số năm kinh nghiệm — Số liệu tham khảo từ báo cáo lương IT Việt Nam giai đoạn 2024-2025; mức lương thực tế thay đổi theo thời gian và từng công ty.</div>
+  </div>
+
+  <h2 class="section-heading">Trade-off: nghề DevOps</h2>
+  <div class="compare-grid">
+    <div class="compare-card green">
+      <h4>👍 Điểm cộng</h4>
+      <ul>
+        <li>Thu nhập tốt, nhu cầu tuyển dụng cao.</li>
+        <li>Được tiếp xúc với toàn bộ vòng đời sản phẩm, nhiều công nghệ mới.</li>
+        <li>Lộ trình phát triển rộng: SRE, Platform Engineer, Cloud / Solution Architect.</li>
+      </ul>
+    </div>
+    <div class="compare-card orange">
+      <h4>👎 Thách thức</h4>
+      <ul>
+        <li class="cross">Kiến thức rộng, phải học liên tục vì công cụ thay đổi nhanh.</li>
+        <li class="cross">Áp lực khi xử lý sự cố Production, có thể phải trực (on-call).</li>
+        <li class="cross">Khó vào nghề nếu chưa có nền tảng IT — thường đi lên từ BE Developer, Fullstack Developer hoặc System Admin.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Các con đường đến với DevOps</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Từ Developer</h4>
+      <p>Đã hiểu cách build và chạy ứng dụng; cần bổ sung Linux, Network, Cloud và CICD. Đây là đối tượng chính của khoá học.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Từ System Admin / Operator</h4>
+      <p>Đã vững hạ tầng và vận hành; cần bổ sung scripting, Git, IaC, CICD và kiến thức về ứng dụng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Sinh viên mới tốt nghiệp</h4>
+      <p>Bắt đầu từ nền tảng (Linux, Git, AWS), làm nhiều lab và một project hoàn chỉnh để apply vị trí Fresher DevOps / Cloud Engineer.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-tip">
+    <strong>Lời khuyên:</strong> đừng cố học hết mọi tool trong roadmap. Hãy nắm chắc khái niệm, làm thật nhiều bài lab, và chuẩn bị một project
+    end-to-end (như Final Assignment của khoá học) để làm portfolio khi đi phỏng vấn.
+  </div>
+  <div class="alert alert-info">
+    <strong>Tiếp theo:</strong> section sau chúng ta sẽ ôn lại những kiến thức AWS cần nắm vững trước khi bắt tay vào các công cụ DevOps.
+  </div>
+
+</body>
+</html>

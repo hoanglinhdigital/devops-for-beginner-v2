@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Security for EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Security for EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Bảo mật cho EKS là tổng hợp của bảo mật AWS (IAM, VPC, Security Group) và bảo mật Kubernetes (RBAC, Secret, Pod Security).
+    Chương này điểm qua 4 mảng bảo mật chính bạn cần nắm khi vận hành cluster.
+  </p>
+
+  <h2 class="section-heading">1. IAM Role and Policy</h2>
+  <p class="body-text">
+    Role và policy có thể được gán cho <strong>EKS Cluster</strong>, <strong>Node</strong> hoặc <strong>Pod</strong> để cấp các quyền cần thiết.
+    Cơ chế <strong>IRSA (IAM Roles for Service Accounts)</strong> cho phép mỗi Service Account trong Kubernetes gắn một IAM Role riêng, giúp Pod có đúng quyền AWS cần thiết (least privilege) thay vì dùng chung quyền của node.
+  </p>
+
+  <h2 class="section-heading">2. Secret Management</h2>
+  <p class="body-text">
+    <strong>Secret</strong> dùng để lưu trữ các thông tin quan trọng và nhạy cảm (password, token, API key).
+    Bên cạnh việc dùng Secret của Kubernetes, bạn có thể dùng các managed service của AWS như <strong>Parameter Store</strong> và <strong>Secrets Manager</strong> để lưu trữ an toàn hơn (có mã hoá KMS, tự xoay vòng secret) và đọc qua <strong>Secrets Store CSI Driver</strong>.
+  </p>
+
+  <h2 class="section-heading">3. Pod Security</h2>
+  <p class="body-text">
+    Là các quy định ở mức <strong>cluster/namespace</strong> quản lý việc tạo và cập nhật Pod.
+    Kubernetes hiện dùng <strong>Pod Security Admission (PSA)</strong> với 3 mức: <em>privileged</em>, <em>baseline</em>, <em>restricted</em>.
+    (Trước đây dùng PodSecurityPolicy, nay đã deprecated.)
+  </p>
+
+  <h2 class="section-heading">4. Role Based Access Control (RBAC)</h2>
+  <p class="body-text">
+    RBAC là cơ chế quản lý <strong>ai có thể làm gì</strong> trên cluster.
+    Có 2 loại role chính:
+  </p>
+  <ul class="feature-list">
+    <li><strong>Role:</strong> cấp quyền trong phạm vi một <strong>namespace</strong>.</li>
+    <li><strong>ClusterRole:</strong> cấp quyền ở mức <strong>cluster</strong>, không giới hạn namespace (ví dụ quyền trên Node, PersistentVolume).</li>
+    <li><strong>RoleBinding</strong> và <strong>ClusterRoleBinding</strong> dùng để gán user/group/service account với Role/ClusterRole tương ứng.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      U["<img src='../../assets/svg-icon/user.svg' style='width:30px;height:30px;'/><br/>IAM User<br/>developer01"]
+      AE["EKS Access Entry"]
+      RB["ClusterRoleBinding /<br/>RoleBinding"]
+      CR["ClusterRole<br/>AmazonEKSViewPolicy"]
+      U --> AE --> RB --> CR
+      CR -->|"cho phép xem resource"| API["🔌 Kubernetes API"]
+  </div>
+  <p class="arch-caption">IAM User được map vào cluster (qua Access Entry / aws-auth) rồi gắn với ClusterRole bằng ClusterRoleBinding để có quyền tương ứng.</p>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Authentication vs Authorization:</strong> IAM lo <em>chứng thực</em> (ai đang truy cập), RBAC lo <em>phân quyền</em> (người đó được làm gì).</li>
+    <li><strong>Access entries (mới):</strong> cách gán quyền IAM principal vào EKS hiện đại, thay cho việc sửa ConfigMap <code>aws-auth</code>.</li>
+    <li><strong>Least privilege:</strong> chỉ cấp đúng quyền cần thiết cho user, service account, node.</li>
+    <li><strong>Mã hoá:</strong> bật encryption cho etcd (control plane) và dùng KMS cho Secret.</li>
+  </ul>
+
+</body>
+</html>

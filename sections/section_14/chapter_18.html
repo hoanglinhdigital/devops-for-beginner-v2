@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết section &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết section &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Tổng kết kiến thức</h2>
+  <p class="body-text">Qua section này, bạn đã nắm được nền tảng Kubernetes để sẵn sàng học <strong>Amazon EKS</strong> ở Section 14:</p>
+  <ul class="feature-list">
+    <li>Hiểu <strong>container orchestration</strong> và vai trò của <strong>Kubernetes</strong> (kiến trúc Control Plane + Worker Node + kubectl).</li>
+    <li>Nắm các khái niệm cốt lõi: <strong>Pod, Namespace, ReplicaSet, Deployment, Service, Ingress, PersistentVolume, ConfigMap, Secret, StatefulSet</strong>.</li>
+    <li>Thao tác thành thạo với <strong>Minikube</strong> và <strong>kubectl</strong> (apply, get, describe, delete, rollout, scale...).</li>
+    <li>Tạo cluster thật bằng <strong>kops</strong> trên EC2 và triển khai ứng dụng <strong>React + Express + MongoDB</strong>.</li>
+  </ul>
+
+  <h2 class="section-heading">Lộ trình 5 lab</h2>
+  <table class="compare-table">
+    <thead><tr><th>#</th><th>Lab</th><th>Kiến thức</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Cài Minikube &amp; chạy Pod đầu tiên</td><td>Cluster local, Pod (imperative &amp; YAML declarative)</td></tr>
+      <tr><td>2</td><td>NodePort Service</td><td>Expose dịch vụ ra ngoài</td></tr>
+      <tr><td>3</td><td>ClusterIP Service</td><td>Giao tiếp nội bộ cluster</td></tr>
+      <tr><td>4</td><td>kops</td><td>Tạo cluster trên AWS</td></tr>
+      <tr><td>5</td><td>Deploy ứng dụng mẫu</td><td>Quy trình triển khai hoàn chỉnh</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Cheat sheet lệnh kubectl</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash"># Thông tin cluster & context
+kubectl cluster-info
+kubectl config get-contexts
+kubectl config use-context &lt;tên&gt;
+
+# Pod / ReplicaSet / Deployment
+kubectl get pods [-o wide] [-n &lt;namespace&gt;]
+kubectl describe pod &lt;tên&gt;
+kubectl logs &lt;tên&gt;
+kubectl get replicasets
+kubectl get deployments
+
+# Tạo / cập nhật / xoá
+kubectl apply -f &lt;file.yaml&gt;
+kubectl delete -f &lt;file.yaml&gt;
+kubectl create namespace &lt;tên&gt;
+
+# Deployment: scale & rollout
+kubectl scale --replicas=5 deployment/&lt;tên&gt;
+kubectl rollout status deployment/&lt;tên&gt;
+kubectl rollout history deployment/&lt;tên&gt;
+kubectl rollout undo deployment/&lt;tên&gt;
+
+# Service & Ingress
+kubectl get services
+kubectl get ingress
+
+# ConfigMap / Secret / PV / PVC
+kubectl get configmap &lt;tên&gt; -o yaml
+kubectl get secret &lt;tên&gt; -o yaml
+kubectl get pv
+kubectl get pvc</code></pre>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Quan trọng:</strong> các lab trên Minikube chạy local không tốn phí, nhưng Lab 4 – 5 dùng EC2/ALB và tốn phí theo giờ. Hãy xoá hết.</div>
+  <ul class="feature-list">
+    <li><strong>Minikube:</strong> <code>minikube stop</code> (hoặc <code>minikube delete</code>).</li>
+    <li><strong>Cluster kops:</strong> <code>kops delete cluster --name &lt;domain&gt; --state=s3://&lt;bucket&gt; --yes</code>.</li>
+    <li><strong>AWS resource:</strong> xoá ALB, Target Group, S3 bucket state, và EC2 admin server.</li>
+    <li><strong>Kiểm tra thêm:</strong> EBS Volume còn sót, NAT Gateway, Elastic IP.</li>
+    <li><strong>ECR Repository:</strong> có thể giữ lại để dùng sau này (tốn phí nhỏ, không đáng kể).</li>
+  </ul>
+
+  <h2 class="section-heading">Tài liệu tham khảo</h2>
+  <ul class="feature-list">
+    <li>Kubernetes concepts &amp; components: <code>https://kubernetes.io/docs/concepts/</code></li>
+    <li>Cài kubectl: <code>https://kubernetes.io/docs/tasks/tools/</code></li>
+    <li>Minikube: <code>https://minikube.sigs.k8s.io/docs/start/</code></li>
+    <li>kops: <code>https://kops.sigs.k8s.io/</code></li>
+    <li>Ingress Nginx Controller: <code>https://kubernetes.github.io/ingress-nginx/</code></li>
+  </ul>
+
+</body>
+</html>

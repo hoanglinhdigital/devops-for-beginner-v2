@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 7: Job deploy lên Amazon ECS (Terraform stack) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 7: Job deploy lên Amazon ECS (Terraform stack)</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Dùng Terraform template có sẵn tạo <strong>VPC + ALB + ECS Fargate</strong>, chạy service Node.js bằng image <code>ver-1</code> của Lab 6; test truy cập qua ALB.</li>
+    <li>Tạo job Jenkins <code>lab07-deploy-ecs</code> nhận tham số <strong><code>IMAGE_TAG</code></strong> (ví dụ <code>ver-1</code>, <code>ver-2</code>) và deploy image đó lên ECS:
+      đăng ký <strong>task definition revision mới</strong> → <code>update-service --force-new-deployment</code> → chờ service ổn định.</li>
+    <li>Ghép job CI (Lab 6) + job CD (Lab 7): sửa code → build image mới → deploy → kiểm tra trên ALB; rollback bằng cách deploy lại tag cũ.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>PC Local</b><br/>terraform apply"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server"]
+              direction TB
+              JB["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:30px;height:30px;'/><br/>lab06-docker-ecr<br/>(CI)"]
+              JD["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:30px;height:30px;'/><br/>lab07-deploy-ecs<br/>IMAGE_TAG (CD)"]
+          end
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:38px;height:38px;'/><br/>ECR<br/>nodejs-random-color"]
+          subgraph VPC["jenkins-lab-vpc 10.30.0.0/16 – 2 public subnet (Terraform)"]
+              direction TB
+              ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:38px;height:38px;'/><br/>jenkins-lab-alb :80"]
+              subgraph SVC["ECS cluster: jenkins-lab-cluster · service: nodejs-service"]
+                  T1["<img src='../../assets/aws-svg/Fargate.svg' style='width:30px;height:30px;'/><br/>Task :3000"]
+                  T2["<img src='../../assets/aws-svg/Fargate.svg' style='width:30px;height:30px;'/><br/>Task :3000"]
+              end
+          end
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Browser"]
+      JB -->|"docker push ver-N"| ECR
+      JD -->|"register task def<br/>update-service"| SVC
+      ECR -.->|"pull image"| SVC
+      Dev -.->|"tạo stack"| VPC
+      User --> ALB --> T1
+      ALB --> T2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 6: ECR có image <code>nodejs-random-color:ver-1</code>; Jenkins server có <code>jq</code> và IAM Role có <code>AmazonECS_FullAccess</code> (Lab 1).</li>
+    <li>Máy local: Terraform &gt;= 1.10, AWS CLI v2 đã cấu hình profile (Section 5).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/terraform_ecs_stack/</code> và <code>sourcecode/section_10_cicd_with_jenkins/lab7_deploy_ecs/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu Terraform stack</strong>
+        <p>Stack <code>terraform_ecs_stack</code> được dùng chung cho Lab 7 → Lab 10, gồm 4 module:</p>
+        <table class="compare-table">
+          <thead><tr><th>Module</th><th>Resource</th></tr></thead>
+          <tbody>
+            <tr><td><code>networking</code></td><td>VPC <code>10.30.0.0/16</code>, 2 public subnet ở 2 AZ (module <code>terraform-aws-modules/vpc/aws</code>), <strong>không NAT Gateway</strong></td></tr>
+            <tr><td><code>security</code></td><td>SG cho ALB (mở 80), SG cho ECS task (chỉ nhận port 3000 từ SG của ALB)</td></tr>
+            <tr><td><code>load_balancer</code></td><td>ALB <code>jenkins-lab-alb</code>, Target Group <code>jenkins-lab-nodejs-tg</code> (target type <code>ip</code>), listener 80</td></tr>
+            <tr><td><code>ecs</code></td><td>Cluster <code>jenkins-lab-cluster</code>, task definition <code>jenkins-lab-nodejs-task</code> (container <code>nodejs-container</code>, 0.25 vCPU / 0.5 GB), service <code>nodejs-service</code> (2 task Fargate), log group <code>/ecs/jenkins-lab-nodejs</code>, task execution role</td></tr>
+          </tbody>
+        </table>
+        <p class="code-note">💡 Service có <code>lifecycle { ignore_changes = [task_definition] }</code>: Jenkins sẽ tạo revision mới mỗi lần deploy, Terraform bỏ qua thay đổi này để <code>terraform apply</code> sau này không rollback version do Jenkins deploy. Circuit breaker được bật để tự rollback nếu version mới không khởi động được.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cấu hình biến &amp; apply Terraform</strong>
+        <p>Trên máy local:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_10_cicd_with_jenkins/terraform_ecs_stack
+cp terraform.tfvars.example terraform.tfvars
+aws sts get-caller-identity --query Account --output text</code></pre>
+        <p>Mở <code>terraform.tfvars</code>, sửa <code>ecr_image_uri</code> thành Image URI tag <code>ver-1</code> của bạn (Lab 6 – Bước 7):</p>
+        <pre class="code-block"><code class="language-hcl">ecr_image_uri = "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:ver-1"
+
+desired_count = 2</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform init
+terraform plan
+terraform apply
+terraform output</code></pre>
+        <pre class="output-box"><code>alb_dns_name = "jenkins-lab-alb-1234567890.ap-southeast-1.elb.amazonaws.com"
+container_name = "nodejs-container"
+ecs_cluster_name = "jenkins-lab-cluster"
+ecs_service_name = "nodejs-service"
+task_definition_family = "jenkins-lab-nodejs-task"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Truy cập website qua ALB</strong>
+        <p>Chờ 1–2 phút để task <strong>RUNNING</strong> và Target Group báo <strong>healthy</strong>, truy cập <code>http://&lt;alb-dns-name&gt;</code>. Trang <strong>Welcome to My Website</strong> hiển thị – mỗi task tô tiêu đề một màu ngẫu nhiên, tải lại trang vài lần sẽ thấy màu đổi giữa 2 task.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo job deploy có tham số</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab07-deploy-ecs</code>:</p>
+        <ul class="feature-list">
+          <li>General → tick <strong>This project is parameterized</strong> → <strong>String Parameter</strong>: Name <code>IMAGE_TAG</code>, Default Value <code>ver-1</code>, Description <code>Image tag trên ECR cần deploy</code></li>
+          <li>Pipeline → Definition <strong>Pipeline script</strong>, dán nội dung <code>lab7_deploy_ecs/Jenkinsfile</code> (không cần sửa nếu giữ nguyên tên resource của Terraform)</li>
+        </ul>
+        <pre class="code-block"><code class="language-groovy">pipeline {
+    agent any
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+    }
+
+    environment {
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_REPO       = 'nodejs-random-color'
+        // Các giá trị dưới đây lấy từ terraform output của terraform_ecs_stack
+        ECS_CLUSTER    = 'jenkins-lab-cluster'
+        ECS_SERVICE    = 'nodejs-service'
+        TASK_FAMILY    = 'jenkins-lab-nodejs-task'
+        CONTAINER_NAME = 'nodejs-container'
+    }
+
+    stages {
+        stage('Register new task definition') {
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    FULL_IMAGE=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}
+                    echo "Deploying image: ${FULL_IMAGE}"
+
+                    # Kiểm tra image tag có tồn tại trên ECR, nếu không job dừng ngay tại đây
+                    aws ecr describe-images --region ${AWS_REGION} --repository-name ${ECR_REPO} --image-ids imageTag=${IMAGE_TAG} &gt; /dev/null
+
+                    # Lấy task definition hiện tại -&gt; đổi image của container -&gt; bỏ các field chỉ đọc
+                    aws ecs describe-task-definition --region ${AWS_REGION} --task-definition ${TASK_FAMILY} |
+                    jq --arg IMAGE "${FULL_IMAGE}" --arg NAME "${CONTAINER_NAME}" '.taskDefinition | (.containerDefinitions[] | select(.name == $NAME) | .image) = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' &gt; new-task-definition.json
+
+                    # Đăng ký revision mới, lưu số revision ra file để stage sau sử dụng
+                    aws ecs register-task-definition --region ${AWS_REGION} --cli-input-json file://new-task-definition.json --query 'taskDefinition.revision' --output text &gt; revision.txt
+                    echo "New revision: ${TASK_FAMILY}:$(cat revision.txt)"
+                '''
+            }
+        }
+
+        stage('Update ECS service') {
+            steps {
+                sh '''
+                    NEW_REVISION=$(cat revision.txt)
+                    aws ecs update-service --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --task-definition ${TASK_FAMILY}:${NEW_REVISION} --force-new-deployment --query 'service.deployments[0].{status:status,taskDefinition:taskDefinition}'
+                '''
+            }
+        }
+
+        stage('Wait for service stable') {
+            steps {
+                // Chờ rolling update hoàn tất: task mới healthy, task cũ đã dừng
+                sh 'aws ecs wait services-stable --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE}'
+                echo "Deploy ${params.IMAGE_TAG} thành công!"
+            }
+        }
+    }
+}</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Bước</th><th>Lệnh</th><th>Giải thích</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><code>describe-task-definition</code></td><td>Lấy JSON của revision mới nhất (CPU, memory, port, log, role...)</td></tr>
+            <tr><td>2</td><td><code>jq</code></td><td>Chỉ đổi <code>image</code> của container <code>nodejs-container</code>, xoá các field chỉ đọc mà API <code>register-task-definition</code> không chấp nhận</td></tr>
+            <tr><td>3</td><td><code>register-task-definition</code></td><td>Tạo revision mới (ví dụ <code>jenkins-lab-nodejs-task:2</code>) trỏ tới image mới</td></tr>
+            <tr><td>4</td><td><code>update-service --force-new-deployment</code></td><td>Service chuyển sang revision mới theo kiểu <strong>rolling update</strong> (Section 9 – Chiến lược deployment)</td></tr>
+            <tr><td>5</td><td><code>wait services-stable</code></td><td>Job chỉ báo SUCCESS khi deployment hoàn tất – nếu lỗi/timeout job báo FAILURE</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Sửa code &amp; chạy job build (Lab 6)</strong>
+        <p>Trên máy local, mở <code>public/index.html</code>, sửa <strong>phần text</strong> của thẻ <code>&lt;h1 id="welcome" ...&gt;</code> thành <code>Welcome to My Website – v2 from Jenkins</code> (giữ nguyên thuộc tính <code>id</code> và <code>style</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/jenkins-labs/nodejs-random-color
+git add public/index.html
+git commit -m "feat: update welcome message v2"
+git push origin master</code></pre>
+        <p>Chạy job <code>lab06-docker-ecr</code> → ghi lại tag mới được push (ví dụ <code>ver-3</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Chạy job deploy</strong>
+        <p>Mở job <code>lab07-deploy-ecs</code> → <strong>Build with Parameters</strong> → <code>IMAGE_TAG</code> = <code>ver-3</code> → <strong>Build</strong>. Stage <em>Wait for service stable</em> mất khoảng 2–4 phút.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Quan sát rolling update</strong>
+        <p>Trong lúc job đang chạy, mở <strong>ECS → jenkins-lab-cluster → nodejs-service → tab Deployments</strong>: deployment mới (revision mới) khởi động task mới trước, task cũ dừng sau khi task mới healthy. Gọi ALB liên tục để thấy giai đoạn 2 version cùng phục vụ (<code>Ctrl + C</code> để dừng):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">while true; do curl -s http://&lt;alb-dns-name&gt;/ | grep -o "&lt;h1[^&gt;]*&gt;[^&lt;]*"; sleep 1; done</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Rollback bằng tag cũ</strong>
+        <p>Chạy lại job <code>lab07-deploy-ecs</code> với <code>IMAGE_TAG</code> = <code>ver-1</code> – website quay về nội dung ban đầu. Đây là lợi ích của việc <strong>tách job build và job deploy</strong>, đồng thời gắn tag duy nhất cho mỗi image: rollback chỉ là deploy lại một tag đã có, không cần build lại.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecs list-task-definitions --family-prefix jenkins-lab-nodejs-task --region ap-southeast-1</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Truy cập <code>http://&lt;alb-dns-name&gt;</code> hiển thị nội dung v2 sau khi deploy <code>ver-3</code>, và quay về nội dung ban đầu sau khi deploy <code>ver-1</code>.</li>
+      <li>Task definition <code>jenkins-lab-nodejs-task</code> có nhiều revision, mỗi revision trỏ tới đúng image tag đã deploy.</li>
+      <li>Job <code>lab07-deploy-ecs</code> báo <strong>SUCCESS</strong> chỉ sau khi service ổn định.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>jq: not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cài <code>jq</code> trên Jenkins server.<br/><strong>Giải pháp:</strong> <code>sudo apt install -y jq</code> (Lab 1 – Bước 9).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>An error occurred (ImageNotFoundException) when calling the DescribeImages operation</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Nhập sai <code>IMAGE_TAG</code> hoặc tag chưa được push.<br/><strong>Giải pháp:</strong> Kiểm tra danh sách tag: <code>aws ecr list-images --repository-name nodejs-random-color --region ap-southeast-1</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>AccessDeniedException ... is not authorized to perform: iam:PassRole</code> khi <code>register-task-definition</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Jenkins cần quyền <code>iam:PassRole</code> cho task execution role.<br/><strong>Giải pháp:</strong> Gắn <code>AmazonECS_FullAccess</code> (đã bao gồm PassRole cho <code>ecs-tasks.amazonaws.com</code>) vào <code>jenkins-server-role</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Stage <em>Wait for service stable</em> bị timeout / task mới liên tục bị dừng</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Container lỗi khi khởi động, health check thất bại, hoặc circuit breaker đã rollback.<br/><strong>Giải pháp:</strong> Xem lý do dừng ở <strong>Tasks → Stopped</strong> và log group <code>/ecs/jenkins-lab-nodejs</code>; chạy thử image ở local: <code>docker run -p 3000:3000 &lt;image-uri&gt;</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Truy cập ALB trả về <code>503 Service Temporarily Unavailable</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Target Group chưa có target healthy.<br/><strong>Giải pháp:</strong> Chờ 1–2 phút, kiểm tra tab <strong>Targets</strong> của <code>jenkins-lab-nodejs-tg</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>ALB, task Fargate và Public IPv4 tính phí theo giờ.</strong> Nếu học tiếp Lab 8 → Lab 10 ngay, giữ lại Terraform stack; nếu không, hãy destroy và apply lại khi học tiếp (nhớ cập nhật <code>ecr_image_uri</code> sang tag mới nhất).</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_10_cicd_with_jenkins/terraform_ecs_stack
+terraform destroy</code></pre>
+
+</body>
+</html>

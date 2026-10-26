@@ -1,0 +1,99 @@
+// Lab 10 – Job release production: trigger thủ công, checkout theo Git tag trên nhánh master
+// Job: lab10-release-manual | Pipeline definition: Pipeline script (dán nội dung file này)
+// This project is parameterized:
+//   - String parameter VERSION (Default: v1.0.0) – Git tag cần release, cũng là image tag trên ECR
+//   - Choice parameter ACTION (BuildAndDeploy, OnlyBuild, OnlyDeploy – mỗi giá trị 1 dòng)
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        // Thay <your-github-username>; credential github-ssh-key đã tạo ở Lab 8
+        GIT_REPO       = 'git@github.com:<your-github-username>/nodejs-random-color.git'
+        GIT_CREDENTIAL = 'github-ssh-key'
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_REPO       = 'nodejs-random-color'
+        ECS_CLUSTER    = 'jenkins-lab-cluster'
+        ECS_SERVICE    = 'nodejs-service'
+        TASK_FAMILY    = 'jenkins-lab-nodejs-task'
+        CONTAINER_NAME = 'nodejs-container'
+    }
+
+    stages {
+        stage('Checkout using tag') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyBuild'] }
+            }
+            steps {
+                checkout scmGit(
+                    branches: [[name: "refs/tags/${params.VERSION}"]],
+                    userRemoteConfigs: [[url: "${GIT_REPO}", credentialsId: "${GIT_CREDENTIAL}"]]
+                )
+                sh 'git log -1 --oneline --decorate'
+            }
+        }
+
+        stage('Build image') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyBuild'] }
+            }
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${VERSION} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyBuild'] }
+            }
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${VERSION} ${ECR_REGISTRY}/${ECR_REPO}:${VERSION}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${VERSION}
+                '''
+            }
+        }
+
+        stage('Deploy to ECS') {
+            when {
+                expression { params.ACTION in ['BuildAndDeploy', 'OnlyDeploy'] }
+            }
+            steps {
+                // Tạm thời dùng rolling update (force-new-deployment) giống Lab 7
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    FULL_IMAGE=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${VERSION}
+                    echo "Deploying image: ${FULL_IMAGE}"
+
+                    # OnlyDeploy: image tag phải tồn tại sẵn trên ECR
+                    aws ecr describe-images --region ${AWS_REGION} --repository-name ${ECR_REPO} --image-ids imageTag=${VERSION} > /dev/null
+
+                    aws ecs describe-task-definition --region ${AWS_REGION} --task-definition ${TASK_FAMILY} |
+                    jq --arg IMAGE "${FULL_IMAGE}" --arg NAME "${CONTAINER_NAME}" '.taskDefinition | (.containerDefinitions[] | select(.name == $NAME) | .image) = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' > new-task-definition.json
+
+                    NEW_REVISION=$(aws ecs register-task-definition --region ${AWS_REGION} --cli-input-json file://new-task-definition.json --query 'taskDefinition.revision' --output text)
+                    echo "New revision: ${TASK_FAMILY}:${NEW_REVISION}"
+
+                    aws ecs update-service --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --task-definition ${TASK_FAMILY}:${NEW_REVISION} --force-new-deployment > /dev/null
+                    aws ecs wait services-stable --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+        }
+        success {
+            echo "Release ${params.VERSION} (${params.ACTION}) thành công!"
+        }
+    }
+}

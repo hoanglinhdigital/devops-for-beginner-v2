@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 6: Docker Compose – ứng dụng Node.js đơn giản – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 6: Docker Compose – ứng dụng Node.js đơn giản</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Viết file <code>docker-compose.yaml</code> để build và start một service Node.js (Express).</li>
+    <li>Truy cập website Node.js qua port <code>8080</code> của host.</li>
+    <li>Dùng <strong>bind mount</strong> để sửa code trên máy host và thấy thay đổi ngay trong container.</li>
+    <li>Làm quen với các lệnh <code>docker compose up / ps / logs / exec / restart / down</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/>Browser"]
+      subgraph Host["Docker Host"]
+          direction LR
+          SRC["📁 ./web<br/>(source code trên host)"]
+          subgraph Proj["Compose project: lab6_compose_simple"]
+              WEB["📦 <b>web</b><br/>node:20-alpine<br/>Express :3000"]
+          end
+          SRC -.->|"bind mount ./web:/app"| WEB
+      end
+      User -->|"http://localhost:8080"| WEB
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1 (Docker Compose đã cài), đã đọc chương <strong>Docker Compose – giới thiệu &amp; cú pháp</strong>.</li>
+    <li>Port <code>8080</code> đang trống (đã dọn dẹp container của các lab trước).</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab6_compose_simple/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu cấu trúc project</strong>
+        <pre class="file-tree"><span class="dir">lab6_compose_simple/</span>
+├── <span class="file">docker-compose.yaml</span>
+├── <span class="file">commands.sh</span>
+└── <span class="dir">web/</span>
+    ├── <span class="file">Dockerfile</span>
+    ├── <span class="file">.dockerignore</span>
+    ├── <span class="file">index.js</span>          <span class="desc"># Express server, port 3000</span>
+    ├── <span class="file">package.json</span>      <span class="desc"># dependency: express</span>
+    ├── <span class="file">package-lock.json</span>
+    └── <span class="dir">public/</span>
+        ├── <span class="file">index.html</span>    <span class="desc"># trang chủ</span>
+        └── <span class="file">learning.html</span> <span class="desc"># trang /learning</span></pre>
+        <p><code>index.js</code> phục vụ file tĩnh trong <code>public/</code>, redirect <code>/learning</code> tới <code>learning.html</code> và có API <code>/api/info</code> trả về hostname của container và các biến môi trường.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Xem Dockerfile của service web</strong>
+        <pre class="code-block"><code class="language-docker"># Base image Node.js 20
+FROM node:20-alpine
+
+# Thư mục làm việc trong container
+WORKDIR /app
+
+# Copy package.json &amp; package-lock.json trước để tận dụng layer cache
+COPY package*.json ./
+
+# Cài dependencies
+RUN npm install
+
+# Copy toàn bộ source code
+COPY . .
+
+# Port ứng dụng lắng nghe
+EXPOSE 3000
+
+# Lệnh chạy ứng dụng
+CMD ["npm", "start"]</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Viết file docker-compose.yaml</strong>
+        <p>Tạo file <code>docker-compose.yaml</code> trong thư mục <code>lab6_compose_simple</code>:</p>
+        <pre class="code-block"><code class="language-yaml">services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: compose-web:1.0
+    ports:
+      - "8080:3000"
+    volumes:
+      # Bind mount source code từ máy host vào container: sửa file trên host =&gt; container thấy ngay
+      - ./web:/app
+      # Anonymous volume giữ lại node_modules đã cài trong image (không bị bind mount ghi đè)
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - APP_VERSION=1.0
+    restart: unless-stopped</code></pre>
+        <p class="code-note">💡 Bind mount <code>./web:/app</code> “che” toàn bộ thư mục <code>/app</code> trong image bằng thư mục trên host – vốn không có <code>node_modules</code>. Dòng <code>/app/node_modules</code> tạo một volume riêng để giữ lại thư viện đã cài lúc build.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Kiểm tra cấu hình &amp; start service</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd lab6_compose_simple
+docker compose config
+docker compose up -d --build</code></pre>
+        <pre class="command-line" data-prompt="$" data-output="2-3"><code class="language-bash">docker compose ps
+NAME                        IMAGE             COMMAND                  SERVICE   CREATED          STATUS          PORTS
+lab6_compose_simple-web-1   compose-web:1.0   "docker-entrypoint.s…"   web       10 seconds ago   Up 9 seconds    0.0.0.0:8080-&gt;3000/tcp</code></pre>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">docker compose logs web
+web-1  | Server is running on port 3000</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Truy cập website</strong>
+        <p>Mở browser truy cập <code>http://localhost:8080</code> (hoặc <code>http://&lt;EC2_PUBLIC_IP&gt;:8080</code>): trang <strong>Welcome to Docker Compose v1.0</strong>. Bấm <strong>Login</strong> để chuyển tới trang <code>/learning</code>. Kiểm tra API:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">curl http://localhost:8080/api/info
+{"hostname":"ba728b565cd1","nodeEnv":"development","appVersion":"1.0"}</code></pre>
+        <p><code>hostname</code> chính là Container ID; <code>nodeEnv</code>, <code>appVersion</code> lấy từ mục <code>environment</code> trong file compose.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Sửa code và thấy thay đổi ngay (bind mount)</strong>
+        <p>Mở file <code>web/public/index.html</code> trên máy host, đổi <code>v1.0</code> thành <code>v1.1</code>, lưu file và refresh browser – trang web đổi ngay mà <strong>không cần build lại image</strong>.</p>
+        <p>File <code>index.js</code> chỉ được Node.js đọc lúc khởi động, nên khi sửa file này cần restart service:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose restart web</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Thao tác với container của service</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose exec web sh</code></pre>
+        <pre class="command-line" data-prompt="/app #"><code class="language-bash">ls /app
+env | grep APP_VERSION
+exit</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose stop
+docker compose ps -a
+docker compose start</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>docker compose ps</code> hiển thị service <code>web</code> ở trạng thái <strong>Up</strong>, port <code>8080-&gt;3000</code>.</li>
+      <li>Truy cập <code>http://localhost:8080</code> và <code>/learning</code> hiển thị đúng nội dung.</li>
+      <li>Sửa <code>public/index.html</code> trên host, refresh browser thấy thay đổi ngay.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error: Cannot find module 'express'</code>, container liên tục restart</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thiếu dòng <code>- /app/node_modules</code> nên bind mount ghi đè mất <code>node_modules</code> đã cài trong image.<br/><strong>Giải pháp:</strong> Bổ sung anonymous volume như Bước 3, chạy <code>docker compose down</code> rồi <code>docker compose up -d --build</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>the attribute `version` is obsolete, it will be ignored</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File compose cũ có dòng <code>version: '3'</code>.<br/><strong>Giải pháp:</strong> Đây chỉ là cảnh báo; xoá dòng <code>version</code> để hết cảnh báo.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Sửa code nhưng browser không thay đổi</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sửa nhầm file (ví dụ sửa <code>index.js</code> mà chưa restart), hoặc browser cache.<br/><strong>Giải pháp:</strong> <code>docker compose restart web</code> khi sửa <code>index.js</code>; nhấn <code>Ctrl + F5</code>; kiểm tra <code>docker compose exec web cat /app/public/index.html</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>no configuration file provided: not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chạy lệnh ở thư mục không có file <code>docker-compose.yaml</code> / <code>compose.yaml</code>.<br/><strong>Giải pháp:</strong> <code>cd</code> vào đúng thư mục, hoặc chỉ định file bằng <code>docker compose -f &lt;đường dẫn&gt; up -d</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose down --rmi all</code></pre>
+  <p class="body-text"><code>down</code> xoá container và network do Compose tạo; <code>--rmi all</code> xoá luôn image <code>compose-web:1.0</code> của service. Bỏ <code>--rmi all</code> nếu muốn giữ image cho lần chạy sau.</p>
+
+</body>
+</html>

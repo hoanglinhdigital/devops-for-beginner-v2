@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: CodeBuild – Build Java project, lưu artifact lên S3 – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: CodeBuild – Build Java project, lưu artifact lên S3</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Viết file <code>buildspec.yml</code> cho project Java (Maven, Corretto 17) và commit vào repository.</li>
+    <li>Tạo CodeBuild project đọc source từ GitHub qua connection đã tạo ở Lab 1.</li>
+    <li>Chạy build, đọc log từng phase và kiểm tra file <code>.jar</code> được upload lên S3.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/>PC Local<br/>git push"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>java-elasticbeanstalk-sample"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          CB["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:44px;height:44px;'/><br/><b>CodeBuild</b><br/>java-project-build<br/>mvn clean package"]
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:40px;height:40px;'/><br/><b>S3</b><br/>java-artifact/demo-v0.0.2.jar"]
+          CW["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:36px;height:36px;'/><br/>CloudWatch Logs"]
+      end
+      PC --> GH
+      GH -->|"checkout (CodeConnections)"| CB
+      CB -->|"artifact"| S3
+      CB -.->|"log"| CW
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1: repository <code>java-elasticbeanstalk-sample</code> đã fork &amp; clone, connection <code>github-connection</code> ở trạng thái Available, S3 bucket <code>codebuild-artifact-&lt;your-suffix&gt;</code>.</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/lab2_codebuild_java/buildspec.yml</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Thêm buildspec.yml vào repository</strong>
+        <p>Tạo file <code>buildspec.yml</code> tại thư mục gốc của repository <code>java-elasticbeanstalk-sample</code>, copy nội dung từ file <code>lab2_codebuild_java/buildspec.yml</code>:</p>
+        <pre class="code-block"><code class="language-yaml">version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto17
+  pre_build:
+    commands:
+      - echo Java version
+      - java -version
+      - mvn -version
+  build:
+    commands:
+      - echo Build started on `date`
+      - mvn clean package -DskipTests
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - ls -lh target/*.jar
+
+artifacts:
+  files:
+    - target/*.jar
+  discard-paths: yes
+
+cache:
+  paths:
+    - '/root/.m2/**/*'</code></pre>
+        <p class="code-note">💡 <code>discard-paths: yes</code> bỏ đường dẫn <code>target/</code>, file jar nằm ngay ở gốc artifact – cần thiết cho việc deploy lên Elastic Beanstalk ở Lab 5.</p>
+        <p>Commit &amp; push:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/java-elasticbeanstalk-sample
+git add buildspec.yml
+git commit -m "ci: add buildspec for CodeBuild"
+git push origin main</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo CodeBuild project – phần Source</strong>
+        <p>Vào <strong>CodeBuild → Build projects</strong>, tạo build project với các thông số:</p>
+        <ul class="feature-list">
+          <li>Project name: <code>java-project-build</code></li>
+          <li>Source provider: <strong>GitHub</strong></li>
+          <li>Credential: dùng <strong>GitHub App</strong> với connection <code>github-connection</code> (thiết lập làm <em>default source credential</em> nếu Console yêu cầu)</li>
+          <li>Repository: <code>&lt;your-github-username&gt;/java-elasticbeanstalk-sample</code></li>
+          <li>Source version: <code>main</code></li>
+          <li>Webhook (Primary source webhook events): <strong>không</strong> bật – lab này chạy build thủ công</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình Environment, Buildspec, Artifacts, Logs</strong>
+        <ul class="feature-list">
+          <li>Provisioning model: <strong>On-demand</strong>; Environment image: <strong>Managed image</strong>; Compute: <strong>EC2</strong></li>
+          <li>Operating system: <strong>Amazon Linux</strong>; Runtime: <strong>Standard</strong>; Image: <code>aws/codebuild/amazonlinux-x86_64-standard:5.0</code>; Image version: luôn dùng bản mới nhất</li>
+          <li>Service role: <strong>New service role</strong>, tên <code>codebuild-java-project-build-service-role</code></li>
+          <li>Additional configuration: Compute <strong>3 GB memory, 2 vCPUs</strong>; Timeout <strong>15 phút</strong></li>
+          <li>Buildspec: <strong>Use a buildspec file</strong> (để trống tên – mặc định đọc <code>buildspec.yml</code>)</li>
+          <li>Artifacts: Type <strong>Amazon S3</strong>; Bucket <code>codebuild-artifact-&lt;your-suffix&gt;</code>; Name <code>java-artifact</code>; Path: để trống; Namespace type: <strong>None</strong>; Artifacts packaging: <strong>None</strong></li>
+          <li>Logs: bật <strong>CloudWatch logs</strong>, Group name <code>/codebuild/java-project-build</code></li>
+        </ul>
+        <p>Tạo project. CodeBuild tự tạo service role với quyền ghi log và ghi vào bucket artifact đã chọn.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Chạy build &amp; theo dõi log</strong>
+        <p>Chọn project <code>java-project-build</code> → <strong>Start build</strong>. Theo dõi:</p>
+        <ul class="feature-list">
+          <li>Tab <strong>Phase details</strong>: các phase <code>SUBMITTED → PROVISIONING → DOWNLOAD_SOURCE → INSTALL → PRE_BUILD → BUILD → POST_BUILD → UPLOAD_ARTIFACTS → FINALIZING → COMPLETED</code>.</li>
+          <li>Tab <strong>Build logs</strong>: output của <code>java -version</code>, quá trình Maven tải dependency và dòng <code>BUILD SUCCESS</code>.</li>
+        </ul>
+        <p>Lần build đầu mất khoảng 2–3 phút do Maven phải tải dependency.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra artifact trên S3</strong>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">aws s3 ls s3://codebuild-artifact-&lt;your-suffix&gt;/java-artifact/
+2026-10-25 10:15:32   19876543 demo-v0.0.2.jar</code></pre>
+        <p>(Tuỳ chọn) Tải file về và chạy thử nếu máy bạn đã cài Java 17, sau đó truy cập <code>http://localhost:5000</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 cp s3://codebuild-artifact-&lt;your-suffix&gt;/java-artifact/demo-v0.0.2.jar .
+java -jar demo-v0.0.2.jar</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6 (tuỳ chọn): Build tự động khi push code</strong>
+        <p>Edit project → Source → bật <strong>Rebuild every time a code change is pushed to this repository</strong>, Event type: <strong>PUSH</strong>. Sửa nội dung trong <code>HelloController.java</code>, commit &amp; push – một build mới tự động chạy. Sau khi thử xong, <strong>tắt webhook</strong> để tránh trùng build khi dùng CodePipeline ở Lab 5.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Build của project <code>java-project-build</code> ở trạng thái <strong>Succeeded</strong>.</li>
+      <li>Log có dòng <code>BUILD SUCCESS</code> và output <code>ls -lh target/*.jar</code>.</li>
+      <li>S3 có file <code>java-artifact/demo-v0.0.2.jar</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>YAML_FILE_ERROR: stat /codebuild/output/.../buildspec.yml: no such file or directory</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File <code>buildspec.yml</code> chưa được push, đặt sai thư mục, hoặc build branch khác.<br/><strong>Giải pháp:</strong> Kiểm tra file nằm ở thư mục gốc repository trên GitHub, đúng tên (không phải <code>buildspec.yaml</code>) và Source version là <code>main</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>CLIENT_ERROR: authorization failed for primary source</code> / <code>repository not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Connection chưa Available hoặc GitHub App chưa được cấp quyền repository.<br/><strong>Giải pháp:</strong> Xem lại Lab 1 – Bước 3 và mục Troubleshoot của Lab 1.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unknown runtime version named 'corretto17' of java</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Build image không hỗ trợ runtime khai báo trong <code>runtime-versions</code>.<br/><strong>Giải pháp:</strong> Dùng image <code>aws/codebuild/amazonlinux-x86_64-standard:5.0</code>, hoặc tra bảng <em>Available runtimes</em> trong tài liệu CodeBuild để chọn phiên bản phù hợp.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>AccessDenied</code> ở phase <code>UPLOAD_ARTIFACTS</code> hoặc không tạo được log stream</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service role không có quyền với bucket/log group (thường do đổi bucket sau khi tạo project).<br/><strong>Giải pháp:</strong> Vào IAM, thêm quyền <code>s3:PutObject</code> cho bucket artifact và quyền CloudWatch Logs vào role <code>codebuild-java-project-build-service-role</code>. Môi trường học có thể gắn tạm <code>AmazonS3FullAccess</code>, <code>CloudWatchLogsFullAccess</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại CodeBuild project <code>java-project-build</code> và artifact trên S3 – sẽ dùng lại trong Lab 5. CodeBuild không tính phí khi không có build đang chạy.</div>
+
+</body>
+</html>

@@ -1,0 +1,88 @@
+# Lab 5: Workflow tổng thể kết hợp build, deploy, switch traffic, clear resource.
+# Sử dụng reusable workflow (workflow_call) để gọi lại 4 workflow đã tạo ở Lab 1-4.
+# Yêu cầu: tạo Environment "production-approval" có required reviewer cho bước manual-approval.
+# Copy file này thành .github/workflows/blue-green-deployment.yml
+name: Complete Blue-Green Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      target_cluster:
+        description: 'Target cluster for deployment'
+        required: true
+        type: choice
+        options:
+        - blue
+        - green
+      switch_traffic:
+        description: 'Switch traffic after deployment'
+        required: false
+        type: boolean
+        default: false
+      cleanup_old_cluster:
+        description: 'Clean up old cluster after traffic switch'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-and-push:
+    uses: ./.github/workflows/build-docker.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit
+
+  deploy-to-target:
+    needs: build-and-push
+    uses: ./.github/workflows/deploy-ecs.yml
+    with:
+      version: ${{ inputs.version }}
+      cluster_name: ${{ inputs.target_cluster == 'blue' && 'udemy-devops-cluster-blue' || 'udemy-devops-cluster-green' }}
+    secrets: inherit
+
+  manual-approval:
+    if: ${{ inputs.switch_traffic }}
+    needs: deploy-to-target
+    runs-on: ubuntu-latest
+    environment: production-approval
+    steps:
+    - name: Manual Approval Required
+      run: |
+        echo "## Ready to Switch Traffic" >> $GITHUB_STEP_SUMMARY
+        echo "Deployment to **${{ inputs.target_cluster }}** cluster completed." >> $GITHUB_STEP_SUMMARY
+        echo "- Version: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Target cluster: ${{ inputs.target_cluster }}" >> $GITHUB_STEP_SUMMARY
+        echo "Approve this deployment to switch traffic to the new version." >> $GITHUB_STEP_SUMMARY
+
+  switch-traffic:
+    if: ${{ inputs.switch_traffic }}
+    needs: manual-approval
+    uses: ./.github/workflows/switch-traffic.yml
+    secrets: inherit
+
+  cleanup-old-cluster:
+    if: ${{ inputs.cleanup_old_cluster && inputs.switch_traffic }}
+    needs: switch-traffic
+    uses: ./.github/workflows/clear-resources.yml
+    with:
+      cluster_name: ${{ inputs.target_cluster == 'blue' && 'udemy-devops-cluster-green' || 'udemy-devops-cluster-blue' }}
+    secrets: inherit
+
+  deployment-summary:
+    needs: [build-and-push, deploy-to-target]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deployment Summary
+      run: |
+        echo "## Blue-Green Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- Version: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Target cluster: ${{ inputs.target_cluster }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Switch traffic: ${{ inputs.switch_traffic }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Cleanup old cluster: ${{ inputs.cleanup_old_cluster }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Build status: ${{ needs.build-and-push.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Deploy status: ${{ needs.deploy-to-target.result }}" >> $GITHUB_STEP_SUMMARY

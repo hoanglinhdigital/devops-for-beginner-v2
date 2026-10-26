@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kiến trúc Kubernetes cluster – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Kiến trúc Kubernetes cluster: Control Plane, Worker Node &amp; kubectl</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Một Kubernetes cluster gồm hai phần: <strong>Control Plane</strong> (Master node) – bộ não điều phối toàn cluster, và <strong>Worker node</strong> – nơi các container thực sự chạy.
+    Người dùng tương tác với cluster thông qua <strong>kubectl</strong>, một công cụ dòng lệnh gửi yêu cầu đến API Server.
+    Trên môi trường quản lý sẵn như EKS, Control Plane do AWS vận hành và bạn chỉ lo các Worker node.
+  </p>
+
+  <h2 class="section-heading">Mô hình kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart TB
+      Kubectl["<img src='../../assets/svg-icon/kubernetes.svg' style='width:34px;height:34px;'/><br/>kubectl<br/>(command line tool)"]
+      subgraph CP["Control Plane (Master node)"]
+          API["🔌 API Server<br/>entrypoint của cluster"]
+          Sched["🗓️ Scheduler<br/>phân phối Pod về node"]
+          CM["🎛️ Controller Manager<br/>theo dõi hoạt động cluster"]
+          ETCD["<img src='../../assets/svg-icon/eks-etcd.svg' style='width:32px;height:32px;'/><br/>etcd<br/>lưu trữ key:value"]
+      end
+      subgraph WN1["Worker node 1"]
+          K1["<img src='../../assets/svg-icon/eks-kubelet.svg' style='width:30px;height:30px;'/><br/>kubelet"]
+          P1["<img src='../../assets/svg-icon/eks-pod.svg' style='width:30px;height:30px;'/><br/>Pod"]
+          KP1["🌐 kube-proxy"]
+          RT1["📦 container runtime"]
+      end
+      subgraph WN2["Worker node 2"]
+          K2["<img src='../../assets/svg-icon/eks-kubelet.svg' style='width:30px;height:30px;'/><br/>kubelet"]
+          P2["<img src='../../assets/svg-icon/eks-pod.svg' style='width:30px;height:30px;'/><br/>Pod"]
+          KP2["🌐 kube-proxy"]
+          RT2["📦 container runtime"]
+      end
+      Kubectl -->|"gửi yêu cầu (kubectl apply / get...)"| API
+      API --> ETCD
+      API --> Sched
+      API --> CM
+      API -.-> K1
+      API -.-> K2
+      K1 --> P1
+      K1 --> RT1
+      K2 --> P2
+      K2 --> RT2
+  </div>
+  <p class="arch-caption">kubectl gửi yêu cầu tới API Server. Scheduler chọn node cho Pod, Controller Manager giữ trạng thái đúng với mong muốn, etcd lưu toàn bộ dữ liệu cluster. kubelet trên mỗi worker node nhận lệnh và nhờ container runtime chạy Pod.</p>
+
+  <h2 class="section-heading">Các thành phần của Control Plane</h2>
+  <ul class="feature-list">
+    <li><strong>API Server (kube-apiserver):</strong> entrypoint duy nhất của cluster. Mọi lệnh kubectl hay component nội bộ đều đi qua đây; nó xác thực và ghi trạng thái vào etcd.</li>
+    <li><strong>etcd:</strong> kho lưu trữ dạng key:value, lưu toàn bộ cấu hình và trạng thái cluster, đảm bảo tính nhất quán. Đây là "nguồn chân lý" của cluster.</li>
+    <li><strong>Scheduler:</strong> đảm bảo việc phân phối Pod – quan sát các Pod mới chưa có node, chọn worker node phù hợp (đủ CPU/RAM, đúng ràng buộc) rồi gán Pod vào node đó.</li>
+    <li><strong>Controller Manager:</strong> theo dõi tất cả hoạt động đang diễn ra trên cluster và liên tục điều chỉnh để trạng thái thực tế khớp trạng thái mong muốn (ví dụ: Pod chết thì tạo Pod mới).</li>
+    <li><strong>Cloud Controller Manager (tuỳ chọn):</strong> giao tiếp với cloud provider (AWS...) để tạo LoadBalancer, volume, route.</li>
+  </ul>
+
+  <h2 class="section-heading">Các thành phần của Worker node</h2>
+  <ul class="feature-list">
+    <li><strong>kubelet:</strong> agent chạy trên mỗi worker node, nhận lệnh từ Control Plane và đảm bảo các container trong Pod chạy đúng như khai báo.</li>
+    <li><strong>kube-proxy:</strong> phụ trách quản lý network communication – áp dụng các rule mạng để traffic đến Service được chuyển tới đúng Pod.</li>
+    <li><strong>Container runtime:</strong> phần mềm thực sự chạy container, ví dụ containerd, CRI-O, hoặc Docker Engine.</li>
+    <li><strong>Pod:</strong> đơn vị nhỏ nhất được triển khai, chứa một hoặc nhiều container (sẽ học chi tiết ở chương sau).</li>
+  </ul>
+
+  <h2 class="section-heading">kubectl – công cụ tương tác với cluster</h2>
+  <p class="body-text">kubectl là command line tool để giao tiếp với API Server. Bạn có thể thao tác với mọi resource của cluster bằng kubectl:</p>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl run my-hello-kube --image=nginx
+kubectl get services
+kubectl describe nodes my-node
+kubectl apply -f myconfig.yaml</code></pre>
+  <ul class="feature-list">
+    <li><strong>Imperative (ra lệnh trực tiếp):</strong> <code>kubectl run</code>, <code>kubectl expose</code>, <code>kubectl delete</code>... nhanh nhưng khó lặp lại.</li>
+    <li><strong>Declarative (khai báo qua file):</strong> <code>kubectl apply -f file.yaml</code> – khai báo trạng thái mong muốn trong YAML rồi apply; đây là cách dùng chuẩn trong thực tế.</li>
+  </ul>
+  <p class="code-note">💡 kubectl đọc cấu hình kết nối cluster từ file <code>~/.kube/config</code> (trên Windows: <code>C:\Users\&lt;user&gt;\.kube\config</code>). Một máy có thể kết nối nhiều cluster và chuyển đổi bằng <code>kubectl config use-context</code>.</p>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>High Availability:</strong> để cluster production không bị "single point of failure", Control Plane thường chạy nhiều bản sao (3 master, etcd cluster). Minikube chỉ có 1 node duy nhất cho cả Control Plane lẫn Worker.</li>
+    <li><strong>Trên EKS:</strong> AWS vận hành Control Plane (API Server, etcd, Scheduler...) với độ sẵn sàng cao và tự cập nhật; bạn chỉ cần quản lý Worker node (EC2) hoặc dùng Fargate để "không node".</li>
+    <li><strong>Xem thành phần hệ thống:</strong> <code>kubectl get pods -n kube-system</code> liệt kê các Pod chạy Control Plane / addon trên cluster.</li>
+    <li><strong>Lưu ý:</strong> đừng nhầm "Master node" với "Worker node" – Control Plane chạy logic điều phối, còn ứng dụng của bạn chạy trên Worker node.</li>
+  </ul>
+
+</body>
+</html>

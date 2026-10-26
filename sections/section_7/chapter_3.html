@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Cài đặt Git, SourceTree &amp; clone repository đầu tiên – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Cài đặt Git, SourceTree &amp; clone repository đầu tiên</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt <strong>Git</strong> (kèm Git Bash trên Windows) và cấu hình thông tin người dùng.</li>
+    <li>Cài đặt <strong>SourceTree</strong> – công cụ giao diện đồ hoạ để xem branch, lịch sử commit.</li>
+    <li>Clone một public repository trên GitHub về máy local.</li>
+    <li>Mở repository bằng <strong>VS Code</strong> và xem các branch bằng SourceTree.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph PC["💻 PC Local"]
+          direction TB
+          GB["⌨️ <b>Git Bash</b><br/>git clone"]
+          VS["<img src='../../assets/svg-icon/ide.svg' style='width:32px;height:32px;'/><br/><b>VS Code</b>"]
+          ST["🌳 <b>SourceTree</b>"]
+          REPO["📦 <b>~/git-labs/Hello-World</b>"]
+          GB --> REPO
+          VS --> REPO
+          ST --> REPO
+      end
+      GH["<img src='../../assets/svg-icon/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>octocat/Hello-World<br/>(public)"]
+      GH -->|"git clone (HTTPS)"| GB
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>PC Windows / Mac / Linux có kết nối Internet, quyền cài đặt phần mềm.</li>
+    <li>Đã cài <strong>VS Code</strong> (đã chuẩn bị theo checklist ở Section 1).</li>
+    <li>Tài khoản <strong>GitHub</strong> (đăng ký miễn phí tại <a href="https://github.com/signup" target="_blank" rel="noopener">github.com/signup</a>) – dùng từ Lab 2, nên tạo trước.</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab1_install_git/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt Git</strong>
+        <table class="compare-table">
+          <thead><tr><th>Hệ điều hành</th><th>Cách cài đặt</th></tr></thead>
+          <tbody>
+            <tr><td>Windows</td><td>Tải <strong>Git for Windows</strong> tại <a href="https://git-scm.com/downloads" target="_blank" rel="noopener">git-scm.com/downloads</a>, cài với các tuỳ chọn mặc định. Bộ cài kèm sẵn <strong>Git Bash</strong> – terminal giống Linux.</td></tr>
+            <tr><td>Mac</td><td><code>brew install git</code> (hoặc <code>xcode-select --install</code>)</td></tr>
+            <tr><td>Ubuntu / Debian</td><td><code>sudo apt install -y git</code></td></tr>
+            <tr><td>Amazon Linux 2023</td><td><code>sudo dnf install -y git</code></td></tr>
+          </tbody>
+        </table>
+        <p>Mở Git Bash trên Windows bằng một trong hai cách: click chuột phải vào thư mục → <strong>Open Git Bash here</strong>, hoặc tìm “Git Bash” trong Start menu. Kiểm tra phiên bản:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">git --version
+git version 2.51.0.windows.1</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cấu hình thông tin người dùng (chỉ làm 1 lần)</strong>
+        <p>Tên và email sẽ được ghi vào mỗi commit. Dùng email trùng với email tài khoản GitHub để commit hiển thị đúng avatar:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git config --global user.name "Your Name"
+git config --global user.email "your_email@example.com"
+git config --global init.defaultBranch main
+git config --global pull.rebase false
+git config --global core.autocrlf true
+git config --global core.editor "code --wait"
+git config --global --list</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Cấu hình</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>init.defaultBranch main</code></td><td>Repo tạo bằng <code>git init</code> dùng branch mặc định <code>main</code> (giống GitHub)</td></tr>
+            <tr><td><code>pull.rebase false</code></td><td><code>git pull</code> dùng merge (mặc định dễ hiểu cho người mới), tránh cảnh báo “divergent branches”</td></tr>
+            <tr><td><code>core.autocrlf true</code></td><td>Windows: tự chuyển ký tự xuống dòng CRLF ↔ LF. Trên Mac/Linux dùng <code>core.autocrlf input</code></td></tr>
+            <tr><td><code>core.editor "code --wait"</code></td><td>Dùng VS Code để soạn commit message thay vì Vim</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cài đặt SourceTree</strong>
+        <p>Tải tại <a href="https://www.sourcetreeapp.com/" target="_blank" rel="noopener">sourcetreeapp.com</a> (Windows/Mac). Khi cài đặt có thể bỏ qua bước đăng nhập Bitbucket; ở bước chọn Git, chọn dùng <strong>System Git</strong> đã cài ở bước 1.</p>
+        <p class="code-note">💡 SourceTree không bắt buộc. Có thể thay bằng tab <strong>Source Control</strong> có sẵn trong VS Code, extension <strong>Git Graph</strong>/<strong>GitLens</strong>, hoặc GitHub Desktop.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo thư mục làm việc</strong>
+        <p>Tất cả repository của section này sẽ đặt trong thư mục <code>~/git-labs</code> (trên Windows là <code>C:\Users\&lt;tên-user&gt;\git-labs</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/git-labs
+cd ~/git-labs
+pwd</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Clone một public repository trên GitHub</strong>
+        <p>Repository <code>octocat/Hello-World</code> là repo mẫu của GitHub, có nhiều branch để quan sát:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git clone https://github.com/octocat/Hello-World.git
+cd Hello-World
+ls -la
+git status
+git log --oneline
+git branch
+git branch -a</code></pre>
+        <p>Quan sát:</p>
+        <ul class="feature-list">
+          <li><code>ls -la</code> có thư mục ẩn <code>.git</code> – đây chính là local repository.</li>
+          <li><code>git branch</code> chỉ hiện branch local (<code>master</code>), còn <code>git branch -a</code> hiện thêm các branch trên remote dạng <code>remotes/origin/...</code>.</li>
+          <li>Repo này tạo từ trước 2020 nên branch chính vẫn là <code>master</code>.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Mở repository bằng VS Code</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">code .</code></pre>
+        <p>Trong VS Code: góc dưới bên trái hiển thị branch hiện tại; tab <strong>Source Control</strong> hiển thị các file thay đổi. Thử sửa file <code>README</code> rồi quay lại Git Bash chạy <code>git status</code> và <code>git diff</code> để thấy Git đã phát hiện thay đổi. Sau đó bỏ thay đổi bằng:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git restore README
+git status</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Xem branch &amp; lịch sử bằng SourceTree</strong>
+        <p>Mở SourceTree, thêm repository có sẵn với thông số:</p>
+        <ul class="feature-list">
+          <li>Loại: <strong>Add / Open local repository</strong></li>
+          <li>Đường dẫn: thư mục <code>~/git-labs/Hello-World</code></li>
+        </ul>
+        <p>Quan sát danh sách <strong>Branches</strong> và <strong>Remotes → origin</strong> ở cột bên trái, biểu đồ commit ở tab <strong>History</strong>. Double-click vào một branch remote (ví dụ <code>origin/test</code>) để checkout thành branch local.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>git --version</code> hiển thị phiên bản Git.</li>
+      <li><code>git config --global --list</code> có <code>user.name</code> và <code>user.email</code> của bạn.</li>
+      <li>Thư mục <code>~/git-labs/Hello-World</code> tồn tại, <code>git branch -a</code> liệt kê được các branch remote.</li>
+      <li>SourceTree (hoặc VS Code) hiển thị được lịch sử commit của repository.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>bash: git: command not found</code> / <code>'git' is not recognized as an internal or external command</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cài Git hoặc chưa mở lại terminal sau khi cài nên biến PATH chưa cập nhật.<br/><strong>Giải pháp:</strong> Đóng và mở lại terminal/VS Code. Trên Windows nên dùng Git Bash.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>bash: code: command not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Lệnh <code>code</code> chưa được thêm vào PATH.<br/><strong>Giải pháp:</strong> Windows: cài lại VS Code với tuỳ chọn <em>Add to PATH</em>. Mac: trong VS Code mở Command Palette → <em>Shell Command: Install 'code' command in PATH</em>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>fatal: unable to access 'https://github.com/...': SSL certificate problem</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Mạng công ty dùng proxy/firewall kiểm tra SSL.<br/><strong>Giải pháp:</strong> Thử mạng khác (4G, mạng nhà) hoặc liên hệ IT để lấy cấu hình proxy. Không tắt kiểm tra SSL (<code>http.sslVerify false</code>) vì không an toàn.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo resource trên Cloud nên không phát sinh chi phí. Có thể giữ hoặc xoá thư mục <code>~/git-labs/Hello-World</code> (<code>rm -rf ~/git-labs/Hello-World</code>); thư mục <code>~/git-labs</code> sẽ tiếp tục được dùng ở các lab sau.</div>
+
+</body>
+</html>

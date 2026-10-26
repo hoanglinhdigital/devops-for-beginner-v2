@@ -1,0 +1,60 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: compose-lb-web:1.0
+    # Chạy 3 replica của service web
+    deploy:
+      replicas: 3
+    # Chỉ khai báo port container => Docker tự chọn port ngẫu nhiên trên host cho từng replica
+    ports:
+      - "3000"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=db
+      - DB_USER=appuser
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=testdb
+      - REDIS_HOST=cache
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.4
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=testdb
+      - MYSQL_USER=appuser
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  db-data:

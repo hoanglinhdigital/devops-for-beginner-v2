@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Làm quen giao diện &amp; tạo job Freestyle đầu tiên – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Làm quen giao diện &amp; tạo job Freestyle đầu tiên</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Làm quen giao diện Jenkins: Dashboard, trang job, Build History, Console Output.</li>
+    <li>Tạo job <strong>Freestyle</strong> đầu tiên <code>lab02-hello-job</code> chạy một đoạn shell script, build thử và đọc log.</li>
+    <li>Xem <strong>workspace</strong> của job trên giao diện và trên server, hiểu job chạy bằng user nào, ở thư mục nào.</li>
+    <li>Thử trigger job tự động theo lịch (<strong>Build periodically</strong>) – cú pháp giống cron (Section 6 – Lab 8).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>PC Local</b><br/>Browser"]
+      subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server"]
+          direction LR
+          J["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:40px;height:40px;'/><br/><b>lab02-hello-job</b><br/>Freestyle"]
+          WS["📁 Workspace<br/>/var/lib/jenkins/workspace/<br/>lab02-hello-job"]
+          J -->|"Execute shell"| WS
+      end
+      PC -->|"Build Now · Console Output"| J
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1: Jenkins server đang chạy, đăng nhập được bằng user admin.</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab2_first_job/hello.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu giao diện Dashboard</strong>
+        <ul class="feature-list">
+          <li><strong>Menu trái:</strong> New Item (tạo job), Build History (lịch sử build của mọi job), Manage Jenkins, My Views.</li>
+          <li><strong>Danh sách job</strong> ở giữa: trạng thái build gần nhất (✔ xanh / ✖ đỏ), biểu tượng thời tiết (☀ ổn định → ⛈ hay lỗi), thời gian lần build thành công / lỗi gần nhất.</li>
+          <li><strong>Build Queue / Build Executor Status:</strong> build đang chờ và build đang chạy trên từng executor của built-in node.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo job Freestyle</strong>
+        <p>Vào <strong>New Item</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Item name: <code>lab02-hello-job</code></li>
+          <li>Type: <strong>Freestyle project</strong></li>
+          <li>Description: <code>Job đầu tiên – Hello Jenkins</code></li>
+          <li>Build Steps: thêm <strong>Execute shell</strong>, nội dung Command như bên dưới</li>
+        </ul>
+        <pre class="code-block"><code class="language-bash">echo "Build Step 01 - Hello world"
+echo "DevOps on AWS for Beginner"
+echo "Job đang chạy với user: $(whoami)"
+echo "Thư mục làm việc (workspace): $(pwd)"
+date
+echo "Hello Jenkins - build ${BUILD_NUMBER}" &gt; hello.txt
+ls -la</code></pre>
+        <p class="code-note">💡 Mỗi build step <strong>Execute shell</strong> được Jenkins lưu thành một file script tạm và chạy bằng <code>/bin/sh -xe</code>: <code>-x</code> in từng lệnh ra log (dòng bắt đầu bằng <code>+</code>), <code>-e</code> dừng ngay và báo FAILURE khi có lệnh trả về exit code khác 0.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Build &amp; xem Console Output</strong>
+        <p>Trong trang job, chọn <strong>Build Now</strong>. Một build <code>#1</code> xuất hiện ở <strong>Build History</strong> → click vào → <strong>Console Output</strong>:</p>
+        <pre class="output-box"><code>Started by user admin
+Running as SYSTEM
+Building in workspace /var/lib/jenkins/workspace/lab02-hello-job
+[lab02-hello-job] $ /bin/sh -xe /tmp/jenkins1234567890.sh
++ echo Build Step 01 - Hello world
+Build Step 01 - Hello world
++ echo DevOps on AWS for Beginner
+DevOps on AWS for Beginner
++ whoami
++ echo Job đang chạy với user: jenkins
+Job đang chạy với user: jenkins
+...
+Finished: SUCCESS</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Xem workspace của job</strong>
+        <p>Trên giao diện: trang job → <strong>Workspace</strong> – thấy file <code>hello.txt</code>. Trên server (cửa sổ SSH):</p>
+        <pre class="command-line" data-prompt="$" data-output="2-4"><code class="language-bash">sudo ls -la /var/lib/jenkins/workspace/lab02-hello-job
+total 12
+drwxr-xr-x 2 jenkins jenkins 4096 ... .
+-rw-r--r-- 1 jenkins jenkins   28 ... hello.txt
+sudo cat /var/lib/jenkins/workspace/lab02-hello-job/hello.txt</code></pre>
+        <p class="code-note">💡 Workspace <strong>được giữ lại giữa các lần build</strong> – file của build trước vẫn còn nếu không xoá. Các lab build sau sẽ có bước dọn dẹp (ví dụ xoá thư mục <code>dist</code>) để tránh dùng nhầm file cũ.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Thử một build lỗi</strong>
+        <p>Vào <strong>Configure</strong>, thêm dòng sau vào cuối Command, Save rồi <strong>Build Now</strong>:</p>
+        <pre class="code-block"><code class="language-bash">cat file-khong-ton-tai.txt</code></pre>
+        <p>Build <code>#2</code> báo đỏ, Console Output kết thúc bằng <code>Finished: FAILURE</code>. Xoá dòng vừa thêm, build lại để job xanh trở lại.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Trigger job theo lịch (tuỳ chọn)</strong>
+        <p>Vào <strong>Configure → Triggers</strong>, tick <strong>Build periodically</strong>, Schedule:</p>
+        <pre class="code-block"><code class="language-bash">H/5 * * * *</code></pre>
+        <p>Job sẽ tự chạy khoảng 5 phút một lần; log ghi <code>Started by timer</code>. Ký hiệu <code>H</code> (hash) giúp Jenkins rải đều thời điểm chạy của nhiều job thay vì tất cả chạy cùng phút 0. <strong>Bỏ tick sau khi thử xong</strong> để tránh tạo nhiều build không cần thiết.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Một số thao tác hữu ích trên job</strong>
+        <ul class="feature-list">
+          <li><strong>Discard old builds</strong> (Configure → General): giữ tối đa N build gần nhất, tránh đầy ổ đĩa.</li>
+          <li><strong>Rebuild / Replay:</strong> chạy lại build cũ (Replay dành cho Pipeline job, sẽ dùng ở các lab sau).</li>
+          <li><strong>Copy job:</strong> New Item → ô <em>Copy from</em> nhập tên job có sẵn để nhân bản cấu hình.</li>
+          <li><strong>Disable Project:</strong> tạm dừng job mà không xoá.</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Job <code>lab02-hello-job</code> có ít nhất 1 build <strong>SUCCESS</strong> và 1 build <strong>FAILURE</strong> (Bước 5).</li>
+      <li>Console Output cho thấy job chạy bằng user <code>jenkins</code> trong thư mục <code>/var/lib/jenkins/workspace/lab02-hello-job</code>.</li>
+      <li>Thấy file <code>hello.txt</code> trong Workspace trên giao diện và trên server.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Build bị kẹt ở trạng thái <code>Waiting for next available executor</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Built-in node có 0 executor hoặc mọi executor đang bận, hoặc node bị <em>offline</em> do ổ đĩa sắp đầy.<br/><strong>Giải pháp:</strong> Vào <strong>Manage Jenkins → Nodes → Built-In Node → Configure</strong>, đặt <em>Number of executors</em> = 2; kiểm tra dung lượng bằng <code>df -h /</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Permission denied</code> khi script đọc/ghi file ngoài workspace</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Job chạy bằng user <code>jenkins</code>, không phải <code>ubuntu</code> hay <code>root</code>.<br/><strong>Giải pháp:</strong> Chỉ ghi file trong workspace; nếu thật sự cần, cấp quyền thư mục cho user <code>jenkins</code> (Section 6 – Lab 4). Không cấp <code>sudo</code> không giới hạn cho user <code>jenkins</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo resource trên AWS. Có thể giữ hoặc xoá job <code>lab02-hello-job</code> (trang job → <strong>Delete Project</strong>). Nhớ <strong>Stop</strong> Jenkins server nếu nghỉ học.</div>
+
+</body>
+</html>

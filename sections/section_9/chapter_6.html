@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: CodeBuild – Build Docker image &amp; push lên ECR – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: CodeBuild – Build Docker image &amp; push lên ECR</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo ECR repository <code>nodejs-random-color</code>.</li>
+    <li>Cấu hình CodeBuild project ở <strong>privileged mode</strong> để build Docker image.</li>
+    <li>Viết buildspec: login ECR, build image, đánh tag <code>latest</code> và tag theo <strong>commit SHA</strong>, push lên ECR.</li>
+    <li>Chuẩn bị image cho các lab deploy lên ECS (Lab 6 → Lab 9).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>nodejs-random-color<br/>Dockerfile · buildspec.yml"]
+      PUB["🐳 ECR Public Gallery<br/>node:20-alpine"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          CB["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:44px;height:44px;'/><br/><b>CodeBuild</b><br/>nodejs-docker-build<br/>privileged mode"]
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:44px;height:44px;'/><br/><b>ECR</b><br/>nodejs-random-color<br/>:latest · :a1b2c3d"]
+      end
+      GH -->|"checkout"| CB
+      PUB -.->|"pull base image"| CB
+      CB -->|"docker push"| ECR
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1 (repository <code>nodejs-random-color</code>, connection) và đã quen với CodeBuild ở Lab 2, Lab 3.</li>
+    <li>Kiến thức Dockerfile, ECR (Section 8 – Chapter 5, Chapter 13, Lab 9).</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/lab4_codebuild_docker/</code> (<code>Dockerfile</code>, <code>buildspec.yml</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo ECR repository</strong>
+        <p>Vào <strong>Amazon ECR → Private registry → Repositories</strong>, tạo repository với các thông số:</p>
+        <ul class="feature-list">
+          <li>Repository name: <code>nodejs-random-color</code></li>
+          <li>Image tag mutability: <strong>Mutable</strong> (cho phép ghi đè tag <code>latest</code>)</li>
+          <li>Encryption: <strong>AES-256</strong> (mặc định)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cập nhật Dockerfile &amp; thêm buildspec.yml vào repository</strong>
+        <p>Trong repository <code>nodejs-random-color</code>: copy đè file <code>Dockerfile</code> và tạo file <code>buildspec.yml</code> ở thư mục gốc, nội dung lấy từ thư mục <code>lab4_codebuild_docker</code>.</p>
+        <p><code>Dockerfile</code> – nâng cấp từ <code>node:14</code> lên Node.js 20 và lấy base image từ <strong>ECR Public</strong> để tránh lỗi rate limit của Docker Hub:</p>
+        <pre class="code-block"><code class="language-docker"># Dùng base image Node.js 20 từ Amazon ECR Public Gallery (mirror Docker Official Image)
+# để tránh lỗi rate limit khi CodeBuild pull image ẩn danh từ Docker Hub
+FROM public.ecr.aws/docker/library/node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --omit=dev
+
+COPY . .
+
+EXPOSE 3000
+
+CMD [ "npm", "start" ]</code></pre>
+        <p><code>buildspec.yml</code>:</p>
+        <pre class="code-block"><code class="language-yaml">version: 0.2
+
+# Biến IMAGE_REPO_NAME khai báo ngay trong file; AWS_DEFAULT_REGION do CodeBuild cung cấp sẵn
+env:
+  variables:
+    IMAGE_REPO_NAME: nodejs-random-color
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPOSITORY_URI=$ECR_REGISTRY/$IMAGE_REPO_NAME
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - echo Image will be tagged with $COMMIT_HASH
+  build:
+    commands:
+      - echo Build started on `date`
+      - docker build -t $REPOSITORY_URI:latest .
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$COMMIT_HASH
+  post_build:
+    commands:
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$COMMIT_HASH
+      - echo Build completed on `date`</code></pre>
+        <p class="code-note">💡 Account ID được lấy động bằng <code>aws sts get-caller-identity</code> – không hard-code Account ID trong source code. Tag theo commit SHA (7 ký tự đầu) giúp truy ngược image về đúng commit.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/nodejs-random-color
+git add Dockerfile buildspec.yml
+git commit -m "ci: build docker image with CodeBuild"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo CodeBuild project</strong>
+        <ul class="feature-list">
+          <li>Project name: <code>nodejs-docker-build</code></li>
+          <li>Source: <strong>GitHub</strong> (connection <code>github-connection</code>), Repository <code>&lt;your-github-username&gt;/nodejs-random-color</code>, Source version <code>master</code></li>
+          <li>Environment: Managed image, Amazon Linux, Standard, <code>aws/codebuild/amazonlinux-x86_64-standard:5.0</code>, 3 GB / 2 vCPUs</li>
+          <li><strong>Privileged: bật</strong> (<em>Enable this flag if you want to build Docker images...</em>)</li>
+          <li>Service role: <strong>New service role</strong>, tên <code>codebuild-nodejs-docker-build-service-role</code></li>
+          <li>Buildspec: <strong>Use a buildspec file</strong>; Artifacts: <strong>No artifacts</strong></li>
+          <li>Logs: CloudWatch logs, Group name <code>/codebuild/nodejs-docker-build</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cấp quyền push image cho service role</strong>
+        <p>Vào IAM → Roles → <code>codebuild-nodejs-docker-build-service-role</code>, gắn managed policy:</p>
+        <ul class="feature-list">
+          <li><code>AmazonEC2ContainerRegistryPowerUser</code> – cho phép login, pull, push image lên ECR (không có quyền xoá repository).</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Chạy build &amp; kiểm tra image trên ECR</strong>
+        <p><strong>Start build</strong>, theo dõi log: <code>Login Succeeded</code> → các bước <code>docker build</code> → <code>docker push</code>. Sau khi build thành công:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr describe-images --repository-name nodejs-random-color --region ap-southeast-1 --query "imageDetails[].imageTags"</code></pre>
+        <p>Repository có 1 image mang 2 tag: <code>latest</code> và commit SHA (ví dụ <code>a1b2c3d</code>). Copy <strong>Image URI</strong> tag <code>latest</code> – dùng cho Terraform ở Lab 6.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6 (tuỳ chọn): Chạy thử image trên máy local</strong>
+        <p>Thay <code>123456789012</code> bằng Account ID của bạn, sau đó truy cập <code>http://localhost:3000</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">export ECR_REGISTRY=123456789012.dkr.ecr.ap-southeast-1.amazonaws.com
+aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+docker run -d --rm --name random-color -p 3000:3000 ${ECR_REGISTRY}/nodejs-random-color:latest
+docker stop random-color</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Build của <code>nodejs-docker-build</code> ở trạng thái <strong>Succeeded</strong>.</li>
+      <li>ECR repository <code>nodejs-random-color</code> có image với tag <code>latest</code> và tag commit SHA.</li>
+      <li>Mỗi lần push code mới và chạy build lại, xuất hiện thêm 1 tag commit SHA mới.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa bật <strong>Privileged</strong> mode.<br/><strong>Giải pháp:</strong> Edit project → Environment → bật Privileged, chạy lại build.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>An error occurred (AccessDeniedException) when calling the GetAuthorizationToken operation</code> / <code>denied: User ... is not authorized to perform: ecr:InitiateLayerUpload</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service role chưa có quyền ECR.<br/><strong>Giải pháp:</strong> Gắn policy <code>AmazonEC2ContainerRegistryPowerUser</code> như Bước 4.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>name unknown: The repository with name 'nodejs-random-color' does not exist</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa tạo ECR repository, tạo khác region, hoặc khác tên với biến <code>IMAGE_REPO_NAME</code>.<br/><strong>Giải pháp:</strong> Kiểm tra lại Bước 1.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>toomanyrequests: You have reached your pull rate limit</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Dockerfile vẫn dùng base image từ Docker Hub (<code>FROM node:14</code>) – CodeBuild pull ẩn danh, dùng chung IP với nhiều khách hàng khác.<br/><strong>Giải pháp:</strong> Dùng base image <code>public.ecr.aws/docker/library/node:20-alpine</code> như Bước 2. Nếu bắt buộc dùng Docker Hub: lưu username/token vào Secrets Manager, khai báo trong buildspec bằng <code>env.secrets-manager</code> và chạy <code>docker login</code> ở phase <code>pre_build</code> (service role cần quyền <code>secretsmanager:GetSecretValue</code>).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại ECR repository và image – là đầu vào cho Lab 6 → Lab 9. ECR tính phí theo dung lượng lưu trữ (rất nhỏ với vài image). Có thể cấu hình <strong>Lifecycle policy</strong> chỉ giữ 10 image gần nhất.</div>
+
+</body>
+</html>

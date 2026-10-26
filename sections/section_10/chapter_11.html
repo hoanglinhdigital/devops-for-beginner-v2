@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 9: Tự động trigger job từ GitHub webhook – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 9: Tự động trigger job từ GitHub webhook</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Viết <code>Jenkinsfile-auto</code> gộp <strong>build + push ECR + deploy ECS</strong> (Lab 6 + Lab 7) thành một pipeline CI/CD hoàn chỉnh; image được tag <code>ver-&lt;BUILD_NUMBER&gt;</code> và <code>latest</code>.</li>
+    <li>Tạo job <code>lab09-cicd-nodejs-auto</code> (Pipeline from SCM, nhánh <code>develop</code>) với trigger <strong>GitHub hook trigger for GITScm polling</strong>.</li>
+    <li>Cấu hình <strong>webhook</strong> trên GitHub để mỗi lần push/merge vào <code>develop</code>, Jenkins tự động build và deploy – không cần bấm tay.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>Developer</b><br/>git push develop"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>nodejs-random-color<br/>Webhook"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server :8080"]
+              direction TB
+              W["/github-webhook/"] --> P1["① Checkout SCM<br/>*/develop"]
+              P1 --> P2["② docker build"]
+              P2 --> P3["③ push ver-N + latest"]
+              P3 --> P4["④ deploy ECS<br/>wait stable"]
+          end
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR"]
+          ECS["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:30px;height:30px;'/> <img src='../../assets/aws-svg/Fargate.svg' style='width:30px;height:30px;'/><br/>ALB + nodejs-service"]
+      end
+      Dev --> GH
+      GH -->|"POST push event"| W
+      P3 --> ECR
+      P4 --> ECS
+      ECR -.-> ECS
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 7 (Terraform stack đang chạy) và Lab 8 (repository Private, credential <code>github-ssh-key</code>).</li>
+    <li>Jenkins server có Public IP ổn định trong lúc làm lab (không Stop/Start giữa chừng, hoặc dùng Elastic IP).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab9_github_webhook/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo nhánh develop &amp; thêm Jenkinsfile-auto</strong>
+        <p>Copy file <code>lab9_github_webhook/Jenkinsfile-auto</code> vào thư mục gốc repository trên máy local. Pipeline này gộp Lab 6 + Lab 7: push thêm tag <code>latest</code> và deploy ngay sau khi push (không có stage Checkout vì dùng Pipeline from SCM):</p>
+        <pre class="code-block"><code class="language-groovy">pipeline {
+    agent any
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        // Không chạy 2 build cùng lúc trên cùng một service ECS
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_REPO       = 'nodejs-random-color'
+        IMAGE_TAG      = "ver-${BUILD_NUMBER}"
+        ECS_CLUSTER    = 'jenkins-lab-cluster'
+        ECS_SERVICE    = 'nodejs-service'
+        TASK_FAMILY    = 'jenkins-lab-nodejs-task'
+        CONTAINER_NAME = 'nodejs-container'
+    }
+
+    stages {
+        stage('Show commit') {
+            steps {
+                sh 'git log -1 --oneline'
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                // Push 2 tag: ver-&lt;BUILD_NUMBER&gt; (truy vết, rollback) và latest (bản mới nhất của develop)
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:latest
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:latest
+                '''
+            }
+        }
+
+        stage('Deploy to ECS') {
+            steps {
+                // Deploy theo tag ver-&lt;BUILD_NUMBER&gt; thay vì latest: mỗi revision task definition trỏ tới đúng 1 image
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    FULL_IMAGE=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}
+                    echo "Deploying image: ${FULL_IMAGE}"
+
+                    aws ecs describe-task-definition --region ${AWS_REGION} --task-definition ${TASK_FAMILY} |
+                    jq --arg IMAGE "${FULL_IMAGE}" --arg NAME "${CONTAINER_NAME}" '.taskDefinition | (.containerDefinitions[] | select(.name == $NAME) | .image) = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' &gt; new-task-definition.json
+
+                    NEW_REVISION=$(aws ecs register-task-definition --region ${AWS_REGION} --cli-input-json file://new-task-definition.json --query 'taskDefinition.revision' --output text)
+                    echo "New revision: ${TASK_FAMILY}:${NEW_REVISION}"
+
+                    aws ecs update-service --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --task-definition ${TASK_FAMILY}:${NEW_REVISION} --force-new-deployment &gt; /dev/null
+                    aws ecs wait services-stable --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+        }
+        success {
+            echo "Deploy ${IMAGE_TAG} lên ${ECS_SERVICE} thành công!"
+        }
+    }
+}</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/jenkins-labs/nodejs-random-color
+git checkout master
+git pull origin master
+git checkout -b develop
+git add Jenkinsfile-auto
+git commit -m "ci: add Jenkinsfile-auto for develop CI/CD"
+git push -u origin develop</code></pre>
+        <p class="code-note">💡 Vì sao deploy bằng <code>ver-N</code> mà không dùng <code>latest</code>? Nếu task definition trỏ tới <code>latest</code>, sau này không biết revision nào chạy code nào, và mỗi lần ECS khởi động lại task có thể vô tình kéo về version mới. Tag <code>latest</code> chỉ dùng như "con trỏ" tới bản build mới nhất.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Mở port 8080 cho GitHub webhook</strong>
+        <p>GitHub cần gọi được vào Jenkins. Vào <strong>EC2 → Security Groups → jenkins-sg → Edit inbound rules</strong>, thêm rule <strong>Custom TCP 8080</strong> cho các dải IP webhook của GitHub (giữ rule My IP cũ):</p>
+        <ul class="feature-list">
+          <li><code>192.30.252.0/22</code>, <code>185.199.108.0/22</code>, <code>140.82.112.0/20</code>, <code>143.55.64.0/20</code> – Description <code>GitHub webhook</code></li>
+        </ul>
+        <p>Danh sách IP chính thức có thể thay đổi, kiểm tra lại bằng:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -s https://api.github.com/meta | jq '.hooks'</code></pre>
+        <div class="alert alert-warning">Không mở 8080 cho <code>0.0.0.0/0</code>: Jenkins public ra Internet là mục tiêu tấn công phổ biến. Production thường đặt Jenkins sau ALB + HTTPS, hoặc trong private subnet và nhận webhook qua một endpoint trung gian / dùng polling.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kiểm tra plugin GitHub</strong>
+        <p>Vào <strong>Manage Jenkins → Plugins → Installed plugins</strong>, tìm <strong>GitHub plugin</strong> (đã có trong suggested plugins). Nếu chưa có: Available plugins → <code>GitHub</code> → Install. Kiểm tra endpoint webhook từ máy local:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -s -o /dev/null -w "%{http_code}\n" http://&lt;jenkins-public-ip&gt;:8080/github-webhook/</code></pre>
+        <p class="code-note">💡 Kết quả <code>405</code> (Method Not Allowed – vì gửi GET thay vì POST) là bình thường, chứng tỏ endpoint tồn tại. Nếu bị timeout, kiểm tra lại Security Group.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo job CI/CD tự động</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab09-cicd-nodejs-auto</code>:</p>
+        <ul class="feature-list">
+          <li>Triggers: tick <strong>GitHub hook trigger for GITScm polling</strong></li>
+          <li>Pipeline → Definition <strong>Pipeline script from SCM</strong>, SCM <strong>Git</strong></li>
+          <li>Repository URL: <code>git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git</code>; Credentials: <code>github-ssh-key</code></li>
+          <li>Branch Specifier: <code>*/develop</code></li>
+          <li>Script Path: <code>Jenkinsfile-auto</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Chạy job lần đầu bằng tay</strong>
+        <p><strong>Build Now</strong> một lần để Jenkins ghi nhận repository/branch của job (webhook dựa vào thông tin này để biết job nào cần chạy). Kiểm tra pipeline chạy hết 5 stage và website trên ALB hiển thị code của nhánh <code>develop</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Tạo webhook trên GitHub</strong>
+        <p>Trong repository <code>nodejs-random-color</code> → <strong>Settings → Webhooks → Add webhook</strong>:</p>
+        <ul class="feature-list">
+          <li>Payload URL: <code>http://&lt;jenkins-public-ip&gt;:8080/github-webhook/</code> – <strong>bắt buộc có dấu <code>/</code> ở cuối</strong></li>
+          <li>Content type: <code>application/json</code></li>
+          <li>Which events: <strong>Just the push event</strong>; Active: tick</li>
+        </ul>
+        <p>Sau khi Add, GitHub gửi một <em>ping</em> event – tab <strong>Recent Deliveries</strong> hiển thị dấu ✔ xanh với response <code>200</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Sửa code &amp; push lên develop</strong>
+        <p>Sửa text thẻ <code>&lt;h1 id="welcome" ...&gt;</code> trong <code>public/index.html</code> thành <code>Welcome to My Website – v3 from develop</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add public/index.html
+git commit -m "feat: update welcome message v3 from develop"
+git push origin develop</code></pre>
+        <p>Trong vài giây, job <code>lab09-cicd-nodejs-auto</code> tự chạy; log build bắt đầu bằng <code>Started by GitHub push by &lt;your-github-username&gt;</code>. Thử push một commit lên <code>master</code>: job <strong>không</strong> chạy vì chỉ theo dõi nhánh <code>develop</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Kiểm tra version mới qua ALB</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -s http://&lt;alb-dns-name&gt;/ | grep -o "&lt;h1[^&gt;]*&gt;[^&lt;]*"</code></pre>
+        <p>Trên ECR, image mới nhất có 2 tag <code>ver-N</code> và <code>latest</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Webhook trên GitHub có delivery thành công (response <code>200</code>).</li>
+      <li>Push lên <code>develop</code> tự động tạo build mới với lý do <em>Started by GitHub push</em>, build SUCCESS cả 5 stage.</li>
+      <li>Website qua ALB hiển thị nội dung v3 mà không cần thao tác thủ công trên Jenkins.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">GitHub Recent Deliveries báo <code>We couldn't deliver this payload: failed to connect to host</code> / timeout</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group chưa mở 8080 cho IP của GitHub, hoặc Public IP của Jenkins đã đổi sau khi Stop/Start.<br/><strong>Giải pháp:</strong> Kiểm tra Bước 2; cập nhật Payload URL theo Public IP mới (hoặc dùng Elastic IP), bấm <strong>Redeliver</strong>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Webhook trả về <code>302</code> hoặc <code>403 No valid crumb</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Payload URL thiếu dấu <code>/</code> cuối hoặc sai đường dẫn.<br/><strong>Giải pháp:</strong> Dùng đúng <code>http://&lt;jenkins-public-ip&gt;:8080/github-webhook/</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Webhook trả về <code>200</code> nhưng job không chạy</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa tick trigger <em>GitHub hook trigger for GITScm polling</em>, chưa build tay lần đầu, push vào nhánh khác <code>develop</code>, hoặc repository URL trong job khác repository gửi webhook.<br/><strong>Giải pháp:</strong> Kiểm tra lại Bước 4, 5; xem <strong>Manage Jenkins → System Log</strong> và trang job → <strong>GitHub Hook Log</strong>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Hai build chạy chồng lên nhau khi push liên tục</div>
+    <div class="fix"><strong>Nguyên nhân &amp; giải pháp:</strong> Jenkinsfile đã có <code>disableConcurrentBuilds()</code> nên build sau sẽ chờ build trước xong – tránh 2 deployment cùng lúc trên một ECS service.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">Sau khi hoàn thành, <strong>xoá rule 8080 của GitHub</strong> trong <code>jenkins-sg</code> (hoặc giữ đến hết Lab 10 nếu học tiếp). ALB và task Fargate vẫn tính phí theo giờ – <code>terraform destroy</code> nếu dừng học tại đây.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_10_cicd_with_jenkins/terraform_ecs_stack
+terraform destroy</code></pre>
+
+</body>
+</html>

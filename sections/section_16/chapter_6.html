@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Monitoring for Kubernetes – Log – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Monitoring for Kubernetes – Log</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Làm quen với khái niệm <strong>ELK stack</strong> (Elasticsearch + Logstash + Kibana) và <strong>Filebeat</strong>.</li>
+    <li>Cài đặt các công cụ cần thiết để <strong>thu thập log</strong> từ ứng dụng TODO rồi visualize trên Kibana.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/lab2-elk-concept.png" alt="Khái niệm ELK + Filebeat stack" />
+    <div class="figure-title">Concept ELK + Filebeat stack</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section15/lab2-architecture.png" alt="Sơ đồ thực tế hệ thống Lab 2: Filebeat → Logstash → Elasticsearch → Kibana" />
+    <div class="figure-title">Sơ đồ thực tế hệ thống của bài Lab 2</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Filebeat:</strong> chạy dạng <em>DaemonSet</em> trên mỗi node, tự động thu thập container log rồi gửi sang Logstash.</li>
+    <li><strong>Logstash:</strong> nhận log qua cổng <code>5044</code> (Beats), xử lý và chuẩn hoá.</li>
+    <li><strong>Elasticsearch:</strong> lưu trữ và đánh index log qua cổng <code>9200</code>.</li>
+    <li><strong>Kibana:</strong> truy vấn Elasticsearch và visualize log qua cổng <code>5601</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong>: đã có Minikube và ứng dụng TODO (frontend/backend/mongo) đang chạy trong namespace <code>default</code>.</li>
+    <li>Source code bài lab nằm tại <code>sourcecode/section_15_monitoring_for_eks/lab2_log/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Deploy stack thu thập log (ELK + Filebeat)</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f log-collection.yaml -n monitoring</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Kiểm tra deploy</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods -n monitoring</code></pre>
+        <p>Bạn sẽ thấy các pod <code>elasticsearch</code>, <code>kibana</code>, <code>logstash</code>, <code>filebeat</code> ở trạng thái <code>Running</code>, cùng với các pod ứng dụng (frontend, backend, mongo).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Truy cập Kibana</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube service kibana -n monitoring</code></pre>
+        <p>Hoặc dùng port-forward:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl port-forward svc/kibana 5601:5601</code></pre>
+        <p>rồi truy cập <code>http://localhost:5601</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo Index Pattern và xem log</strong>
+        <p>Trong Kibana:</p>
+        <ul class="feature-list">
+          <li>Vào <strong>Stack Management → Index Patterns → Create index pattern</strong>.</li>
+          <li>Nhập pattern khớp với cấu hình Logstash: <code>todo-app-logs-*</code>.</li>
+          <li>Chọn <code>@timestamp</code> làm time field rồi hoàn tất.</li>
+          <li>Vào <strong>Discover</strong>, chọn index pattern <code>todo-app-logs-*</code> vừa tạo.</li>
+        </ul>
+        <p>Thực hiện vài thao tác trên app TODO (thêm, sửa, xoá todo) rồi tìm log bằng keyword, ví dụ <code>DELETE</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Các pod ELK + Filebeat đều <code>Running</code> trong namespace <code>monitoring</code>.</li>
+      <li>Truy cập được Kibana tại cổng <code>5601</code>.</li>
+      <li>Index pattern <code>todo-app-logs-*</code> được tạo thành công và có dữ liệu log đổ về.</li>
+      <li>Khi thao tác trên app TODO, log của frontend/backend xuất hiện trên Discover.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Elasticsearch không lên hoặc bị OOM</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Elasticsearch cần nhiều RAM; Minikube thiếu tài nguyên.<br/><strong>Giải pháp:</strong> Tăng RAM/CPU cho Minikube khi khởi động (VD <code>minikube start --memory 6144 --cpus 4</code>), hoặc giảm <code>-Xmx</code> trong file YAML.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Kibana không thấy log dù đã tạo index pattern</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Pattern sai tên, hoặc Logstash chưa nhận log từ Filebeat.<br/><strong>Giải pháp:</strong> Kiểm tra index pattern đúng <code>todo-app-logs-*</code>; xem log pod <code>filebeat</code> và <code>logstash</code>; đảm bảo cổng <code>5044</code> thông.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Có thể giữ lại để demo/tham khảo. Nếu muốn xoá:</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f log-collection.yaml -n monitoring</code></pre>
+
+</body>
+</html>

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng quan các dịch vụ chính trên AWS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">4. Giới thiệu &amp; ôn lại kiến thức AWS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng quan các dịch vụ chính trên AWS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    AWS có hơn 200 dịch vụ, được chia thành nhiều nhóm theo chức năng: Compute, Storage, Networking, Database, Security, Monitoring, Integration, DevOps...
+    Chương này giúp bạn có <strong>bản đồ tổng quan</strong> để biết mỗi dịch vụ nằm ở đâu và dùng để làm gì — không cần nhớ hết tên hay biểu tượng (vì Google có!).
+  </p>
+
+  <h2 class="section-heading">Đặc điểm của danh sách dưới đây</h2>
+  <ul class="feature-list">
+    <li>Được sắp xếp theo <strong>mức độ phổ biến</strong> trong dự án thực tế — service hay dùng được đưa lên đầu.</li>
+    <li>Sắp xếp theo <strong>độ khó tăng dần</strong> — service dễ tiếp cận được đưa lên trước.</li>
+    <li>Chỉ là <strong>một phần nhỏ</strong>, không phải tất cả dịch vụ của AWS.</li>
+    <li>Những dịch vụ có nhãn <span class="badge badge-orange">Hay dùng</span> và nền màu cam là dịch vụ thường xuyên xuất hiện trong dự án.</li>
+    <li>Khoá DevOps này tập trung vào các nhóm: <strong>Compute, Container, Database, Network, Security, Deployment &amp; Monitoring</strong>.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình: các nhóm dịch vụ trong một hệ thống điển hình</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/svg-icon/user.svg' style='width:36px;height:36px;'/><br/><b>User</b>"]
+      Dev["<img src='../../assets/svg-icon/developer.svg' style='width:36px;height:36px;'/><br/><b>Developer</b>"]
+      subgraph AWS["☁️ AWS Cloud"]
+          direction LR
+          subgraph Net["🌐 Networking"]
+              R53["<img src='../../assets/aws-svg/Route-53.svg' style='width:28px;height:28px;'/><br/>Route 53"]
+              CF["<img src='../../assets/aws-svg/CloudFront.svg' style='width:28px;height:28px;'/><br/>CloudFront"]
+              ELB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:28px;height:28px;'/><br/>ELB"]
+          end
+          subgraph Comp["🖥️ Compute &amp; Container"]
+              EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:28px;height:28px;'/><br/>EC2 / ECS / EKS"]
+              Lambda["<img src='../../assets/aws-svg/Lambda.svg' style='width:28px;height:28px;'/><br/>Lambda"]
+          end
+          subgraph DB["🗄️ Database &amp; Storage"]
+              RDS["<img src='../../assets/aws-svg/RDS.svg' style='width:28px;height:28px;'/><br/>RDS"]
+              S3["<img src='../../assets/aws-svg/S3.svg' style='width:28px;height:28px;'/><br/>S3"]
+          end
+          subgraph Ops["⚙️ DevOps · Security · Monitoring"]
+              CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:28px;height:28px;'/><br/>CodePipeline"]
+              IAM["<img src='../../assets/aws-svg/IAM.svg' style='width:28px;height:28px;'/><br/>IAM"]
+              CW["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:28px;height:28px;'/><br/>CloudWatch"]
+          end
+          R53 --> CF --> ELB --> EC2 --> RDS
+          EC2 --> S3
+          Lambda --> RDS
+      end
+      User --> R53
+      Dev -->|"git push"| CP -->|"deploy"| EC2
+  </div>
+
+  <h3 class="section-subheading">🖥️ Compute &amp; Container</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/EC2.svg" alt="EC2" /><div><strong>Amazon EC2<span class="svc-tag">Hay dùng</span></strong>Máy chủ ảo — nền tảng của hầu hết các hệ thống.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/EC2-Auto-Scaling.svg" alt="Auto Scaling" /><div><strong>EC2 Auto Scaling<span class="svc-tag">Hay dùng</span></strong>Tự động tăng/giảm số lượng EC2 theo tải.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Lambda.svg" alt="Lambda" /><div><strong>AWS Lambda<span class="svc-tag">Hay dùng</span></strong>Chạy code dạng function, không cần quản lý server.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Elastic-Container-Service.svg" alt="ECS" /><div><strong>Amazon ECS / Fargate<span class="svc-tag">Hay dùng</span></strong>Chạy container được quản lý bởi AWS.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Elastic-Container-Registry.svg" alt="ECR" /><div><strong>Amazon ECR<span class="svc-tag">Hay dùng</span></strong>Registry lưu trữ Docker image.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Elastic-Kubernetes-Service.svg" alt="EKS" /><div><strong>Amazon EKS<span class="svc-tag">Hay dùng</span></strong>Kubernetes được quản lý (managed control plane).</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Elastic-Beanstalk.svg" alt="Elastic Beanstalk" /><div><strong>AWS Elastic Beanstalk</strong>PaaS — upload code, AWS lo phần hạ tầng.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Outposts-family.svg" alt="Outposts" /><div><strong>AWS Outposts</strong>Hạ tầng AWS đặt tại data center của doanh nghiệp.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/VMware-Cloud-on-AWS.svg" alt="VMware Cloud on AWS" /><div><strong>VMware Cloud on AWS</strong>Chạy môi trường VMware trên hạ tầng AWS.</div></div>
+  </div>
+
+  <h3 class="section-subheading">💾 Storage</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/S3.svg" alt="S3" /><div><strong>Amazon S3<span class="svc-tag">Hay dùng</span></strong>Object storage gần như không giới hạn dung lượng.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Elastic-Block-Store.svg" alt="EBS" /><div><strong>Amazon EBS<span class="svc-tag">Hay dùng</span></strong>Ổ đĩa (block storage) gắn vào EC2.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/EFS.svg" alt="EFS" /><div><strong>Amazon EFS<span class="svc-tag">Hay dùng</span></strong>File system NFS dùng chung cho nhiều EC2/container.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Backup.svg" alt="Backup" /><div><strong>AWS Backup<span class="svc-tag">Hay dùng</span></strong>Quản lý backup tập trung cho nhiều dịch vụ.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/FSx.svg" alt="FSx" /><div><strong>Amazon FSx</strong>File system được quản lý: Windows File Server, Lustre, NetApp ONTAP...</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Storage-Gateway.svg" alt="Storage Gateway" /><div><strong>AWS Storage Gateway</strong>Kết nối storage on-premise với AWS.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Snowball.svg" alt="Snowball" /><div><strong>AWS Snow Family</strong>Thiết bị vật lý để chuyển dữ liệu lớn (TB–PB) lên AWS.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Elastic-Disaster-Recovery.svg" alt="Elastic Disaster Recovery" /><div><strong>Elastic Disaster Recovery</strong>Giải pháp DR cho server on-premise/cloud.</div></div>
+  </div>
+
+  <h3 class="section-subheading">🌐 Networking</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Virtual-Private-Cloud.svg" alt="VPC" /><div><strong>Amazon VPC<span class="svc-tag">Hay dùng</span></strong>Mạng ảo riêng của bạn trên AWS.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Elastic-Load-Balancing.svg" alt="ELB" /><div><strong>Elastic Load Balancing<span class="svc-tag">Hay dùng</span></strong>Phân phối traffic tới nhiều target.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Route-53.svg" alt="Route 53" /><div><strong>Amazon Route 53<span class="svc-tag">Hay dùng</span></strong>Dịch vụ DNS &amp; đăng ký domain.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/CloudFront.svg" alt="CloudFront" /><div><strong>Amazon CloudFront<span class="svc-tag">Hay dùng</span></strong>CDN — cache nội dung tại Edge Location.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Transit-Gateway.svg" alt="Transit Gateway" /><div><strong>AWS Transit Gateway</strong>Hub kết nối nhiều VPC và on-premise.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Site-to-Site-VPN.svg" alt="Site-to-Site VPN" /><div><strong>Site-to-Site / Client VPN</strong>Kết nối VPN từ văn phòng hoặc máy cá nhân vào VPC.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Direct-Connect.svg" alt="Direct Connect" /><div><strong>AWS Direct Connect</strong>Đường truyền vật lý riêng từ data center tới AWS.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/PrivateLink.svg" alt="PrivateLink" /><div><strong>AWS PrivateLink</strong>Truy cập service qua mạng private, không đi ra Internet.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Global-Accelerator.svg" alt="Global Accelerator" /><div><strong>AWS Global Accelerator</strong>Tăng tốc traffic toàn cầu qua backbone của AWS.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Cloud-Map.svg" alt="Cloud Map" /><div><strong>AWS Cloud Map</strong>Service discovery cho microservices.</div></div>
+  </div>
+
+  <h3 class="section-subheading">🗄️ Database</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/RDS.svg" alt="RDS" /><div><strong>Amazon RDS<span class="svc-tag">Hay dùng</span></strong>Database quan hệ được quản lý: MySQL, PostgreSQL, SQL Server, Oracle...</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Aurora.svg" alt="Aurora" /><div><strong>Amazon Aurora<span class="svc-tag">Hay dùng</span></strong>Database độc quyền của AWS, tương thích MySQL/PostgreSQL.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/DynamoDB.svg" alt="DynamoDB" /><div><strong>Amazon DynamoDB<span class="svc-tag">Hay dùng</span></strong>NoSQL key-value, serverless, hiệu năng millisecond.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/ElastiCache.svg" alt="ElastiCache" /><div><strong>Amazon ElastiCache<span class="svc-tag">Hay dùng</span></strong>In-memory cache (Redis/Valkey, Memcached).</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/DocumentDB.svg" alt="DocumentDB" /><div><strong>Amazon DocumentDB</strong>Document database tương thích MongoDB.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/MemoryDB-for-Redis.svg" alt="MemoryDB" /><div><strong>Amazon MemoryDB</strong>Database in-memory bền vững, tương thích Redis.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Neptune.svg" alt="Neptune" /><div><strong>Amazon Neptune</strong>Graph database.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Keyspaces.svg" alt="Keyspaces" /><div><strong>Amazon Keyspaces</strong>Tương thích Apache Cassandra.</div></div>
+  </div>
+
+  <h3 class="section-subheading">🔐 Security &amp; Identity</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/IAM.svg" alt="IAM" /><div><strong>AWS IAM<span class="svc-tag">Hay dùng</span></strong>Quản lý user, group, role, permission.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Certificate-Manager.svg" alt="ACM" /><div><strong>AWS Certificate Manager<span class="svc-tag">Hay dùng</span></strong>Cấp SSL/TLS certificate miễn phí cho ELB, CloudFront.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Key-Management-Service.svg" alt="KMS" /><div><strong>AWS KMS<span class="svc-tag">Hay dùng</span></strong>Quản lý key mã hoá dữ liệu.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Secrets-Manager.svg" alt="Secrets Manager" /><div><strong>AWS Secrets Manager<span class="svc-tag">Hay dùng</span></strong>Lưu trữ &amp; rotate secret (password DB, API key).</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Cognito.svg" alt="Cognito" /><div><strong>Amazon Cognito<span class="svc-tag">Hay dùng</span></strong>Đăng ký/đăng nhập cho ứng dụng web, mobile.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/WAF.svg" alt="WAF" /><div><strong>AWS WAF<span class="svc-tag">Hay dùng</span></strong>Web Application Firewall, chặn SQL injection, XSS...</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Shield.svg" alt="Shield" /><div><strong>AWS Shield</strong>Chống tấn công DDoS.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/GuardDuty.svg" alt="GuardDuty" /><div><strong>Amazon GuardDuty</strong>Phát hiện mối đe doạ dựa trên log.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Inspector.svg" alt="Inspector" /><div><strong>Amazon Inspector</strong>Scan lỗ hổng EC2, container image, Lambda.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Macie.svg" alt="Macie" /><div><strong>Amazon Macie</strong>Phát hiện dữ liệu nhạy cảm (PII) trong S3.</div></div>
+  </div>
+
+  <h3 class="section-subheading">📊 Monitoring, Management &amp; Governance</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/CloudWatch.svg" alt="CloudWatch" /><div><strong>Amazon CloudWatch<span class="svc-tag">Hay dùng</span></strong>Metric, Logs, Alarm, Dashboard, Synthetics, RUM.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/CloudTrail.svg" alt="CloudTrail" /><div><strong>AWS CloudTrail<span class="svc-tag">Hay dùng</span></strong>Ghi lại mọi API call — ai làm gì, khi nào.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Systems-Manager.svg" alt="Systems Manager" /><div><strong>AWS Systems Manager<span class="svc-tag">Hay dùng</span></strong>Quản lý server, Session Manager, Parameter Store.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/CloudFormation.svg" alt="CloudFormation" /><div><strong>AWS CloudFormation<span class="svc-tag">Hay dùng</span></strong>Infrastructure as Code của AWS.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/Budgets.svg" alt="Budgets" /><div><strong>AWS Budgets / Cost Explorer<span class="svc-tag">Hay dùng</span></strong>Theo dõi và cảnh báo chi phí.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Organizations.svg" alt="Organizations" /><div><strong>AWS Organizations / Control Tower</strong>Quản lý nhiều account tập trung.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Config.svg" alt="Config" /><div><strong>AWS Config</strong>Ghi nhận và kiểm tra cấu hình resource.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Trusted-Advisor.svg" alt="Trusted Advisor" /><div><strong>Trusted Advisor / Well-Architected Tool</strong>Gợi ý tối ưu chi phí, bảo mật, hiệu năng.</div></div>
+  </div>
+
+  <h3 class="section-subheading">✉️ Messaging &amp; Application Integration</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/API-Gateway.svg" alt="API Gateway" /><div><strong>Amazon API Gateway<span class="svc-tag">Hay dùng</span></strong>Tạo, publish và bảo vệ REST/HTTP/WebSocket API.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/SQS.svg" alt="SQS" /><div><strong>Amazon SQS<span class="svc-tag">Hay dùng</span></strong>Message queue.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/SNS.svg" alt="SNS" /><div><strong>Amazon SNS<span class="svc-tag">Hay dùng</span></strong>Pub/Sub, gửi notification (email, SMS...).</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/EventBridge.svg" alt="EventBridge" /><div><strong>Amazon EventBridge<span class="svc-tag">Hay dùng</span></strong>Event bus, schedule (cron) cho các tác vụ.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/SES.svg" alt="SES" /><div><strong>Amazon SES</strong>Gửi email số lượng lớn.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/MQ.svg" alt="MQ" /><div><strong>Amazon MQ</strong>Message broker ActiveMQ/RabbitMQ được quản lý.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Step-Functions.svg" alt="Step Functions" /><div><strong>AWS Step Functions</strong>Điều phối workflow nhiều bước.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/AppSync.svg" alt="AppSync" /><div><strong>AWS AppSync</strong>GraphQL API được quản lý.</div></div>
+  </div>
+
+  <h3 class="section-subheading">🚀 Deployment &amp; Automation (DevOps)</h3>
+  <div class="svc-grid">
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/CodePipeline.svg" alt="CodePipeline" /><div><strong>AWS CodePipeline<span class="svc-tag">Hay dùng</span></strong>Điều phối CICD pipeline.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/CodeBuild.svg" alt="CodeBuild" /><div><strong>AWS CodeBuild<span class="svc-tag">Hay dùng</span></strong>Build &amp; test source code.</div></div>
+    <div class="svc-card popular"><img class="svc-icon" src="../../assets/aws-svg/CodeDeploy.svg" alt="CodeDeploy" /><div><strong>AWS CodeDeploy<span class="svc-tag">Hay dùng</span></strong>Deploy lên EC2, ECS, Lambda (rolling, blue/green).</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/CodeCommit.svg" alt="CodeCommit" /><div><strong>AWS CodeCommit</strong>Git repository của AWS (hạn chế cho khách hàng mới).</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/CodeArtifact.svg" alt="CodeArtifact" /><div><strong>AWS CodeArtifact</strong>Repository cho package (npm, Maven, PyPI...).</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/Cloud-Development-Kit.svg" alt="CDK" /><div><strong>AWS CDK</strong>IaC bằng ngôn ngữ lập trình (TypeScript, Python...).</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/X-Ray.svg" alt="X-Ray" /><div><strong>AWS X-Ray</strong>Distributed tracing cho microservices.</div></div>
+    <div class="svc-card"><img class="svc-icon" src="../../assets/aws-svg/CloudShell.svg" alt="CloudShell" /><div><strong>AWS CloudShell</strong>Terminal trên trình duyệt, có sẵn AWS CLI.</div></div>
+  </div>
+
+  <h3 class="section-subheading">📦 Các nhóm dịch vụ khác</h3>
+  <table class="req-table">
+    <thead><tr><th>Nhóm</th><th>Một số dịch vụ tiêu biểu</th></tr></thead>
+    <tbody>
+      <tr><td>Migration</td><td>Database Migration Service (DMS), Application Migration Service, DataSync, Transfer Family, Migration Hub</td></tr>
+      <tr><td>Big Data &amp; Analytics</td><td>Redshift, Athena, Glue, Kinesis, MSK (Kafka), QuickSight, Lake Formation, EMR</td></tr>
+      <tr><td>AI &amp; Machine Learning</td><td>Bedrock, Amazon Q, SageMaker, Rekognition, Polly, Translate, Textract, Kendra</td></tr>
+      <tr><td>Khác</td><td>IoT, Media Services, Game, Quantum (Braket), Robotics, Satellite (Ground Station)... — tìm hiểu thêm khi cần</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off: Managed service vs tự quản lý trên EC2</h2>
+  <table class="req-table">
+    <thead><tr><th>Tiêu chí</th><th>Managed service (RDS, ECS Fargate, Lambda...)</th><th>Tự cài trên EC2</th></tr></thead>
+    <tbody>
+      <tr><td>Công sức vận hành</td><td>Thấp — AWS lo patch, backup, HA</td><td>Cao — tự cài đặt, update, backup</td></tr>
+      <tr><td>Chi phí trực tiếp</td><td>Thường cao hơn một chút</td><td>Thấp hơn về giá instance</td></tr>
+      <tr><td>Mức độ tuỳ biến</td><td>Bị giới hạn bởi tính năng service</td><td>Toàn quyền (root access)</td></tr>
+      <tr><td>Vendor lock-in</td><td>Cao hơn</td><td>Thấp hơn, dễ di chuyển</td></tr>
+      <tr><td>Khuyến nghị</td><td colspan="2">Ưu tiên managed service cho team nhỏ, muốn tập trung vào sản phẩm; tự quản lý khi có yêu cầu đặc thù mà service không đáp ứng.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Web application truyền thống</h4>
+      <p>Route 53 → CloudFront → ALB → EC2/ECS → RDS + ElastiCache, file upload lưu trên S3, monitoring bằng CloudWatch.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Ứng dụng Serverless</h4>
+      <p>S3 + CloudFront host frontend, API Gateway + Lambda làm backend, DynamoDB lưu dữ liệu, Cognito xác thực người dùng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>CICD pipeline trên AWS</h4>
+      <p>Source trên GitHub → CodePipeline → CodeBuild build Docker image, push lên ECR → CodeDeploy/ECS triển khai — sẽ được thực hành ở section CodePipeline phía sau.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-tip">
+    <strong>Mẹo học:</strong> đừng cố học thuộc 200+ dịch vụ. Hãy nắm chắc khoảng <strong>20–30 dịch vụ “Hay dùng”</strong> ở trên, khi gặp yêu cầu mới thì tra cứu tài liệu AWS.
+  </div>
+  <div class="alert alert-info">
+    <strong>Tiếp theo:</strong> 3 chương tiếp theo sẽ ôn lại nhanh các dịch vụ quan trọng nhất sẽ được dùng trong khoá học: IAM, VPC, Load Balancer, RDS, S3, CloudFront, Serverless, Container, Monitoring và Messaging.
+  </div>
+
+</body>
+</html>

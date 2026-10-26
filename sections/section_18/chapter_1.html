@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Final Assignment: Đề bài – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">18. Final Assignment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Final assignment: Đề bài</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Đây là <strong>bài tập lớn cuối khoá</strong> (Final Assignment #1): <strong>Container Architecture</strong>.
+    Sau khi đã học xong toàn bộ các phần từ AWS cơ bản, Terraform, Linux, Git, Docker, CI/CD (Jenkins, CodePipeline, GitHub Actions)
+    cho đến ECS/EKS, bạn sẽ <strong>tự mình</strong> thiết kế và triển khai một hệ thống hoàn chỉnh trên AWS theo kiến trúc
+    <strong>Container</strong>, áp dụng đúng các Best Practice.
+  </p>
+  <p class="body-text">
+    Đây không phải là bài kiểm tra trí nhớ — mà là cơ hội để bạn <strong>tổng hợp mọi kiến thức</strong> đã học vào một
+    bài toán thực tế, giống như công việc của một DevOps/Cloud Engineer thực thụ: nhận một ứng dụng có sẵn, đọc hiểu nó,
+    thiết kế hạ tầng, triển khai lên Cloud và dựng pipeline CI/CD.
+  </p>
+
+  <h2 class="section-heading">Mục đích của Assignment</h2>
+  <ul class="feature-list">
+    <li><strong>Vận dụng kiến thức đã học</strong> để thiết kế một hệ thống trên AWS theo kiến trúc Container.</li>
+    <li><strong>Sử dụng các services đã học</strong> để triển khai ứng dụng lên AWS, đảm bảo các yếu tố Best Practice của AWS.</li>
+    <li><strong>Implement được một pipeline CI/CD</strong> trên hệ thống đã triển khai.</li>
+    <li><strong>Troubleshoot được các lỗi</strong> (nếu có) trong quá trình deploy.</li>
+    <li><strong>Tự tin áp dụng</strong> vào các dự án Cloud thực tế trong tương lai.</li>
+  </ul>
+
+  <h2 class="section-heading">Đề bài</h2>
+  <div class="alert alert-info">
+    <strong>Ứng dụng mẫu:</strong> repository được cung cấp sẵn ở link sau
+    <br/>
+    <a href="https://github.com/hoanglinhdigital/react-spring-mongo-full-stack-demo" target="_blank" rel="noopener">
+      https://github.com/hoanglinhdigital/react-spring-mongo-full-stack-demo
+    </a>
+  </div>
+  <p class="body-text">Ứng dụng là một hệ thống full-stack gồm 3 thành phần:</p>
+  <ul class="feature-list">
+    <li><strong>Frontend:</strong> React (chạy bằng Node.js/nginx).</li>
+    <li><strong>Backend:</strong> Spring Boot (Java), expose REST API.</li>
+    <li><strong>Database:</strong> MongoDB.</li>
+  </ul>
+
+  <p class="body-text">Các việc bạn cần thực hiện:</p>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Đọc hiểu project</strong>
+        <p>Đọc kỹ file <code>README</code> của repository để hiểu rõ cấu trúc project, cách chạy ứng dụng ở local và các thành phần cần thiết.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Thiết kế hệ thống</strong>
+        <p>Tạo các sơ đồ <strong>Network</strong>, <strong>Security</strong>, <strong>Resources</strong>. Sử dụng <strong>PowerPoint</strong> hoặc <strong>Draw.io</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Triển khai lên AWS</strong>
+        <p>Triển khai hệ thống lên AWS theo các bước trong file <code>README</code>. Có thể sử dụng <strong>Terraform</strong> hoặc thực hiện <strong>step-by-step</strong> trên AWS Console.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Triển khai CI/CD</strong>
+        <p>Triển khai pipeline CI/CD cho hệ thống, sử dụng <strong>Jenkins</strong> hoặc <strong>AWS CodePipeline</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Chụp lại kết quả</strong>
+        <p>Capture (chụp màn hình) các thành phần được tạo ra trên AWS và kết quả chạy thành công của ứng dụng.</p>
+      </div>
+    </li>
+  </ol>
+  <div class="alert alert-warning">
+    <strong>Lưu ý quan trọng:</strong> các thiết kế (sơ đồ) &amp; Evidence (ảnh chụp màn hình kết quả) cần được <strong>dán trực tiếp</strong> vào file bài nộp của bạn.
+  </div>
+
+  <h2 class="section-heading">Cấu trúc bài nộp (template)</h2>
+  <p class="body-text">
+    Bài nộp nên được tổ chức theo cấu trúc sau (mỗi phần là một mục riêng trong file PowerPoint/Word/Draw.io của bạn):
+  </p>
+  <table class="compare-table">
+    <thead><tr><th>#</th><th>Phần</th><th>Nội dung cần có</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><strong>Thiết kế hệ thống – Networking</strong></td><td>Sơ đồ mạng: VPC, subnet (public/private), AZ, IGW, NAT Gateway, route table.</td></tr>
+      <tr><td>2</td><td><strong>Thiết kế hệ thống – Security</strong></td><td>Sơ đồ Security Groups, luồng traffic được phép giữa các tầng, IAM role cần thiết.</td></tr>
+      <tr><td>3</td><td><strong>Thiết kế – Services and Resources</strong></td><td>Liệt kê các dịch vụ AWS sẽ dùng (ECR, ECS, ALB, EC2, VPC...) và vai trò từng dịch vụ.</td></tr>
+      <tr><td>4</td><td><strong>Thiết kế – CI/CD</strong></td><td>Sơ đồ pipeline CI/CD (Jenkins hoặc CodePipeline): Source → Build → Deploy.</td></tr>
+      <tr><td>5</td><td><strong>Kết quả triển khai trên AWS</strong></td><td>Ảnh chụp các resource đã tạo và ứng dụng chạy thành công.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Tiêu chí đánh giá</h2>
+  <p class="body-text">Để tự đánh giá (và cũng là tiêu chí chấm điểm), hãy kiểm tra xem bài của bạn đã đáp ứng các điểm sau chưa:</p>
+  <ul class="feature-list">
+    <li><strong>Tính hoàn chỉnh của thiết kế:</strong> đủ các sơ đồ Networking, Security, Resources, CI/CD; mô tả đúng luồng dữ liệu.</li>
+    <li><strong>Best Practice về mạng:</strong> public subnet cho ALB, private subnet cho backend/database; dùng NAT Gateway cho private subnet truy cập Internet; multi-AZ.</li>
+    <li><strong>Best Practice về bảo mật:</strong> Security Group chaining (SG này làm source của SG khác), least privilege cho IAM, không mở port thừa ra Internet.</li>
+    <li><strong>Tính khả thi khi triển khai:</strong> hệ thống thực sự chạy được, ứng dụng truy cập thành công.</li>
+    <li><strong>CI/CD hoạt động:</strong> push code → pipeline tự build &amp; deploy thành công.</li>
+    <li><strong>Evidence đầy đủ:</strong> ảnh chụp các resource và kết quả chạy rõ ràng.</li>
+  </ul>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã hoàn thành các section về <strong>AWS cơ bản, Terraform, Docker, ECS</strong> (và Jenkins/CodePipeline tuỳ công cụ CI/CD bạn chọn).</li>
+    <li>Tài khoản AWS có quyền tạo VPC, EC2, ECR, ECS, ALB... (khuyến nghị dùng IAM User <code>PowerUserAccess</code>, <strong>không</strong> dùng root).</li>
+    <li>Công cụ: Git, VS Code, AWS CLI, Terraform, Docker, và (tuỳ chọn) Draw.io.</li>
+    <li>Một cặp EC2 key pair để SSH vào máy chạy MongoDB khi cần troubleshoot.</li>
+  </ul>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-warning">
+    <strong>Chi phí:</strong> hạ tầng trong bài này (ALB, NAT Gateway, ECS Fargate, EBS, Elastic IP) <strong>tính phí theo giờ</strong>
+    kể cả khi không dùng. Hãy lên kế hoạch làm bài gọn trong 1–2 buổi và <code>terraform destroy</code> / xoá resource ngay sau khi chụp xong evidence.
+  </div>
+  <div class="alert alert-info">
+    <strong>Đây là bài tập mở:</strong> không có một "đáp án duy nhất". Điều quan trọng là bạn <em>hiểu lý do</em> đằng sau mỗi quyết định thiết kế.
+    Các chương tiếp theo cung cấp <em>đáp án mẫu phần thiết kế</em> và <em>hướng dẫn triển khai</em> để bạn tham khảo — đừng copy nguyên xi mà hãy tự điều chỉnh cho hợp lý.
+  </div>
+
+</body>
+</html>

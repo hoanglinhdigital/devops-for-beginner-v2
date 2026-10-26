@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các khái niệm cơ bản & vòng đời EC2 – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Computing service – EC2</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các khái niệm cơ bản &amp; vòng đời EC2</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Trước khi tạo EC2 đầu tiên, bạn cần nắm một vài khái niệm sẽ gặp liên tục trên AWS Console: <strong>AMI, Instance, Instance type, EBS Volume, Snapshot, Key pair</strong>.
+    Chương này cũng giới thiệu <strong>vòng đời (life cycle)</strong> của một instance: các trạng thái và thao tác chuyển trạng thái, cùng với ảnh hưởng của chúng tới dữ liệu và chi phí.
+  </p>
+
+  <h2 class="section-heading">Các khái niệm chính</h2>
+  <ul class="feature-list">
+    <li><strong>AMI (Amazon Machine Image):</strong> giống một file ISO/Ghost chứa toàn bộ hệ điều hành và phần mềm cài sẵn. EC2 được khởi động từ một AMI, tương tự việc cài Windows lần đầu cho PC. Bạn có thể dùng AMI của AWS, của Marketplace, hoặc tự tạo AMI từ instance đang chạy.</li>
+    <li><strong>Instance:</strong> một máy chủ ảo được cấp phát tài nguyên CPU, RAM, GPU... Mỗi dòng instance có giới hạn nhất định về tài nguyên và hiệu năng.</li>
+    <li><strong>Instance type:</strong> "cấu hình" của instance, ví dụ <code>t3.micro</code> (2 vCPU, 1 GB RAM), <code>m7i.large</code> (2 vCPU, 8 GB RAM).</li>
+    <li><strong>EBS Volume:</strong> ổ cứng ảo do AWS cấp phát. Chỉ đọc được dữ liệu khi được gắn (attach) vào một instance.</li>
+    <li><strong>Snapshot:</strong> ảnh chụp của một EBS Volume tại một thời điểm, dùng để phục hồi dữ liệu khi có sự cố hoặc tạo volume mới.</li>
+    <li><strong>Key pair:</strong> cặp khoá public/private dùng để đăng nhập SSH vào Linux hoặc giải mã mật khẩu Administrator của Windows.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc: quan hệ giữa các thành phần</h2>
+  <div class="mermaid">
+  flowchart LR
+      AMI["💿 <b>AMI</b><br/>Amazon Linux 2023"]
+      subgraph AZ["Availability Zone ap-southeast-1a"]
+          EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:40px;height:40px;'/><br/><b>EC2 Instance</b><br/>t3.micro"]
+          Root["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:32px;height:32px;'/><br/>EBS Root volume"]
+          Data["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:32px;height:32px;'/><br/>EBS Data volume"]
+      end
+      Snap["📸 <b>Snapshot</b>"]
+      NewAMI["💿 <b>AMI tự tạo</b>"]
+      AMI -->|"Launch"| EC2
+      EC2 --- Root
+      EC2 --- Data
+      Root -->|"Create snapshot"| Snap
+      EC2 -->|"Create image"| NewAMI
+      NewAMI -.->|"Launch instance mới"| EC2
+  </div>
+  <p class="arch-caption">Instance được launch từ AMI, gắn một ổ root và có thể thêm ổ data. Từ volume có thể tạo snapshot; từ instance có thể tạo AMI mới để nhân bản server.</p>
+
+  <h2 class="section-heading">Instance type (Instance class)</h2>
+  <p class="body-text">
+    Tên instance type có dạng <code>&lt;family&gt;&lt;generation&gt;&lt;thuộc tính&gt;.&lt;size&gt;</code>. Ví dụ <code>m7g.large</code>: family <strong>m</strong> (general purpose), thế hệ <strong>7</strong>,
+    thuộc tính <strong>g</strong> (chip Graviton – ARM), kích thước <strong>large</strong>. Một số ký hiệu thuộc tính hay gặp: <code>g</code> = Graviton, <code>a</code> = AMD, <code>i</code> = Intel, <code>d</code> = có ổ instance store, <code>n</code> = network cao.
+  </p>
+  <div class="instance-grid">
+    <div class="instance-card">
+      <div class="family">T, M</div>
+      <div class="subtitle">General Purpose</div>
+      <ul>
+        <li>Cân bằng CPU/RAM</li>
+        <li>Web server, app server, môi trường dev</li>
+        <li>T là dòng "burstable": rẻ, dùng CPU credit</li>
+      </ul>
+    </div>
+    <div class="instance-card">
+      <div class="family">C</div>
+      <div class="subtitle">Compute Optimized</div>
+      <ul>
+        <li>Tỷ lệ CPU cao</li>
+        <li>Batch processing, encode video, game server</li>
+      </ul>
+    </div>
+    <div class="instance-card">
+      <div class="family">R, X</div>
+      <div class="subtitle">Memory Optimized</div>
+      <ul>
+        <li>Tỷ lệ RAM cao</li>
+        <li>Database, in-memory cache, phân tích dữ liệu lớn</li>
+      </ul>
+    </div>
+    <div class="instance-card">
+      <div class="family">I, D</div>
+      <div class="subtitle">Storage Optimized</div>
+      <ul>
+        <li>Ổ instance store NVMe tốc độ rất cao</li>
+        <li>NoSQL, data warehouse, log processing</li>
+      </ul>
+    </div>
+    <div class="instance-card">
+      <div class="family">P, G, Inf, Trn</div>
+      <div class="subtitle">Accelerated Computing</div>
+      <ul>
+        <li>Có GPU hoặc chip chuyên dụng</li>
+        <li>Train/inference AI, đồ hoạ, render</li>
+      </ul>
+    </div>
+  </div>
+  <p class="body-text">Danh sách đầy đủ và thông số chi tiết: <a href="https://aws.amazon.com/ec2/instance-types/" target="_blank" rel="noopener">aws.amazon.com/ec2/instance-types</a>.</p>
+
+  <h2 class="section-heading">Vòng đời (Life cycle) của EC2</h2>
+  <div class="mermaid">
+  flowchart LR
+      AMI["💿 AMI"] -->|"Launch"| Pending["⏳ pending"]
+      Pending --> Running["🟢 running"]
+      Running -->|"Reboot"| Rebooting["🔄 rebooting"]
+      Rebooting --> Running
+      Running -->|"Stop"| Stopping["🟠 stopping"]
+      Stopping --> Stopped["⏸️ stopped"]
+      Stopped -->|"Start"| Pending
+      Running -->|"Terminate"| ShuttingDown["🔴 shutting-down"]
+      Stopped -->|"Terminate"| ShuttingDown
+      ShuttingDown --> Terminated["⚫ terminated"]
+  </div>
+  <p class="arch-caption">Các trạng thái của một EC2 instance sử dụng ổ root EBS (mặc định).</p>
+
+  <table class="req-table">
+    <thead>
+      <tr><th>Trạng thái / Thao tác</th><th>Tính tiền instance?</th><th>Ghi chú</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>running</strong></td><td>Có</td><td>Instance đang chạy.</td></tr>
+      <tr><td><strong>Reboot</strong></td><td>Có</td><td>Giống restart máy tính. Giữ nguyên IP public, dữ liệu trên ổ đĩa.</td></tr>
+      <tr><td><strong>stopped</strong></td><td>Không (nhưng vẫn tính tiền EBS, Elastic IP)</td><td>Giống tắt máy. Khi Start lại, instance có thể chạy trên host khác và <strong>đổi IP public</strong>.</td></tr>
+      <tr><td><strong>terminated</strong></td><td>Không</td><td>Xoá vĩnh viễn, <strong>không thể phục hồi</strong>. Ổ EBS bị xoá hay không tuỳ thiết lập <em>Delete on termination</em>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Các thao tác cơ bản đối với EC2</h3>
+  <div class="two-col">
+    <div class="card">
+      <h4>Với instance</h4>
+      <ul class="feature-list">
+        <li>Launch / Reboot / Stop / Start / Terminate instance</li>
+        <li>Thay đổi instance type (cần Stop trước)</li>
+        <li>Create AMI (image) từ instance</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>Gắn / gỡ tài nguyên</h4>
+      <ul class="feature-list">
+        <li>Attach / Detach EBS Volume</li>
+        <li>Attach / Detach Elastic IP</li>
+        <li>Attach / Detach Security Group</li>
+        <li>Attach / Detach IAM Role</li>
+        <li>Create Snapshot từ Volume</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="section-subheading">Vòng đời của EC2 dùng ổ instance store</h3>
+  <p class="body-text">
+    Ngoài EBS, EC2 hỗ trợ loại ổ <strong>instance store</strong>: ổ đĩa gắn trực tiếp trên máy host vật lý. Ưu điểm là <strong>IOPS rất cao</strong>, nhưng <strong>dữ liệu sẽ mất</strong> khi instance stop, terminate hoặc phần cứng host bị lỗi.
+    Phù hợp cho dữ liệu tạm, cache, buffer cần tốc độ đọc ghi cao.
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      AMI["💿 AMI (instance-store backed)"] -->|"Launch"| Pending["⏳ pending"]
+      Pending --> Running["🟢 running"]
+      Running -->|"Reboot"| Rebooting["🔄 rebooting"]
+      Rebooting --> Running
+      Running -->|"Terminate"| ShuttingDown["🔴 shutting-down"]
+      ShuttingDown --> Terminated["⚫ terminated"]
+  </div>
+  <div class="alert alert-warning">
+    <strong>Lưu ý #1:</strong> chỉ một số AMI và instance type nhất định hỗ trợ root volume là instance store.<br/>
+    <strong>Lưu ý #2:</strong> instance dùng root volume là instance store <strong>không thể Stop</strong> (chỉ có Launch, Reboot, Terminate).
+  </div>
+
+  <h2 class="section-heading">Trade-off: EBS vs Instance store</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>EBS Volume</th><th>Instance store</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Độ bền dữ liệu</td><td>Bền vững, tồn tại độc lập với instance</td><td>Mất khi stop/terminate</td></tr>
+      <tr><td>Hiệu năng</td><td>Tốt, có thể chọn IOPS</td><td>Rất cao (gắn trực tiếp)</td></tr>
+      <tr><td>Snapshot / backup</td><td>Có</td><td>Không</td></tr>
+      <tr><td>Thay đổi dung lượng</td><td>Tăng được khi đang chạy</td><td>Cố định theo instance type</td></tr>
+      <tr><td>Nên dùng khi</td><td>Ổ root, dữ liệu quan trọng</td><td>Cache, dữ liệu tạm</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Nhân bản server bằng AMI</h4>
+      <p>Cài đặt và cấu hình một web server hoàn chỉnh, tạo AMI, rồi launch thêm nhiều instance giống hệt để chạy sau Load Balancer.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Stop instance ngoài giờ làm việc</h4>
+      <p>Môi trường dev/test chỉ cần chạy 8h/ngày. Stop instance buổi tối giúp tiết kiệm tới ~65% chi phí instance.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Backup trước khi nâng cấp</h4>
+      <p>Tạo snapshot ổ root trước khi update OS hoặc ứng dụng. Nếu có lỗi, tạo lại volume từ snapshot để quay về trạng thái cũ.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Termination protection:</strong> với server quan trọng, hãy bật <em>Termination protection</em> để tránh xoá nhầm instance.
+  </div>
+  <div class="alert alert-info">
+    <strong>Free Tier:</strong> tài khoản mới có thể dùng một số instance type nhỏ (như <code>t3.micro</code>) trong phạm vi Free Tier. Điều kiện Free Tier thay đổi theo thời gian, hãy kiểm tra trang Billing của tài khoản.
+  </div>
+
+</body>
+</html>

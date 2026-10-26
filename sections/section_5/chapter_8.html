@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: Chia module &amp; liên kết module bằng Output – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: Chia module &amp; liên kết module bằng Output</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu khái niệm <strong>module</strong> trong Terraform, cách phân chia module và tổ chức thư mục.</li>
+    <li>Tách resource của bài lab trước thành 2 module: <code>security</code> và <code>compute</code>.</li>
+    <li>Dùng <strong>output của module này làm input của module khác</strong> để liên kết các module.</li>
+    <li>Deploy AWS resource sử dụng module (vẫn dùng Default VPC).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến thức cần nắm</h2>
+  <p class="body-text">
+    <strong>Module</strong> là một thư mục chứa các file <code>.tf</code>. Thư mục bạn chạy lệnh <code>terraform</code> gọi là <strong>root module</strong>; các module được root gọi tới là <strong>child module</strong>.
+    Mỗi module giống như một "hàm": nhận <strong>input</strong> qua <code>variable</code>, trả về <strong>output</strong> qua <code>output</code>. Module bên ngoài chỉ nhìn thấy những gì được khai báo trong output.
+  </p>
+  <pre class="code-block"><code class="language-hcl">module "security" {
+  source = "./modules/security"   # đường dẫn tới thư mục module (local, Git, Registry...)
+  vpc_id = "vpc-xxxx"             # truyền giá trị cho variable "vpc_id" của module
+}
+
+# Đọc output của module: module.&lt;tên module&gt;.&lt;tên output&gt;
+module.security.public_security_group_id</code></pre>
+  <div class="alert alert-info"><strong>Best practice:</strong> chỉ khai báo khối <code>provider</code> ở root module. Child module tự động kế thừa provider từ root, giúp cùng một module có thể deploy ở nhiều region khác nhau (sẽ áp dụng ở Lab 10).</div>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Root["📁 Root module (lab5_modules)"]
+          direction LR
+          subgraph Sec["📦 module security"]
+              SG1["🛡️ public SG<br/>22, 80, 443"]
+              SG2["🛡️ private SG<br/>80, 3306 từ public SG"]
+          end
+          subgraph Comp["📦 module compute"]
+              EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:40px;height:40px;'/><br/><b>EC2</b>"]
+              EIP["📌 Elastic IP"]
+          end
+          KP["🔑 aws_key_pair"]
+          AMI["💿 data aws_ami"]
+          Sec -->|"output<br/>public_security_group_id"| Comp
+          KP -->|"key_name"| Comp
+          AMI -->|"image_id"| Comp
+      end
+      Root -->|"apply"| AWS["☁️ <b>AWS</b><br/>Default VPC"]
+  </div>
+  <p class="arch-caption">Module <code>security</code> trả về ID của Security Group qua output; root module truyền giá trị đó vào input <code>ec2_security_group_ids</code> của module <code>compute</code>.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 4 (đã destroy resource), hiểu về variable và output.</li>
+    <li>Keypair tại <code>~/terraform-labs/keypair/</code>, region <code>ap-southeast-1</code> có Default VPC.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo cấu trúc thư mục</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab5_modules/modules/security
+mkdir -p ~/terraform-labs/lab5_modules/modules/compute
+cd ~/terraform-labs/lab5_modules
+code .</code></pre>
+        <p>Cấu trúc thư mục cần đạt được sau khi hoàn thành các bước tiếp theo:</p>
+        <pre class="file-tree"><span class="dir">lab5_modules/</span>                 <span class="desc"># root module</span>
+├── <span class="file">main.tf</span>
+├── <span class="file">variable.tf</span>
+├── <span class="file">output.tf</span>
+├── <span class="file">terraform.tfvars</span>
+└── <span class="dir">modules/</span>
+    ├── <span class="dir">security/</span>
+    │   ├── <span class="file">main.tf</span>
+    │   ├── <span class="file">variable.tf</span>
+    │   └── <span class="file">output.tf</span>
+    └── <span class="dir">compute/</span>
+        ├── <span class="file">main.tf</span>
+        ├── <span class="file">variable.tf</span>
+        └── <span class="file">output.tf</span></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo module security</strong>
+        <p>Module gồm 2 Security Group. <code>private-security-group</code> chỉ nhận traffic từ <code>public-security-group</code> (kỹ thuật <strong>SG chaining</strong> đã học ở Section 4). Biến <code>vpc_id</code> mặc định là <code>null</code> → dùng Default VPC; ở Lab 6 ta sẽ truyền VPC tự tạo vào.</p>
+        <p class="code-note">📄 <code>lab5_modules/modules/security/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl"># Security Group cho tầng public (web server)
+resource "aws_security_group" "public_security_group" {
+  name        = "public-security-group"
+  description = "Allow HTTP, HTTPS, SSH from Internet"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Security Group cho tầng private: chỉ nhận traffic từ public SG (SG chaining)
+resource "aws_security_group" "private_security_group" {
+  name        = "private-security-group"
+  description = "Allow traffic from public security group only"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.public_security_group.id]
+  }
+
+  ingress {
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.public_security_group.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}</code></pre>
+        <p class="code-note">📄 <code>lab5_modules/modules/security/variable.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "vpc_id" {
+  type        = string
+  description = "VPC ID. Để null sẽ dùng Default VPC"
+  default     = null
+}</code></pre>
+        <p class="code-note">📄 <code>lab5_modules/modules/security/output.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "public_security_group_id" {
+  value = aws_security_group.public_security_group.id
+}
+
+output "private_security_group_id" {
+  value = aws_security_group.private_security_group.id
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo module compute</strong>
+        <p>Module không tự tạo Security Group hay key pair mà nhận chúng qua input — giúp module độc lập và dễ tái sử dụng.</p>
+        <p class="code-note">📄 <code>lab5_modules/modules/compute/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">resource "aws_instance" "demo_instance" {
+  ami                    = var.image_id
+  instance_type          = var.instance_type
+  key_name               = var.key_name
+  subnet_id              = var.subnet_id
+  vpc_security_group_ids = var.ec2_security_group_ids
+
+  tags = {
+    Name = "Udemy Demo"
+  }
+}
+
+resource "aws_eip" "demo_eip" {
+  instance = aws_instance.demo_instance.id
+  domain   = "vpc"
+}</code></pre>
+        <p class="code-note">📄 <code>lab5_modules/modules/compute/variable.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "image_id" {
+  type        = string
+  description = "The id of the machine image (AMI) to use for the server."
+}
+
+variable "instance_type" {
+  type        = string
+  description = "Type of EC2 instance to launch. Example: t3.micro"
+  default     = "t3.micro"
+}
+
+variable "key_name" {
+  type        = string
+  description = "Name of the keypair to use for the instance"
+  nullable    = false
+}
+
+variable "subnet_id" {
+  type        = string
+  description = "Subnet ID để launch EC2. Để null sẽ dùng default subnet"
+  default     = null
+}
+
+variable "ec2_security_group_ids" {
+  type     = list(string)
+  nullable = false
+}</code></pre>
+        <p class="code-note">📄 <code>lab5_modules/modules/compute/output.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "instance_public_ip" {
+  value = aws_eip.demo_eip.public_ip
+}
+
+output "instance_private_ip" {
+  value = aws_instance.demo_instance.private_ip
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo root module</strong>
+        <p>Root module khai báo provider, gọi 2 module và nối chúng với nhau. Output ở root "chuyển tiếp" output của các module con để hiển thị ra ngoài.</p>
+        <p class="code-note">📄 <code>lab5_modules/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+}
+
+# Provider chỉ khai báo ở root module, các sub-module sẽ kế thừa
+provider "aws" {
+  region = var.region
+}
+
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+resource "aws_key_pair" "udemy_keypair" {
+  key_name   = "udemy-keypair"
+  public_key = file(var.keypair_path)
+}
+
+module "security" {
+  source = "./modules/security"
+}
+
+module "compute" {
+  source        = "./modules/compute"
+  image_id      = data.aws_ami.amazon_linux.id
+  instance_type = var.instance_type
+  key_name      = aws_key_pair.udemy_keypair.key_name
+  # Output của module security trở thành input của module compute
+  ec2_security_group_ids = [module.security.public_security_group_id]
+}</code></pre>
+        <p class="code-note">📄 <code>lab5_modules/variable.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "region" {
+  type    = string
+  default = "ap-southeast-1"
+}
+
+variable "instance_type" {
+  type        = string
+  description = "Type of EC2 instance to launch. Example: t3.micro"
+  default     = "t3.micro"
+}
+
+variable "keypair_path" {
+  type    = string
+  default = "../keypair/udemy-key.pub"
+}</code></pre>
+        <p class="code-note">📄 <code>lab5_modules/output.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">output "instance_public_ip" {
+  value = module.compute.instance_public_ip
+}
+
+output "instance_private_ip" {
+  value = module.compute.instance_private_ip
+}
+
+output "public_security_group_id" {
+  value = module.security.public_security_group_id
+}
+
+output "private_security_group_id" {
+  value = module.security.private_security_group_id
+}</code></pre>
+        <p class="code-note">📄 <code>lab5_modules/terraform.tfvars</code></p>
+        <pre class="code-block"><code class="language-hcl">region        = "ap-southeast-1"
+instance_type = "t3.micro"
+keypair_path  = "../keypair/udemy-key.pub"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Init và deploy</strong>
+        <p><code>terraform init</code> sẽ hiển thị thêm dòng <em>Initializing modules...</em>. Mỗi khi thêm module mới hoặc đổi <code>source</code> của module, bạn cần chạy lại <code>init</code>.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform init
+terraform plan
+terraform apply -auto-approve</code></pre>
+        <p>Trong output của plan, địa chỉ resource có tiền tố module, ví dụ <code>module.compute.aws_instance.demo_instance</code>. Xem danh sách resource Terraform đang quản lý:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform state list</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Kiểm tra trên AWS Console</strong>
+        <ul class="feature-list">
+          <li><strong>EC2 → Security Groups</strong>: có <code>public-security-group</code> và <code>private-security-group</code>; inbound của private SG có source là ID của public SG.</li>
+          <li><strong>EC2 → Instances</strong>: instance <code>Udemy Demo</code> gắn <code>public-security-group</code>, public IP bằng output <code>instance_public_ip</code>.</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>terraform state list</code> hiển thị resource thuộc <code>module.security</code> và <code>module.compute</code>.</li>
+      <li>EC2 sử dụng đúng Security Group lấy từ output của module security.</li>
+      <li>SSH được vào EC2: <code>ssh -i ../keypair/udemy-key ec2-user@$(terraform output -raw instance_public_ip)</code></li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Module not installed</code> / <code>Module source has changed</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thêm module hoặc đổi <code>source</code> nhưng chưa chạy lại init.<br/><strong>Giải pháp:</strong> Chạy <code>terraform init</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unsupported argument: An argument named "xxx" is not expected here</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Truyền vào module một tham số mà module không khai báo variable tương ứng.<br/><strong>Giải pháp:</strong> Thêm <code>variable "xxx"</code> trong <code>variable.tf</code> của module, hoặc bỏ tham số.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unsupported attribute: This object does not have an attribute named "..."</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Đọc <code>module.xxx.yyy</code> nhưng module không có output <code>yyy</code>.<br/><strong>Giải pháp:</strong> Khai báo output trong <code>output.tf</code> của module con.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Luôn xoá resource sau khi thực hành để tránh phát sinh chi phí (Elastic IP tính phí theo giờ).</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+
+</body>
+</html>

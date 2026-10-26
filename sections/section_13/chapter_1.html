@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Serverless và AWS SAM là gì? – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Serverless và AWS SAM là gì?</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu section</h2>
+  <p class="body-text">Trong Section 4 bạn đã làm quen với Lambda, API Gateway và DynamoDB bằng AWS Console. Khi ứng dụng có nhiều function, nhiều API, nhiều môi trường thì thao tác thủ công không còn phù hợp. Section này hướng dẫn bạn <strong>định nghĩa và triển khai toàn bộ ứng dụng serverless bằng code</strong> với AWS SAM:</p>
+  <ul class="feature-list">
+    <li>Hiểu serverless application là gì và AWS SAM giải quyết vấn đề gì so với CloudFormation thuần.</li>
+    <li>Đọc, viết được <code>template.yaml</code> và sử dụng thành thạo các lệnh <code>sam init / build / deploy / local / logs / sync / delete</code>.</li>
+    <li>Triển khai ứng dụng <strong>URL Shortener</strong> (API Gateway + Lambda + DynamoDB) chỉ bằng vài lệnh.</li>
+    <li>Triển khai an toàn (<strong>canary</strong>) cho Lambda với CodeDeploy và tự động rollback bằng CloudWatch Alarm.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Serverless</strong> là mô hình trong đó bạn chỉ viết code và cấu hình; AWS lo toàn bộ việc cấp phát, mở rộng và vá lỗi server.
+    Một ứng dụng serverless điển hình ghép nhiều dịch vụ managed: API Gateway nhận request, Lambda xử lý, DynamoDB lưu dữ liệu, SQS/SNS/EventBridge kết nối sự kiện.
+    <strong>AWS Serverless Application Model (SAM)</strong> là một framework mã nguồn mở, là <strong>phần mở rộng của CloudFormation</strong>, cho phép mô tả cả ứng dụng ấy trong một file YAML ngắn gọn,
+    kèm <strong>SAM CLI</strong> để build, test ở local và deploy.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Cú pháp rút gọn:</strong> vài dòng <code>AWS::Serverless::Function</code> được SAM tự mở rộng thành Lambda + IAM Role + API Gateway + permission, tiết kiệm hàng trăm dòng CloudFormation.</li>
+    <li><strong>Là CloudFormation:</strong> template SAM là template CloudFormation có thêm <code>Transform</code>; có thể trộn lẫn resource CloudFormation thông thường (DynamoDB, SNS, S3...).</li>
+    <li><strong>SAM CLI mạnh mẽ:</strong> build, đóng gói, upload S3, deploy, xem log, đồng bộ code nhanh chỉ với các lệnh ngắn.</li>
+    <li><strong>Test ở local:</strong> chạy Lambda và giả lập API Gateway ngay trên máy bằng container Docker giống môi trường Lambda thật.</li>
+    <li><strong>Policy templates:</strong> khai báo quyền tối thiểu bằng tên ngắn gọn như <code>DynamoDBReadPolicy</code>, <code>S3ReadPolicy</code> thay vì tự viết JSON policy.</li>
+    <li><strong>Safe deployment:</strong> chỉ cần vài dòng cấu hình để deploy Lambda theo Canary/Linear qua CodeDeploy và tự rollback.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">Luồng từ code đến hạ tầng</h3>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/developer.svg' style='width:36px;height:36px;'/><br/>Developer<br/>template.yaml + code"]
+      CLI["<img src='../../assets/aws-svg/Command-Line-Interface.svg' style='width:36px;height:36px;'/><br/>SAM CLI<br/>sam build · sam deploy"]
+      S3["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>S3 bucket<br/>deployment package"]
+      CFN["<img src='../../assets/aws-svg/CloudFormation.svg' style='width:36px;height:36px;'/><br/>CloudFormation<br/>Transform: Serverless"]
+      subgraph Stack["Stack: các resource được tạo"]
+          APIGW["<img src='../../assets/aws-svg/API-Gateway.svg' style='width:34px;height:34px;'/><br/>API Gateway"]
+          FN["<img src='../../assets/aws-svg/Lambda.svg' style='width:34px;height:34px;'/><br/>Lambda"]
+          DDB["<img src='../../assets/aws-svg/DynamoDB.svg' style='width:34px;height:34px;'/><br/>DynamoDB"]
+          IAM["<img src='../../assets/aws-svg/IAM.svg' style='width:34px;height:34px;'/><br/>IAM Role"]
+      end
+      Dev --> CLI
+      CLI -->|"upload code"| S3
+      CLI -->|"submit template"| CFN
+      CFN -->|"mở rộng & tạo"| Stack
+      APIGW --> FN
+      FN --> DDB
+      IAM -.-> FN
+  </div>
+  <p class="arch-caption">SAM CLI đóng gói code lên S3, gửi template cho CloudFormation. Transform <code>AWS::Serverless-2016-10-31</code> mở rộng các resource <code>AWS::Serverless::*</code> thành resource CloudFormation chuẩn.</p>
+
+  <h3 class="section-subheading">Các resource SAM thường dùng</h3>
+  <table class="compare-table">
+    <thead><tr><th>Resource SAM</th><th>Mục đích</th><th>Resource CloudFormation được sinh ra</th></tr></thead>
+    <tbody>
+      <tr><td><code>AWS::Serverless::Function</code></td><td>Lambda function + event source</td><td>Lambda Function, IAM Role, Lambda Permission, API Gateway / event mapping, Alias &amp; Version (nếu có)</td></tr>
+      <tr><td><code>AWS::Serverless::Api</code></td><td>REST API (API Gateway v1)</td><td>RestApi, Deployment, Stage</td></tr>
+      <tr><td><code>AWS::Serverless::HttpApi</code></td><td>HTTP API (API Gateway v2) – rẻ và nhanh hơn</td><td>Api (v2), Stage, Integration</td></tr>
+      <tr><td><code>AWS::Serverless::SimpleTable</code></td><td>DynamoDB table chỉ có primary key</td><td>DynamoDB Table</td></tr>
+      <tr><td><code>AWS::Serverless::LayerVersion</code></td><td>Lambda Layer dùng chung thư viện</td><td>Lambda LayerVersion</td></tr>
+      <tr><td><code>AWS::Serverless::StateMachine</code></td><td>Step Functions workflow</td><td>State Machine, IAM Role</td></tr>
+      <tr><td><code>AWS::Serverless::Application</code></td><td>Nhúng ứng dụng khác (nested / Serverless Application Repository)</td><td>Nested Stack</td></tr>
+    </tbody>
+  </table>
+  <p class="code-note">💡 Mọi resource CloudFormation khác (<code>AWS::DynamoDB::Table</code>, <code>AWS::SNS::Topic</code>, <code>AWS::CloudWatch::Alarm</code>...) đều dùng được trong cùng template SAM.</p>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Template ngắn, dễ đọc hơn nhiều so với CloudFormation thuần cho ứng dụng serverless.</li>
+        <li>Một công cụ cho cả vòng đời: init → build → test local → deploy → log → xoá.</li>
+        <li>Tích hợp sẵn safe deployment (canary/linear) và policy templates theo best practice.</li>
+        <li>Dùng chung hệ sinh thái CloudFormation: change set, rollback, drift detection, StackSets.</li>
+        <li>Miễn phí; chỉ trả tiền cho resource tạo ra.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Chỉ dành cho AWS; không đa cloud như Terraform.</li>
+        <li>Tập trung vào serverless; hạ tầng lớn (VPC, EKS...) vẫn nên dùng Terraform / CloudFormation.</li>
+        <li>Vẫn phải hiểu CloudFormation để debug khi stack lỗi.</li>
+        <li><code>sam local</code> chỉ giả lập; hành vi có thể khác môi trường thật (IAM, timeout, network).</li>
+      </ul>
+    </div>
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>AWS SAM</th><th>CloudFormation</th><th>Terraform</th><th>AWS CDK</th></tr></thead>
+    <tbody>
+      <tr><td>Ngôn ngữ</td><td>YAML (mở rộng CFN)</td><td>YAML / JSON</td><td>HCL</td><td>TypeScript, Python, Java...</td></tr>
+      <tr><td>Phạm vi</td><td>Serverless trên AWS</td><td>Mọi dịch vụ AWS</td><td>Đa cloud</td><td>Mọi dịch vụ AWS</td></tr>
+      <tr><td>Test local</td><td>✅ <code>sam local</code></td><td>❌</td><td>❌</td><td>✅ (dùng SAM CLI)</td></tr>
+      <tr><td>Phù hợp khi</td><td>Ứng dụng Lambda + API + DB đơn giản đến vừa</td><td>Cần kiểm soát chi tiết</td><td>Hạ tầng đa cloud, nhiều dịch vụ</td><td>Team mạnh về lập trình</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>REST API cho web / mobile</h4>
+      <p>API Gateway + Lambda + DynamoDB: URL shortener, to-do, đặt chỗ... Chi phí gần bằng 0 khi không có người dùng, tự scale khi traffic tăng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Xử lý sự kiện / bất đồng bộ</h4>
+      <p>Upload ảnh lên S3 → Lambda tạo thumbnail; message từ SQS/SNS/EventBridge kích hoạt Lambda xử lý đơn hàng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Tác vụ định kỳ &amp; tự động hoá</h4>
+      <p>Lambda chạy theo lịch (EventBridge Schedule) để dọn dẹp resource, tạo báo cáo chi phí, sao lưu dữ liệu.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Chi phí:</strong> Lambda tính theo số request và thời gian chạy (có free tier hằng tháng); API Gateway tính theo số request; DynamoDB on-demand tính theo số đọc/ghi. SAM CLI không tốn phí, nhưng <code>sam deploy</code> tạo bucket S3 và stack CloudFormation (chi phí không đáng kể).</li>
+    <li><strong>Runtime:</strong> khoá học dùng Python 3.13. Luôn chọn runtime còn được AWS hỗ trợ; runtime đã deprecated sẽ không thể tạo/cập nhật function.</li>
+    <li><strong>Giới hạn Lambda cần nhớ:</strong> timeout tối đa 15 phút, bộ nhớ 128 MB – 10 GB, package zip tối đa 50 MB (250 MB sau khi giải nén). Quá giới hạn thì dùng container image.</li>
+    <li><strong>Cold start:</strong> lần gọi đầu sau thời gian không dùng cần khởi tạo môi trường; khai báo client (boto3...) bên ngoài handler để tái sử dụng khi warm start.</li>
+    <li><strong>Quan hệ với DevOps:</strong> template SAM chính là <em>Infrastructure as Code</em> cho serverless; kết hợp với CI/CD (Section 9, 10) bằng các bước <code>sam build</code> và <code>sam deploy</code> trong pipeline.</li>
+  </ul>
+
+</body>
+</html>

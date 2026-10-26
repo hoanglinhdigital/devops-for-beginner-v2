@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tại sao cần chiến lược deployment? – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">11. Chiến lược deployment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tại sao cần chiến lược deployment?</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu của section</h2>
+  <ul class="feature-list">
+    <li>Hiểu các <strong>chiến lược deployment</strong> phổ biến: In-place (All at once), Rolling update, Blue/Green, Canary (và Linear).</li>
+    <li>Phân tích được <strong>ưu – nhược điểm</strong> của từng chiến lược theo các tiêu chí: downtime, phạm vi ảnh hưởng khi lỗi, tốc độ rollback, chi phí, độ phức tạp.</li>
+    <li>Biết cách AWS hỗ trợ từng chiến lược: ECS, Elastic Beanstalk, CodeDeploy, ALB weighted target group, Route 53, <strong>RDS Blue/Green Deployments</strong>.</li>
+    <li>Tự xây dựng quy trình <strong>Blue/Green</strong> và <strong>Canary</strong> cho ECS bằng Terraform + các job Jenkins (Build, Deploy, Switch traffic, Clear resource, Canary).</li>
+    <li>Chọn được chiến lược phù hợp cho từng bài toán thực tế (và cho câu hỏi thi SAA/DVA).</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Ở Section 9 và Section 10, bạn đã tự động hoá được việc <strong>build</strong> và <strong>deploy</strong>. Nhưng “deploy được” chưa đủ:
+    khi hệ thống đang phục vụ người dùng thật, câu hỏi quan trọng là <em>thay version cũ bằng version mới như thế nào</em> để người dùng
+    không bị gián đoạn, lỗi (nếu có) chỉ ảnh hưởng ít người nhất, và có thể quay lại version cũ thật nhanh.
+    <strong>Chiến lược deployment</strong> (deployment strategy) chính là câu trả lời cho câu hỏi đó – một phần của
+    <strong>yêu cầu phi chức năng</strong> (non-functional requirement) mà DevOps Engineer cần thiết kế ngay từ đầu.
+  </p>
+
+  <h2 class="section-heading">Các yếu tố cần cân nhắc khi deployment</h2>
+  <ul class="feature-list">
+    <li><strong>Hiệu quả thông qua tự động hoá:</strong> mỗi lần release là một quy trình lặp lại được, chạy bằng pipeline/job thay vì thao tác tay.</li>
+    <li><strong>Chính xác &amp; tin cậy:</strong> đúng version, đúng môi trường, đúng cấu hình; cùng một artifact (image tag) đi từ Test lên Production.</li>
+    <li><strong>Có chiến lược testing phù hợp:</strong> kiểm thử version mới trên hạ tầng giống production trước (hoặc trong khi) mở cho người dùng.</li>
+    <li><strong>Giảm thiểu ảnh hưởng tới end-user:</strong> không downtime, hoặc nếu lỗi thì chỉ một phần nhỏ người dùng gặp phải.</li>
+    <li><strong>Khả năng khôi phục (rollback):</strong> khi version mới không hoạt động như mong đợi, quay về version cũ trong vài giây – vài phút.</li>
+    <li><strong>Chi phí &amp; độ phức tạp:</strong> chiến lược càng an toàn thường càng tốn tài nguyên và cần nhiều công cụ hơn (routing, monitoring, automation).</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình tổng quan</h2>
+  <p class="body-text">Chiến lược deployment nằm ở bước cuối của pipeline CI/CD – quyết định cách artifact mới được đưa tới người dùng:</p>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/developer.svg' style='width:36px;height:36px;'/><br/>Developer<br/>git tag v2.1.0"]
+      CI["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:36px;height:36px;'/><br/>CI<br/>Build &amp; Test"]
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR<br/>image :v2.1.0"]
+      subgraph CD["🚀 Deployment strategy"]
+          direction TB
+          S1["🟥 In-place"]
+          S2["🟧 Rolling update"]
+          S3["🟦🟩 Blue/Green"]
+          S4["🐤 Canary / Linear"]
+      end
+      Users["<img src='../../assets/aws-svg/user.svg' style='width:36px;height:36px;'/><br/>End-users"]
+      Mon["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:36px;height:36px;'/><br/>Monitoring<br/>OK? / Rollback?"]
+      Dev --> CI --> ECR --> CD --> Users
+      Users -.-> Mon
+      Mon -.->|"lỗi → rollback"| CD
+  </div>
+  <p class="arch-caption">Cùng một image, chiến lược khác nhau cho kết quả rất khác nhau về downtime, rủi ro và chi phí.</p>
+
+  <h3 class="section-subheading">4 chiến lược phổ biến (theo mức độ an toàn tăng dần)</h3>
+  <table class="compare-table">
+    <thead><tr><th>Chiến lược</th><th>Ý tưởng chính</th><th>Chương</th></tr></thead>
+    <tbody>
+      <tr><td><strong>In-place</strong> (All at once)</td><td>Thay ngay lập tức version cũ bằng version mới trên toàn bộ server, chấp nhận downtime.</td><td>Chương 2</td></tr>
+      <tr><td><strong>Rolling update</strong></td><td>Thay dần từng nhóm server/task cho tới khi tất cả chạy version mới.</td><td>Chương 2</td></tr>
+      <tr><td><strong>Blue/Green</strong></td><td>Dựng 2 môi trường song song, kiểm thử môi trường mới rồi switch <strong>100%</strong> traffic một lần.</td><td>Chương 3, 4 · Lab 1 → 4</td></tr>
+      <tr><td><strong>Canary</strong> / Linear</td><td>Chuyển một phần nhỏ traffic (vd 10%) sang version mới, theo dõi, ổn thì tăng dần lên 100%.</td><td>Chương 5 · Lab 5</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Tiêu chí đánh giá một chiến lược</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Câu hỏi cần trả lời</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Downtime</strong></td><td>Trong lúc deploy, người dùng có bị gián đoạn (lỗi 5xx, trang không truy cập được) không?</td></tr>
+      <tr><td><strong>Blast radius</strong> (phạm vi ảnh hưởng)</td><td>Nếu version mới có bug, bao nhiêu % người dùng gặp phải?</td></tr>
+      <tr><td><strong>Tốc độ rollback</strong></td><td>Mất bao lâu để quay về version cũ? Có cần build/deploy lại không?</td></tr>
+      <tr><td><strong>Chi phí tài nguyên</strong></td><td>Có phải chạy thêm (thậm chí gấp đôi) server/task trong lúc deploy không?</td></tr>
+      <tr><td><strong>Độ phức tạp</strong></td><td>Cần thêm công cụ routing (ALB, Route 53), monitoring, automation đến mức nào?</td></tr>
+      <tr><td><strong>Tính nhất quán</strong></td><td>Có thời điểm 2 version cùng phục vụ người dùng không? API và database có tương thích ngược không?</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <p class="body-text">Không có chiến lược “tốt nhất”, chỉ có chiến lược <strong>phù hợp nhất</strong> với yêu cầu và ngân sách:</p>
+  <ul class="feature-list">
+    <li><strong>An toàn hơn = tốn kém hơn:</strong> Blue/Green, Canary cần gấp đôi tài nguyên trong lúc deploy và cần công cụ chuyển traffic.</li>
+    <li><strong>Nhanh &amp; rẻ = rủi ro hơn:</strong> In-place đơn giản nhất nhưng mọi lỗi đều ảnh hưởng 100% người dùng và có downtime.</li>
+    <li><strong>Không downtime = 2 version cùng tồn tại:</strong> Rolling, Blue/Green, Canary đều yêu cầu ứng dụng và database <strong>tương thích ngược</strong>.</li>
+    <li><strong>Mỗi môi trường một chiến lược:</strong> Dev/Test có thể dùng In-place cho nhanh; Production dùng Blue/Green hoặc Canary.</li>
+  </ul>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Hệ thống nội bộ, ít người dùng</h4>
+      <p>Tool quản lý nội bộ của công ty 50 người: deploy In-place ngoài giờ hành chính, chấp nhận 1–2 phút downtime để tiết kiệm chi phí.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Website thương mại điện tử</h4>
+      <p>Không được phép downtime, cần kiểm thử version mới trên hạ tầng thật trước giờ sale: Blue/Green, switch traffic sau khi QA xác nhận.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Ứng dụng hàng triệu người dùng</h4>
+      <p>Thay đổi thuật toán gợi ý sản phẩm: Canary 5% người dùng trong 30 phút, theo dõi tỷ lệ lỗi &amp; doanh thu rồi mới mở rộng.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Deploy ≠ Release:</strong> <em>deploy</em> là đưa code lên hạ tầng; <em>release</em> là cho người dùng thấy tính năng. Blue/Green và Canary tách 2 việc này ra – deploy trước, release sau khi kiểm thử.</li>
+    <li><strong>Liên hệ Section 9:</strong> chương <em>“Các chiến lược deployment: Rolling, Blue/Green, Canary, Linear”</em> đã giới thiệu nhanh và cho bạn làm Blue/Green, Canary bằng <strong>CodeDeploy</strong>. Section này đi sâu hơn vào bản chất từng chiến lược và tự xây dựng chúng bằng <strong>Jenkins + ALB</strong> – hiểu cơ chế bên dưới để áp dụng với bất kỳ công cụ nào.</li>
+    <li><strong>Hạ tầng các bài lab:</strong> dùng lại Jenkins server (EC2) và repository <code>nodejs-random-color</code> của Section 10; Terraform stack mới gồm 1 ALB (listener <code>:80</code> production, <code>:81</code> test), 2 Target Group, 2 ECS Cluster Blue/Green.</li>
+    <li><strong>Chi phí:</strong> stack chạy 4 task Fargate + ALB; nên học liên tục Lab 1 → Lab 5 trong 1–2 buổi rồi <code>terraform destroy</code>.</li>
+  </ul>
+
+</body>
+</html>

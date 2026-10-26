@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: Nhánh release, merge vào main &amp; đánh tag – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: Nhánh release, merge vào main &amp; đánh tag</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo nhánh <code>release/v0.1</code> từ <code>develop</code> và chỉnh sửa nhỏ trước khi release (cập nhật version).</li>
+    <li>Merge <code>release/v0.1</code> vào <code>main</code> qua Pull Request.</li>
+    <li>Đánh <strong>tag</strong> <code>v0.1</code> trên <code>main</code> và push tag lên GitHub.</li>
+    <li>Merge <code>release/v0.1</code> ngược lại <code>develop</code> để đồng bộ thay đổi; tạo GitHub Release (tuỳ chọn).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  gitGraph
+      commit id: "Initial commit"
+      branch develop
+      checkout develop
+      commit id: "Lab 3"
+      commit id: "PR F001"
+      branch release/v0.1
+      checkout release/v0.1
+      commit id: "bump 0.1.0"
+      checkout main
+      merge release/v0.1 id: "PR release" tag: "v0.1"
+      checkout develop
+      merge release/v0.1 id: "back-merge"
+  </div>
+  <p class="arch-caption">Nhánh <code>release/v0.1</code> “đóng băng” các tính năng đã có trên <code>develop</code>, được merge vào <code>main</code> và gắn tag <code>v0.1</code>, sau đó merge ngược về <code>develop</code>.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 4: <code>main</code> và <code>develop</code> đã được bảo vệ bằng Ruleset, <code>develop</code> có <code>about.html</code>.</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab5_release_tag/</code> (<code>commands.sh</code>, <code>VERSION</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo nhánh release/v0.1 từ develop</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout develop
+git pull origin develop
+git checkout -b release/v0.1</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Chỉnh sửa nhỏ trước release</strong>
+        <p>Trên nhánh release chỉ nên có các thay đổi nhỏ: cập nhật số version, sửa lỗi do tester phát hiện. Copy file <code>VERSION</code> (nội dung <code>0.1.0</code>) từ source code vào thư mục gốc repository:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add VERSION
+git commit -m "chore(release): bump version to 0.1.0"
+git push -u origin release/v0.1</code></pre>
+        <p class="code-note">💡 Trong dự án thật, đây là lúc CI/CD deploy <code>release/v0.1</code> lên môi trường Test/Staging để kiểm thử.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Pull Request release/v0.1 → main</strong>
+        <p>Trên GitHub, tạo Pull Request với thông số:</p>
+        <ul class="feature-list">
+          <li>base: <code>main</code> ← compare: <code>release/v0.1</code></li>
+          <li>Title: <code>Release v0.1</code></li>
+        </ul>
+        <p>Merge PR (<em>Create a merge commit</em>). <strong>Chưa xoá</strong> nhánh <code>release/v0.1</code> vì còn dùng ở bước 5.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Đánh tag v0.1 trên main</strong>
+        <p>Cập nhật <code>main</code> ở local, sau đó tạo <strong>annotated tag</strong> (có người tạo, thời gian, message) tại commit mới nhất:</p>
+        <pre class="command-line" data-prompt="$" data-output="6"><code class="language-bash">git checkout main
+git pull origin main
+git log --oneline -5
+git tag -a v0.1 -m "Release version 0.1"
+git tag
+v0.1
+git show v0.1</code></pre>
+        <p>Tag tạo ở local, cần push riêng (lệnh <code>git push</code> thông thường không đẩy tag):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git push origin v0.1</code></pre>
+        <p class="code-note">💡 Push tag vẫn được phép dù <code>main</code> đã được bảo vệ, vì Ruleset hiện chỉ áp dụng cho branch. Trong dự án thật có thể tạo thêm <strong>tag ruleset</strong> để chỉ người có quyền release mới được tạo tag <code>v*</code>.</p>
+        <table class="compare-table">
+          <thead><tr><th>Loại tag</th><th>Lệnh</th><th>Đặc điểm</th></tr></thead>
+          <tbody>
+            <tr><td>Annotated tag</td><td><code>git tag -a v0.1 -m "..."</code></td><td>Lưu người tạo, thời gian, message. <strong>Nên dùng cho release.</strong></td></tr>
+            <tr><td>Lightweight tag</td><td><code>git tag v0.1</code></td><td>Chỉ là con trỏ tới commit, không có thông tin kèm theo</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Merge release/v0.1 ngược lại develop</strong>
+        <p>Thay đổi trên nhánh release (file <code>VERSION</code>) cần có trên <code>develop</code> để các release sau không bị thiếu. Vì <code>develop</code> được bảo vệ, tạo Pull Request với thông số:</p>
+        <ul class="feature-list">
+          <li>base: <code>develop</code> ← compare: <code>release/v0.1</code></li>
+          <li>Title: <code>Back-merge release v0.1 into develop</code></li>
+        </ul>
+        <p>Merge PR, sau đó <strong>Delete branch</strong> <code>release/v0.1</code>. Cập nhật local:</p>
+        <pre class="command-line" data-prompt="$" data-output="4"><code class="language-bash">git checkout develop
+git pull origin develop
+cat VERSION
+0.1.0
+git branch -d release/v0.1
+git fetch --prune</code></pre>
+        <p class="code-note">💡 Nếu nhánh release không có thay đổi gì so với <code>develop</code>, bước back-merge là tuỳ chọn.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6 (tuỳ chọn): Tạo GitHub Release từ tag</strong>
+        <p>Trên GitHub, mục <strong>Releases → Draft a new release</strong> với thông số:</p>
+        <ul class="feature-list">
+          <li>Tag: <code>v0.1</code></li>
+          <li>Title: <code>v0.1</code></li>
+          <li>Description: dùng <strong>Generate release notes</strong> để GitHub tự liệt kê các Pull Request trong release</li>
+        </ul>
+        <p>GitHub Release tự đính kèm file nén source code tại tag đó – hữu ích để khách hàng/đội vận hành tải đúng phiên bản.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Branch <code>main</code> trên GitHub có <code>index.html</code>, <code>about.html</code>, <code>VERSION</code>.</li>
+      <li>Mục <strong>Tags</strong> của repository có <code>v0.1</code>; chọn tag sẽ thấy đúng code tại thời điểm release.</li>
+      <li><code>develop</code> có file <code>VERSION</code> với nội dung <code>0.1.0</code>.</li>
+      <li><code>git log --oneline --graph --all --decorate</code> hiển thị <code>tag: v0.1</code> trên commit merge của <code>main</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Tag có ở local nhưng không thấy trên GitHub</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>git push</code> không tự đẩy tag.<br/><strong>Giải pháp:</strong> <code>git push origin v0.1</code> hoặc <code>git push origin --tags</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Đánh tag nhầm commit (ví dụ quên <code>git pull</code> trước khi tag)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>main</code> ở local chưa có merge commit mới nhất.<br/><strong>Giải pháp:</strong> Xoá tag ở local và remote rồi tạo lại: <code>git tag -d v0.1</code>, <code>git push origin --delete v0.1</code>, <code>git pull origin main</code>, <code>git tag -a v0.1 -m "Release version 0.1"</code>, <code>git push origin v0.1</code>. Chỉ làm khi chưa ai dùng tag đó để deploy.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>! [rejected] v0.1 -&gt; v0.1 (already exists)</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tag cùng tên đã tồn tại trên remote.<br/><strong>Giải pháp:</strong> Tag nên là bất biến – dùng version mới (<code>v0.1.1</code>) thay vì ghi đè tag cũ.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại repository và tag để dùng tiếp ở Lab 6, Lab 7. Lab không phát sinh chi phí.</div>
+
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Phân biệt CMD và ENTRYPOINT – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Phân biệt CMD và ENTRYPOINT</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Dùng <code>docker image inspect</code> để xem <code>Entrypoint</code> và <code>Cmd</code> mặc định của một image.</li>
+    <li>Build 3 image từ <code>alpine</code> với các tổ hợp <code>ENTRYPOINT</code> / <code>CMD</code> khác nhau.</li>
+    <li>Chạy container có và không có tham số, giải thích kết quả của từng trường hợp.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Base["<img src='../../assets/svg-icon/docker.svg' style='width:36px;height:36px;'/><br/>alpine:latest"]
+      D1["📄 Dockerfile-1<br/>ENTRYPOINT ls"] --> I1["🗂️ alpine-1"]
+      D2["📄 Dockerfile-2<br/>CMD ls"] --> I2["🗂️ alpine-2"]
+      D3["📄 Dockerfile-3<br/>ENTRYPOINT ls + CMD -alh"] --> I3["🗂️ alpine-3"]
+      Base --> I1
+      Base --> I2
+      Base --> I3
+      I1 --> R["▶️ docker run [tham số]"]
+      I2 --> R
+      I3 --> R
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3, đã đọc phần <strong>CMD và ENTRYPOINT</strong> trong chương Dockerfile.</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab4_cmd_entrypoint/</code> (<code>Dockerfile-1</code>, <code>Dockerfile-2</code>, <code>Dockerfile-3</code>, <code>commands.sh</code>).</li>
+  </ul>
+
+  <h3 class="section-subheading">Bảng kịch bản thực hành</h3>
+  <table class="compare-table">
+    <thead><tr><th>No</th><th>Image</th><th>ENTRYPOINT</th><th>CMD</th><th>docker run</th><th>Lệnh thực tế</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>alpine-1</code></td><td><code>["ls"]</code></td><td>N/A</td><td>không truyền tham số</td><td><code>ls</code></td></tr>
+      <tr><td>2</td><td><code>alpine-1</code></td><td><code>["ls"]</code></td><td>N/A</td><td><code>-alh</code></td><td><code>ls -alh</code></td></tr>
+      <tr><td>3</td><td><code>alpine-2</code></td><td>N/A</td><td><code>["ls"]</code></td><td>không truyền tham số</td><td><code>ls</code></td></tr>
+      <tr><td>4</td><td><code>alpine-2</code></td><td>N/A</td><td><code>["ls"]</code></td><td><code>-alh</code></td><td><code>-alh</code> → ❌ lỗi</td></tr>
+      <tr><td>5</td><td><code>alpine-3</code></td><td><code>["ls"]</code></td><td><code>["-alh"]</code></td><td>không truyền tham số</td><td><code>ls -alh</code></td></tr>
+      <tr><td>6</td><td><code>alpine-3</code></td><td><code>["ls"]</code></td><td><code>["-alh"]</code></td><td><code>-p --full-time</code></td><td><code>ls -p --full-time</code></td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Hãy thử tự đoán kết quả cột “Lệnh thực tế” trước khi thực hành, sau đó so sánh với kết quả chạy thật.</p>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Inspect image alpine</strong>
+        <p>Di chuyển vào thư mục <code>lab4_cmd_entrypoint</code>, pull image và xem <code>Entrypoint</code>, <code>Cmd</code> mặc định (dùng <code>--format</code> để lọc gọn kết quả JSON):</p>
+        <pre class="command-line" data-prompt="$" data-output="4"><code class="language-bash">cd lab4_cmd_entrypoint
+docker pull alpine:latest
+docker image inspect alpine:latest --format 'Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}'
+Entrypoint=null Cmd=["/bin/sh"]</code></pre>
+        <p>Image <code>alpine</code> không có ENTRYPOINT, CMD mặc định là <code>/bin/sh</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Chuẩn bị 3 Dockerfile</strong>
+        <p>Tạo 3 file với nội dung như sau:</p>
+        <p><code>Dockerfile-1</code></p>
+        <pre class="code-block"><code class="language-docker">FROM alpine:latest
+ENTRYPOINT ["ls"]</code></pre>
+        <p><code>Dockerfile-2</code></p>
+        <pre class="code-block"><code class="language-docker">FROM alpine:latest
+CMD ["ls"]</code></pre>
+        <p><code>Dockerfile-3</code></p>
+        <pre class="code-block"><code class="language-docker">FROM alpine:latest
+ENTRYPOINT ["ls"]
+CMD ["-alh"]</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Image alpine-1 – chỉ có ENTRYPOINT (kịch bản 1, 2)</strong>
+        <pre class="command-line" data-prompt="$" data-output="3"><code class="language-bash">docker build -t alpine-1 -f Dockerfile-1 .
+docker image inspect alpine-1 --format 'Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}'
+Entrypoint=["ls"] Cmd=null</code></pre>
+        <pre class="command-line" data-prompt="$" data-output="2-4,6-9"><code class="language-bash">docker run --rm alpine-1
+bin
+dev
+...
+docker run --rm alpine-1 -alh
+total 64K
+drwxr-xr-x    1 root     root        4.0K Oct 25 09:35 .
+drwxr-xr-x    1 root     root        4.0K Oct 25 09:35 ..
+...</code></pre>
+        <p>Tham số <code>-alh</code> được <strong>nối thêm</strong> vào sau ENTRYPOINT → <code>ls -alh</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Image alpine-2 – chỉ có CMD (kịch bản 3, 4)</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build -t alpine-2 -f Dockerfile-2 .
+docker image inspect alpine-2 --format 'Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}'
+docker run --rm alpine-2</code></pre>
+        <p>Không truyền tham số → chạy CMD mặc định <code>ls</code>. Giờ truyền tham số <code>-alh</code>:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">docker run --rm alpine-2 -alh
+docker: Error response from daemon: ... exec: "-alh": executable file not found in $PATH</code></pre>
+        <p><strong>Báo lỗi!</strong> Khi có tham số lúc run, nó <strong>ghi đè toàn bộ CMD</strong>. Docker chạy lệnh <code>-alh</code> thay vì <code>ls -alh</code> → không tìm thấy chương trình nào tên <code>-alh</code>. Muốn chạy đúng phải truyền đầy đủ lệnh:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker run --rm alpine-2 ls -alh</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Image alpine-3 – ENTRYPOINT + CMD (kịch bản 5, 6)</strong>
+        <pre class="command-line" data-prompt="$" data-output="3"><code class="language-bash">docker build -t alpine-3 -f Dockerfile-3 .
+docker image inspect alpine-3 --format 'Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}'
+Entrypoint=["ls"] Cmd=["-alh"]</code></pre>
+        <pre class="command-line" data-prompt="$" data-output="2-4,6-9"><code class="language-bash">docker run --rm alpine-3
+total 64K
+drwxr-xr-x    1 root     root        4.0K Oct 25 09:35 .
+...
+docker run --rm alpine-3 -p --full-time
+total 56
+drwxr-xr-x    2 root     root          4096 2026-10-21 21:52:47 +0000 bin/
+drwxr-xr-x    5 root     root           340 2026-10-25 09:35:54 +0000 dev/
+...</code></pre>
+        <p>Không truyền tham số → <code>ls -alh</code> (CMD là tham số mặc định). Truyền <code>-p --full-time</code> → <strong>thay thế CMD</strong>, lệnh thực tế là <code>ls -p --full-time</code> (không còn <code>-alh</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Ghi đè ENTRYPOINT lúc run</strong>
+        <p>ENTRYPOINT chỉ bị ghi đè khi dùng cờ <code>--entrypoint</code>:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">docker run --rm --entrypoint echo alpine-3 "Hello from new entrypoint"
+Hello from new entrypoint</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Kết quả 6 kịch bản khớp với cột “Lệnh thực tế” trong bảng.</li>
+      <li>Giải thích được: tham số của <code>docker run</code> được <strong>nối vào ENTRYPOINT</strong> nhưng <strong>thay thế CMD</strong>.</li>
+      <li>Biết khi nào dùng ENTRYPOINT (image như một câu lệnh cố định) và khi nào dùng CMD (lệnh mặc định có thể thay đổi dễ dàng).</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">PowerShell: lệnh <code>docker image inspect ... --format '{{json .Config.Entrypoint}}'</code> báo lỗi hoặc in sai</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> PowerShell xử lý dấu ngoặc nhọn/nháy khác Bash.<br/><strong>Giải pháp:</strong> Chạy lệnh trong Git Bash, hoặc dùng <code>docker image inspect alpine-1</code> rồi tìm mục <code>"Entrypoint"</code> và <code>"Cmd"</code> trong kết quả JSON.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Container chạy ENTRYPOINT dạng shell form không nhận tham số</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Viết <code>ENTRYPOINT ls</code> (shell form) thay vì <code>ENTRYPOINT ["ls"]</code>. Shell form chạy qua <code>/bin/sh -c</code> và bỏ qua CMD cũng như tham số của <code>docker run</code>.<br/><strong>Giải pháp:</strong> Luôn dùng exec form (JSON array) cho ENTRYPOINT và CMD.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker rmi alpine-1 alpine-2 alpine-3</code></pre>
+
+</body>
+</html>

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Quản lý User, Group &amp; quyền sudo – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Quản lý User, Group &amp; quyền sudo</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Thay đổi cấu hình SSH server để cho phép đăng nhập bằng <strong>username/password</strong> (chỉ phục vụ học tập).</li>
+    <li>Tạo user <code>developer1</code>, đặt mật khẩu và đăng nhập bằng user mới.</li>
+    <li>Tạo group <code>developer_group</code>, thêm user vào group và cấp quyền <code>sudo</code> cho cả group.</li>
+    <li>Thực hành các lệnh <code>useradd</code>, <code>passwd</code>, <code>usermod</code>, <code>groupadd</code>, <code>groupmod</code>, <code>visudo</code>.</li>
+    <li>Tắt lại đăng nhập bằng mật khẩu sau khi thực hành để đảm bảo bảo mật.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b>"]
+      subgraph EC2["🖥️ EC2 · linux-lab-server"]
+          direction TB
+          SSHD["🔐 <b>sshd</b><br/>PasswordAuthentication yes"]
+          U1["<img src='../../assets/svg-icon/user.svg' style='width:28px;height:28px;'/><br/>ec2-user<br/>group: wheel"]
+          U2["<img src='../../assets/svg-icon/developer.svg' style='width:28px;height:28px;'/><br/>developer1<br/>group: developer_group"]
+          SUDO["📜 <b>/etc/sudoers.d/developer_group</b><br/>%developer_group ALL=(ALL) ALL"]
+          SSHD --> U1
+          SSHD --> U2
+          U2 -.-> SUDO
+      end
+      PC -->|"SSH + private key"| U1
+      PC -->|"SSH + password"| U2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1 &amp; Lab 2: SSH được vào <code>linux-lab-server</code> bằng <code>ec2-user</code>, biết dùng Vim cơ bản.</li>
+    <li>Đã đọc chương <strong>User, Group &amp; phân quyền trong Linux</strong>.</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab3_user_group/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cho phép đăng nhập SSH bằng password</strong>
+        <p>Mặc định EC2 chỉ cho đăng nhập bằng key. Kiểm tra cấu hình hiện tại (có thể nằm ở file chính hoặc các file trong thư mục <code>sshd_config.d</code>):</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo grep -ri "PasswordAuthentication" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/</code></pre>
+        <p>File <code>/etc/ssh/sshd_config</code> có dòng <code>Include /etc/ssh/sshd_config.d/*.conf</code> ở đầu, và với SSH <strong>giá trị được đọc trước sẽ được ưu tiên</strong>. Vì vậy ta tạo một file có tên bắt đầu bằng số nhỏ để ghi đè:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo vim /etc/ssh/sshd_config.d/01-password-auth.conf</code></pre>
+        <p>Nhấn <code>i</code>, nhập 1 dòng sau, sau đó <code>Esc</code> → <code>:wq</code>:</p>
+        <pre class="code-block"><code class="language-bash">PasswordAuthentication yes</code></pre>
+        <p>Kiểm tra cú pháp (không in gì = OK), xem giá trị đang có hiệu lực rồi restart SSH service:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="3"><code class="language-bash">sudo sshd -t
+sudo sshd -T | grep -i passwordauthentication
+passwordauthentication yes
+sudo systemctl restart sshd</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo user developer1 và đặt mật khẩu</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo useradd developer1
+sudo passwd developer1</code></pre>
+        <p>Nhập mật khẩu 2 lần (khi gõ sẽ không hiển thị ký tự nào, đây là hành vi bình thường). Kiểm tra thông tin user vừa tạo:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2"><code class="language-bash">id developer1
+uid=1001(developer1) gid=1001(developer1) groups=1001(developer1)
+grep developer1 /etc/passwd
+ls -ld /home/developer1</code></pre>
+        <p><code>useradd</code> tự tạo primary group cùng tên <code>developer1</code> và thư mục home <code>/home/developer1</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Đăng nhập bằng developer1</strong>
+        <p>Thoát khỏi server, sau đó từ PC Local SSH bằng user mới (không cần <code>-i</code> key), nhập mật khẩu vừa đặt:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">exit</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh developer1@&lt;PUBLIC_IP&gt;</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$" data-output="2,4,6-7"><code class="language-bash">whoami
+developer1
+pwd
+/home/developer1
+sudo whoami
+[sudo] password for developer1:
+developer1 is not in the sudoers file.</code></pre>
+        <p>User mới chưa có quyền sudo. Thoát ra để cấp quyền bằng <code>ec2-user</code>:</p>
+        <pre class="command-line" data-prompt="[developer1 ~]$"><code class="language-bash">exit</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo group và thêm user vào group</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh -i linux-lab-key.pem ec2-user@&lt;PUBLIC_IP&gt;</code></pre>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="4"><code class="language-bash">sudo groupadd developer_group
+sudo usermod -a -G developer_group developer1
+id developer1
+uid=1001(developer1) gid=1001(developer1) groups=1001(developer1),1002(developer_group)
+grep developer_group /etc/group</code></pre>
+        <p><code>-G</code> chỉ định secondary group, <code>-a</code> (append) để <strong>thêm</strong> vào danh sách group hiện có. Nếu quên <code>-a</code>, user sẽ bị gỡ khỏi tất cả secondary group khác.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Cấp quyền sudo cho group</strong>
+        <p>Dùng <code>visudo</code> tạo file cấu hình riêng trong <code>/etc/sudoers.d/</code> (cách làm khuyến nghị, dễ quản lý hơn sửa trực tiếp <code>/etc/sudoers</code>). <code>visudo</code> mở trình soạn thảo Vim:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo visudo -f /etc/sudoers.d/developer_group</code></pre>
+        <p>Nhấn <code>i</code>, nhập dòng sau, <code>Esc</code> → <code>:wq</code>:</p>
+        <pre class="code-block"><code class="language-bash">%developer_group ALL=(ALL) ALL</code></pre>
+        <p>Ý nghĩa: <code>%</code> = group; group <code>developer_group</code> được chạy trên mọi host (<code>ALL</code>), với quyền của mọi user <code>(ALL)</code>, mọi lệnh (<code>ALL</code>), cần nhập mật khẩu của chính mình. Kiểm tra cú pháp toàn bộ sudoers:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo visudo -c</code></pre>
+        <p class="code-note">💡 Cách của slide cũ: chạy <code>sudo visudo</code> và thêm dòng trên ngay dưới dòng <code>%wheel ALL=(ALL) ALL</code> — kết quả tương tự.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Đăng nhập lại bằng developer1 và thử sudo</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">exit</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh developer1@&lt;PUBLIC_IP&gt;</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$" data-output="2-3"><code class="language-bash">sudo whoami
+[sudo] password for developer1:
+root
+sudo su -</code></pre>
+        <p>Sau lệnh <code>sudo su -</code>, dấu nhắc chuyển thành <code>[root@ip-172-31-xx-xx ~]#</code> (ký tự <code>#</code>) – bạn đang là root. Thoát dần ra:</p>
+        <pre class="command-line" data-prompt="[root ~]#"><code class="language-bash">whoami
+exit</code></pre>
+        <pre class="command-line" data-prompt="[developer1 ~]$"><code class="language-bash">exit</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Một số lệnh quản lý user/group khác</strong>
+        <p>Đăng nhập lại bằng <code>ec2-user</code>, thử sửa thông tin user và đổi tên group:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo usermod -c "Developer 1 - Team A" developer1
+getent passwd developer1
+sudo groupmod -n dev_team developer_group
+getent group dev_team
+sudo groupmod -n developer_group dev_team
+groups developer1</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>usermod -c "..."</code></td><td>Sửa mô tả (comment) của user</td></tr>
+            <tr><td><code>usermod -s /sbin/nologin user</code></td><td>Khoá đăng nhập shell của user (thường dùng cho user chạy service)</td></tr>
+            <tr><td><code>usermod -L</code> / <code>-U</code></td><td>Khoá / mở khoá mật khẩu của user</td></tr>
+            <tr><td><code>groupmod -n &lt;tên_mới&gt; &lt;tên_cũ&gt;</code></td><td>Đổi tên group (GID giữ nguyên nên quyền trên file không đổi)</td></tr>
+            <tr><td><code>gpasswd -d &lt;user&gt; &lt;group&gt;</code></td><td>Gỡ user khỏi một group</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Tắt lại đăng nhập bằng password</strong>
+        <p>Server mở cổng SSH ra Internet mà cho phép đăng nhập bằng mật khẩu rất dễ bị brute-force. Sau khi thực hành xong, hãy tắt lại:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="4"><code class="language-bash">sudo rm /etc/ssh/sshd_config.d/01-password-auth.conf
+sudo systemctl restart sshd
+sudo sshd -T | grep -i passwordauthentication
+passwordauthentication no</code></pre>
+        <p>User <code>developer1</code> và group <code>developer_group</code> được <strong>giữ lại cho Lab 4</strong>. Ở Lab 9 bạn sẽ học cách cho thành viên dự án đăng nhập bằng SSH key – cách làm đúng trong thực tế.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>id developer1</code> hiển thị user thuộc group <code>developer_group</code>.</li>
+      <li>Đăng nhập bằng <code>developer1</code> và chạy <code>sudo whoami</code> trả về <code>root</code>.</li>
+      <li>Sau bước 8, <code>sudo sshd -T | grep -i passwordauthentication</code> trả về <code>no</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>developer1@...: Permission denied (publickey,gssapi-keyex,gssapi-with-mic)</code> khi đăng nhập bằng password</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> PasswordAuthentication vẫn là <code>no</code> (một file khác trong <code>sshd_config.d</code> được đọc trước) hoặc chưa restart sshd.<br/><strong>Giải pháp:</strong> Chạy <code>sudo sshd -T | grep -i passwordauthentication</code>; đảm bảo tên file bắt đầu bằng <code>01-</code> và đã <code>sudo systemctl restart sshd</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Đã thêm vào group nhưng vẫn báo <code>developer1 is not in the sudoers file</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Thay đổi group chỉ có hiệu lực ở phiên đăng nhập mới; hoặc file sudoers gõ sai tên group (thiếu dấu <code>%</code>).<br/><strong>Giải pháp:</strong> Logout và login lại; kiểm tra nội dung <code>sudo cat /etc/sudoers.d/developer_group</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>&gt;&gt;&gt; /etc/sudoers.d/developer_group: syntax error near line 1 &lt;&lt;&lt;</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Gõ sai cú pháp trong file sudoers.<br/><strong>Giải pháp:</strong> <code>visudo</code> sẽ hỏi <em>What now?</em> — gõ <code>e</code> để sửa lại. Đây là lý do luôn dùng <code>visudo</code> thay vì sửa file trực tiếp.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>useradd: user 'developer1' already exists</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> User đã được tạo từ lần thực hành trước.<br/><strong>Giải pháp:</strong> Bỏ qua bước tạo user, hoặc xoá bằng <code>sudo userdel -r developer1</code> rồi tạo lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại <code>developer1</code> và <code>developer_group</code> cho Lab 4 (sẽ xoá ở cuối Lab 4). Nếu không làm Lab 4 ngay, có thể xoá bằng các lệnh dưới. Nhớ <strong>Stop</strong> instance nếu nghỉ học lâu.</div>
+  <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo rm -f /etc/sudoers.d/developer_group
+sudo userdel -r developer1
+sudo groupdel developer_group</code></pre>
+
+</body>
+</html>

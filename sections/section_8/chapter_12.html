@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 8: Docker Compose – Load Balancer với NGINX – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 8: Docker Compose – Load Balancer với NGINX</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Sử dụng lại resource của Lab 7, chạy <strong>3 replica</strong> của service Node.js.</li>
+    <li>Thêm service <strong>NGINX</strong> làm load balancer (reverse proxy) đứng trước các replica, phân phối request theo round-robin.</li>
+    <li>Quan sát request được xử lý bởi các container khác nhau, nhưng dùng chung dữ liệu trên Redis và MySQL.</li>
+    <li>Scale số lượng replica và giả lập một container bị lỗi.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Client["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/><b>Client</b>"]
+      subgraph Proj["Compose project: lab8_compose_load_balancer"]
+          direction LR
+          NGINX["🔀 <b>nginx</b><br/>:80"]
+          subgraph WEB["service web (replicas: 3)"]
+              direction TB
+              W1["📦 Node.js :3000<br/>host :54499"]
+              W2["📦 Node.js :3000<br/>host :54500"]
+              W3["📦 Node.js :3000<br/>host :54501"]
+          end
+          CACHE["<img src='../../assets/aws-svg/ElastiCache.svg' style='width:32px;height:32px;'/><br/>cache (Redis)"]
+          DB["<img src='../../assets/svg-icon/database.svg' style='width:32px;height:32px;'/><br/>db (MySQL)"]
+          NGINX --> W1
+          NGINX --> W2
+          NGINX --> W3
+          WEB --> CACHE
+          WEB --> DB
+      end
+      Client -->|"localhost:8080"| NGINX
+  </div>
+  <p class="arch-caption">Client chỉ biết tới NGINX ở port 8080. Mỗi replica của web được Docker gán 1 port ngẫu nhiên trên host (ví dụ 54499, 54500, 54501).</p>
+  <p class="body-text">Đây chính là mô hình thu nhỏ của <strong>Application Load Balancer + nhiều EC2/ECS task</strong> trên AWS: ứng dụng <strong>stateless</strong>, trạng thái chung (session, cache, dữ liệu) được lưu ở Redis/MySQL nên request đi vào replica nào cũng cho kết quả như nhau.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 7. Port <code>8080</code> trên host đang trống (đã <code>docker compose down</code> Lab 7).</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab8_compose_load_balancer/</code> (thư mục <code>web/</code>, <code>db/</code> giống Lab 7, thêm <code>nginx/nginx.conf</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Dừng Lab 7 &amp; chuẩn bị file .env</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd lab7_compose_multi
+docker compose down
+cd ../lab8_compose_load_balancer
+cp .env.example .env</code></pre>
+        <p>Mở <code>.env</code> và đổi password như ở Lab 7.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cấu hình NGINX làm load balancer</strong>
+        <p>Tạo file <code>nginx/nginx.conf</code>:</p>
+        <pre class="code-block"><code class="language-nginx"># Nhóm backend: "web" là tên service trong docker-compose.yaml.
+# Docker DNS trả về IP của tất cả container (replica) của service web,
+# NGINX phân phối request theo thuật toán round-robin (mặc định).
+upstream web_backend {
+    server web:3000;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://web_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # Container backend bị dừng =&gt; sau 2 giây chuyển request sang container khác (mặc định chờ 60 giây)
+        proxy_connect_timeout 2s;
+
+        # Trả về địa chỉ container backend đã xử lý request (để quan sát load balancing)
+        add_header X-Upstream $upstream_addr always;
+    }
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Viết file docker-compose.yaml</strong>
+        <p>So với Lab 7: thêm service <code>nginx</code>; service <code>web</code> chạy 3 replica và chỉ khai báo port container (<code>"3000"</code>) vì 3 replica không thể cùng dùng port 8080 trên host; <code>db</code> không cần publish port 3306.</p>
+        <pre class="code-block"><code class="language-yaml">services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: compose-lb-web:1.0
+    # Chạy 3 replica của service web
+    deploy:
+      replicas: 3
+    # Chỉ khai báo port container =&gt; Docker tự chọn port ngẫu nhiên trên host cho từng replica
+    ports:
+      - "3000"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=db
+      - DB_USER=appuser
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=testdb
+      - REDIS_HOST=cache
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.4
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=testdb
+      - MYSQL_USER=appuser
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  db-data:</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Start hệ thống</strong>
+        <pre class="command-line" data-prompt="$" data-output="3-9"><code class="language-bash">docker compose up -d --build
+docker compose ps
+NAME                                 SERVICE   STATUS                    PORTS
+lab8_compose_load_balancer-cache-1   cache     Up 40 seconds             6379/tcp
+lab8_compose_load_balancer-db-1      db        Up 40 seconds (healthy)   3306/tcp, 33060/tcp
+lab8_compose_load_balancer-nginx-1   nginx     Up 5 seconds              0.0.0.0:8080-&gt;80/tcp
+lab8_compose_load_balancer-web-1     web       Up 6 seconds              0.0.0.0:54499-&gt;3000/tcp
+lab8_compose_load_balancer-web-2     web       Up 6 seconds              0.0.0.0:54500-&gt;3000/tcp
+lab8_compose_load_balancer-web-3     web       Up 6 seconds              0.0.0.0:54501-&gt;3000/tcp</code></pre>
+        <p>Xem port ngẫu nhiên của từng replica (có thể truy cập trực tiếp từng replica qua port này):</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">docker compose port --index 2 web 3000
+0.0.0.0:54500</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Quan sát load balancing</strong>
+        <p>Đợi khoảng 10–15 giây sau khi start (để các replica sẵn sàng), sau đó gửi nhiều request qua NGINX:</p>
+        <pre class="command-line" data-prompt="$" data-output="2-7"><code class="language-bash">for i in $(seq 1 6); do curl -s http://localhost:8080/api/info; echo; done
+{"hostname":"cd15aedb89da","visits":7}
+{"hostname":"22d3fc825fa2","visits":8}
+{"hostname":"bc0fb9efc15b","visits":9}
+{"hostname":"cd15aedb89da","visits":10}
+{"hostname":"22d3fc825fa2","visits":11}
+{"hostname":"bc0fb9efc15b","visits":12}</code></pre>
+        <p>Nếu dùng PowerShell:</p>
+        <pre class="command-line" data-prompt="PS>"><code class="language-powershell">1..6 | ForEach-Object { curl.exe -s http://localhost:8080/api/info; "" }</code></pre>
+        <p><code>hostname</code> lần lượt thay đổi giữa 3 container (round-robin), trong khi <code>visits</code> vẫn tăng liên tục vì cả 3 replica dùng chung Redis. Mở <code>http://localhost:8080</code> trên browser và refresh nhiều lần để thấy kết quả tương tự.</p>
+        <p>Xem container backend đã xử lý request qua header <code>X-Upstream</code> và đối chiếu với IP của các container:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -s -I http://localhost:8080/api/info
+docker compose ps -q web | xargs docker inspect --format '{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Scale lên 5 replica</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose up -d --scale web=5
+docker compose restart nginx
+for i in $(seq 1 10); do curl -s http://localhost:8080/api/info; echo; done</code></pre>
+        <p class="code-note">💡 NGINX (bản open source) chỉ phân giải tên <code>web</code> thành danh sách IP <strong>lúc khởi động</strong>, nên cần restart NGINX sau khi scale. Load balancer trên Cloud (ALB + Target Group) tự động cập nhật danh sách backend khi scale.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Giả lập một container bị lỗi</strong>
+        <p>Dừng 1 replica của web, sau đó tiếp tục gửi request:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker stop $(docker compose ps -q web | head -n 1)
+for i in $(seq 1 6); do curl -s http://localhost:8080/api/info; echo; done</code></pre>
+        <p>Tất cả request vẫn thành công: NGINX phát hiện không kết nối được tới container đã dừng (sau <code>proxy_connect_timeout</code> 2 giây) và chuyển request sang replica khác, đồng thời tạm loại container lỗi khỏi danh sách. Một request có thể chậm khoảng 2 giây.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose logs nginx</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>docker compose ps</code> hiển thị 3 container <code>web</code>, mỗi container một host port ngẫu nhiên.</li>
+      <li>Gửi request liên tiếp tới <code>http://localhost:8080/api/info</code>, <code>hostname</code> luân phiên giữa các container và <code>visits</code> tăng liên tục.</li>
+      <li>Sau khi scale lên 5 và restart NGINX, xuất hiện 5 hostname khác nhau.</li>
+      <li>Khi dừng 1 replica, website vẫn hoạt động bình thường.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Bind for 0.0.0.0:8080 failed: port is already allocated</code> khi scale web</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service <code>web</code> khai báo port cố định <code>"8080:3000"</code> (như Lab 7) – nhiều replica không thể cùng chiếm 1 port trên host.<br/><strong>Giải pháp:</strong> Chỉ khai báo port container <code>"3000"</code> (hoặc bỏ hẳn <code>ports</code> vì NGINX truy cập web qua network nội bộ).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Request luôn vào cùng 1 container</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Vừa start xong, các replica khác chưa sẵn sàng nên NGINX tạm đánh dấu lỗi (khoảng 10 giây); hoặc NGINX start trước khi scale.<br/><strong>Giải pháp:</strong> Đợi 10–15 giây rồi thử lại; <code>docker compose restart nginx</code> sau khi scale.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">NGINX trả về <code>502 Bad Gateway</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Không có replica web nào đang chạy hoặc web bị lỗi kết nối DB.<br/><strong>Giải pháp:</strong> <code>docker compose ps</code>, <code>docker compose logs web</code>; kiểm tra file <code>.env</code> và trạng thái healthy của <code>db</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">NGINX báo <code>host not found in upstream "web:3000"</code> và dừng</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> NGINX start khi chưa có container web nào (ví dụ web lỗi build).<br/><strong>Giải pháp:</strong> Sửa lỗi của service web, sau đó <code>docker compose up -d</code> lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose down -v --rmi local</code></pre>
+
+</body>
+</html>

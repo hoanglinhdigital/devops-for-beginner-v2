@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tổng kết section &amp; dọn dẹp resource – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Tổng kết section &amp; dọn dẹp resource</span>
+  </div>
+
+  <h2 class="section-heading">Tổng kết section</h2>
+  <div class="mermaid">
+  flowchart LR
+      T1["📘 <b>Developer Tools</b><br/>CodeCommit · CodeBuild<br/>CodeDeploy · CodePipeline"] --> L1["🧪 <b>Lab 1–4</b><br/>GitHub connection<br/>Build Java · Node.js · Docker"]
+      L1 --> T2["📘 <b>CodePipeline &amp;<br/>CodeDeploy</b>"]
+      T2 --> L2["🧪 <b>Lab 5–6</b><br/>→ Elastic Beanstalk<br/>→ ECS rolling"]
+      L2 --> T3["📘 <b>Deployment<br/>strategies</b>"]
+      T3 --> L3["🧪 <b>Lab 7–8</b><br/>Blue/Green · Canary"]
+      L3 --> L4["🧪 <b>Lab 9</b><br/>Approval · Notification"]
+  </div>
+
+  <table class="compare-table">
+    <thead><tr><th>Chương</th><th>Nội dung</th><th>Kiến thức chính</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Giới thiệu AWS Developer Tools</td><td>Vai trò CodeCommit/CodeBuild/CodeDeploy/CodePipeline, mapping CI/CD, so sánh với Jenkins &amp; GitHub Actions</td></tr>
+      <tr><td>2</td><td>CodeBuild &amp; buildspec.yml</td><td>Build project, environment, service role, phases, artifacts, cache, biến môi trường &amp; secret</td></tr>
+      <tr><td>3</td><td>Lab 1: Chuẩn bị source</td><td>Fork repo, AWS CodeConnections (GitHub App), S3 artifact bucket</td></tr>
+      <tr><td>4–6</td><td>Lab 2–4: CodeBuild</td><td>Maven + Corretto 17, Webpack + <code>aws s3 cp</code>, privileged mode + ECR, tag theo commit SHA, least privilege</td></tr>
+      <tr><td>7</td><td>CodePipeline &amp; CodeDeploy</td><td>Stage/action/artifact, pipeline V2, execution mode; application, deployment group, deployment config, AppSpec</td></tr>
+      <tr><td>8</td><td>Lab 5: Pipeline → Elastic Beanstalk</td><td>Source → Build → Deploy, trigger khi push, Release change</td></tr>
+      <tr><td>9</td><td>Chiến lược deployment</td><td>All at once, Rolling, Immutable, Blue/Green, Canary, Linear – trade-off</td></tr>
+      <tr><td>10</td><td>Lab 6: Pipeline → ECS rolling</td><td>Terraform stack, <code>imagedefinitions.json</code>, circuit breaker</td></tr>
+      <tr><td>11–12</td><td>Lab 7–8: Blue/Green, Canary</td><td>Controller <code>CODE_DEPLOY</code>, 2 Target Group, listener 80/81, <code>appspec.yaml</code>, <code>taskdef.json</code>, <code>imageDetail.json</code>, custom deployment config</td></tr>
+      <tr><td>13</td><td>Lab 9: Approval &amp; notification</td><td>Manual approval, notification rule, SNS email</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Các file cấu hình cần nhớ</h2>
+  <table class="req-table">
+    <thead><tr><th>File</th><th>Dùng bởi</th><th>Nội dung</th></tr></thead>
+    <tbody>
+      <tr><td><code>buildspec.yml</code></td><td>CodeBuild</td><td>Các phase build, biến môi trường, artifacts, cache</td></tr>
+      <tr><td><code>imagedefinitions.json</code></td><td>Action deploy <strong>Amazon ECS</strong></td><td><code>[{"name":"&lt;container&gt;","imageUri":"&lt;image&gt;"}]</code></td></tr>
+      <tr><td><code>imageDetail.json</code></td><td>Action deploy <strong>Amazon ECS (Blue/Green)</strong></td><td><code>{"ImageURI":"&lt;image&gt;"}</code> – thay placeholder <code>&lt;IMAGE_NAME&gt;</code></td></tr>
+      <tr><td><code>taskdef.json</code></td><td>Action deploy <strong>Amazon ECS (Blue/Green)</strong></td><td>Task definition mẫu để đăng ký revision mới</td></tr>
+      <tr><td><code>appspec.yaml</code></td><td>CodeDeploy</td><td>Service, container, port nhận traffic; hooks (tuỳ chọn)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Checklist dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Các resource tính phí theo giờ</strong> cần xoá ngay: EC2 của Elastic Beanstalk, ALB, task Fargate, Public IPv4, NAT Gateway (nếu bạn tự tạo thêm). Các resource lưu trữ (S3, ECR, CloudWatch Logs) tính phí theo dung lượng.</div>
+  <ol class="step-list">
+    <li><div><p><strong>Elastic Beanstalk:</strong> terminate environment <code>java-beanstalk-dev</code>, xoá application <code>java-beanstalk-app</code> (Lab 5).</p></div></li>
+    <li><div><p><strong>Pipeline &amp; CodeDeploy:</strong> xoá các pipeline còn lại, CodeDeploy application <code>nodejs-ecs-app</code>, deployment configuration <code>ECSCanary25Percent5Minutes</code>, notification rule và SNS topic (Lab 6 → Lab 9).</p></div></li>
+    <li><div><p><strong>ECS stack:</strong> chạy <code>terraform destroy</code> nếu chưa xoá:</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_9_code_pipeline/terraform_ecs_stack
+terraform destroy</code></pre></div></li>
+    <li><div><p><strong>Kiểm tra lại</strong> trên Console (region Singapore): EC2 instances, Load Balancers, Target Groups, NAT Gateways, Elastic IPs – không còn resource của lab.</p></div></li>
+    <li><div><p><strong>ECR:</strong> xoá image cũ hoặc xoá repository <code>nodejs-random-color</code>:</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr delete-repository --repository-name nodejs-random-color --force --region ap-southeast-1</code></pre></div></li>
+    <li><div><p><strong>S3:</strong> làm rỗng và xoá bucket <code>codebuild-artifact-&lt;your-suffix&gt;</code> và bucket artifact do CodePipeline tự tạo (<code>codepipeline-ap-southeast-1-...</code>):</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 rb s3://codebuild-artifact-&lt;your-suffix&gt; --force
+aws s3 ls | grep codepipeline-ap-southeast-1</code></pre></div></li>
+    <li><div><p><strong>CloudWatch Logs:</strong> xoá các log group <code>/codebuild/...</code>, <code>/ecs/nodejs-random-color</code>, <code>/aws/elasticbeanstalk/...</code>.</p></div></li>
+    <li><div><p><strong>Giữ lại để tham khảo</strong> (không tính phí khi không chạy): GitHub repository, CodeBuild project, connection <code>github-connection</code>, các IAM role.</p></div></li>
+  </ol>
+
+  <h2 class="section-heading">Tài liệu tham khảo</h2>
+  <ul class="feature-list">
+    <li>AWS CodeBuild – <em>Build specification reference</em> và <em>Docker images provided by CodeBuild / Available runtimes</em>.</li>
+    <li>AWS CodePipeline – <em>Image definitions file reference</em> (<code>imagedefinitions.json</code>, <code>imageDetail.json</code>).</li>
+    <li>AWS CodePipeline – <em>Tutorial: Create a pipeline with an Amazon ECR source and ECS-to-CodeDeploy deployment</em>.</li>
+    <li>AWS CodeDeploy – <em>AppSpec file reference</em> và <em>Deployment configurations</em>.</li>
+    <li>Amazon ECS – <em>Deployment types</em> (rolling update, blue/green, canary, linear).</li>
+  </ul>
+
+  <h2 class="section-heading">Chủ đề nên tìm hiểu thêm</h2>
+  <ul class="feature-list">
+    <li>Tự động rollback bằng <strong>CloudWatch Alarm</strong> gắn với deployment group, lifecycle hooks <code>AfterAllowTestTraffic</code> chạy smoke test bằng Lambda.</li>
+    <li>Pipeline nhiều môi trường: Dev → Staging → (Approval) → Production, cross-account deployment.</li>
+    <li>Định nghĩa pipeline bằng IaC (Terraform <code>aws_codepipeline</code>, CloudFormation, CDK) thay vì thao tác Console.</li>
+    <li>So sánh với các công cụ CI/CD khác trong khoá học: <strong>Jenkins</strong> và <strong>GitHub Actions</strong> – cùng khái niệm CI/CD, khác công cụ.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: LoadBalancer trong EKS – Part 1 – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: LoadBalancer trong EKS – Part 1</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt <strong>AWS Load Balancer Controller</strong> (kèm IAM Role qua IRSA) cho cluster.</li>
+    <li>Triển khai ứng dụng mẫu <strong>2048 game</strong> và expose bằng <strong>ALB</strong>.</li>
+    <li>Truy cập ứng dụng qua DNS của ALB.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/svg-icon/user.svg' style='width:30px;height:30px;'/><br/>User"]
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>ALB<br/>(internet-facing)"]
+      IC["AWS Load Balancer<br/>Controller"]
+      subgraph NS["Namespace game-2048"]
+          ING["Ingress-2048"]
+          SVC["Service-2048<br/>NodePort :80"]
+          P["Deployment-2048<br/>5 Pod (app-2048)"]
+      end
+      User -->|"http://&lt;alb-dns&gt;"| ALB
+      IC -->|"tạo ALB"| ALB
+      ALB --> ING --> SVC --> P
+  </div>
+  <p class="arch-caption">User truy cập ALB; ALB (do Controller tạo từ Ingress) chuyển traffic tới Service NodePort, rồi tới các Pod chạy game 2048.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã tạo thành công <strong>EKS Cluster</strong> ở Lab 1 và kết nối được bằng kubectl.</li>
+    <li>Đã cài <strong>eksctl, kubectl, aws cli, helm</strong>.</li>
+    <li>Source code: <code>sourcecode/section_14_eks_basic/lab2_loadbalancer/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo IAM Policy cho Load Balancer Controller</strong>
+        <p>Tạo policy từ file <code>iam_policy.json</code> (đã có trong source code):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam_policy.json</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo IAM Role + Service Account (IRSA)</strong>
+        <p>Thay <code>&lt;AWS_ACCOUNT_ID&gt;</code> bằng Account ID của bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create iamserviceaccount \
+  --cluster=devops-test-cluster \
+  --namespace=kube-system \
+  --name=aws-load-balancer-controller \
+  --role-name AmazonEKSLoadBalancerControllerRole \
+  --attach-policy-arn=arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:policy/AWSLoadBalancerControllerIAMPolicy \
+  --approve</code></pre>
+        <p class="code-note">💡 Bước này tạo Service Account <code>aws-load-balancer-controller</code> trong namespace <code>kube-system</code> và gắn IAM Role (OIDC) cho nó.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cài AWS Load Balancer Controller bằng Helm</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">helm repo add eks https://aws.github.io/eks-charts
+helm repo update eks
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=devops-test-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller</code></pre>
+        <p>Kiểm tra controller đã chạy:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get deployment -n kube-system aws-load-balancer-controller</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Apply ứng dụng mẫu 2048 game</strong>
+        <p>Áp dụng file <code>2048-demo.yaml</code> (gồm Namespace, Deployment 5 Pod, Service NodePort, Ingress ALB):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f 2048-demo.yaml</code></pre>
+        <p>Kiểm tra resource:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get deployment -n game-2048
+kubectl get service -n game-2048
+kubectl get ingress -n game-2048</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra ALB và truy cập ứng dụng</strong>
+        <p>Vào <strong>AWS Console → EC2 → Load Balancers</strong>, tìm ALB vừa được Controller tạo ra. Lấy <strong>DNS name</strong> của ALB và truy cập <code>http://&lt;alb-dns-name&gt;</code> trên trình duyệt (nhớ thêm <code>http://</code>) để chơi game 2048.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Deployment <code>aws-load-balancer-controller</code> trong <code>kube-system</code> có Pod <strong>Running</strong>.</li>
+      <li>Ingress <code>ingress-2048</code> có địa chỉ ALB (cột <code>ADDRESS</code> của <code>kubectl get ingress</code>).</li>
+      <li>Truy cập DNS của ALB hiển thị giao diện game 2048.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Ingress không có ADDRESS / ALB không được tạo</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> controller chưa chạy hoặc Service Account thiếu quyền IAM.<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl logs -n kube-system deployment/aws-load-balancer-controller</code>; xác nhận đã tạo đúng IAM policy và Service Account.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Truy cập ALB trả <code>502 Bad Gateway</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> target group chưa có target healthy (Pod chưa ready) hoặc sai port.<br/><strong>Giải pháp:</strong> chờ Pod <code>Running</code>, kiểm tra <code>kubectl get pods -n game-2048</code>; xem target group trên Console.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pod không kéo được image</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> node không ra được Internet (subnet private không NAT) hoặc image sai.<br/><strong>Giải pháp:</strong> kiểm tra subnet có Internet gateway/NAT, kiểm tra lại tên image trong manifest.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> ALB tính phí theo giờ. Xoá Ingress để Controller xoá ALB, hoặc xoá cluster khi hoàn thành cả chương.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f 2048-demo.yaml</code></pre>
+
+</body>
+</html>

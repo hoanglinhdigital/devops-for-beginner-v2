@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 7: Blue/Green deployment lên ECS với CodeDeploy – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 7: Blue/Green deployment lên ECS với CodeDeploy</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Chuyển deployment controller của ECS service sang <code>CODE_DEPLOY</code> bằng Terraform (đã có sẵn Target Group Green và listener test port 81).</li>
+    <li>Tạo CodeDeploy application &amp; deployment group cho ECS với chiến lược <strong>Blue/Green</strong>.</li>
+    <li>Chuẩn bị <code>appspec.yaml</code>, <code>taskdef.json</code>, <code>imageDetail.json</code> và tạo pipeline với action <strong>Amazon ECS (Blue/Green)</strong>.</li>
+    <li>Kiểm thử version mới qua port 81, chủ động <strong>Reroute traffic</strong> và <strong>Terminate original task set</strong>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>appspec.yaml · taskdef.json"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:26px;height:26px;'/> nodejs-ecs-bluegreen-pipeline"]
+              direction TB
+              SRC["① Source"] --> BLD["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:30px;height:30px;'/><br/>② Build"]
+              BLD --> DPL["③ Deploy<br/>Amazon ECS (Blue/Green)"]
+          end
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR"]
+          CD["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:38px;height:38px;'/><br/><b>CodeDeploy</b><br/>nodejs-ecs-app<br/>nodejs-ecs-dg"]
+          subgraph ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:24px;height:24px;'/> ALB"]
+              L80["Listener :80"]
+              L81["Listener :81"]
+          end
+          subgraph SVC["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:24px;height:24px;'/> nodejs-service (CODE_DEPLOY)"]
+              direction TB
+              BLUE["🟦 TG Blue<br/>task set v2 (original)"]
+              GREEN["🟩 TG Green<br/>task set v3 (replacement)"]
+          end
+      end
+      GH -->|"trigger"| SRC
+      BLD -->|"push image"| ECR
+      DPL --> CD
+      CD -->|"tạo task set mới · đổi listener"| SVC
+      L80 --> BLUE
+      L81 --> GREEN
+  </div>
+  <p class="arch-caption">Blue/Green ở mức service: ECS service có 2 task set, mỗi task set gắn với 1 Target Group. CodeDeploy đổi Target Group của listener 80 khi reroute traffic.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 6: Terraform stack đang chạy, pipeline <code>nodejs-ecs-rolling-pipeline</code> <strong>đã được xoá</strong>.</li>
+    <li>Đọc chương <em>Các chiến lược deployment</em> và phần CodeDeploy trong chương <em>AWS CodePipeline &amp; AWS CodeDeploy</em>.</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/lab7_ecs_blue_green/</code> (<code>buildspec.yml</code>, <code>appspec.yaml</code>, <code>taskdef.json</code>, <code>commands.sh</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuyển deployment controller sang CODE_DEPLOY</strong>
+        <p>Sửa <code>terraform.tfvars</code>:</p>
+        <pre class="code-block"><code class="language-hcl">deployment_controller_type = "CODE_DEPLOY"</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_9_code_pipeline/terraform_ecs_stack
+terraform plan
+terraform apply</code></pre>
+        <p>Đọc kỹ output của <code>terraform plan</code>: service <code>nodejs-service</code> được cập nhật deployment controller (hoặc tạo lại). Sau khi apply, truy cập <code>http://&lt;alb-dns-name&gt;</code> kiểm tra website vẫn hoạt động.</p>
+        <p class="code-note">💡 Listener 81 và Target Group Green đã được tạo sẵn từ Lab 6 nhưng chưa có target. Với controller <code>CODE_DEPLOY</code>, mọi thay đổi version của service phải đi qua CodeDeploy.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo IAM role cho CodeDeploy</strong>
+        <p>Vào IAM → Roles, tạo role với thông số:</p>
+        <ul class="feature-list">
+          <li>Trusted entity: <strong>AWS service</strong> → <strong>CodeDeploy</strong>, use case <strong>CodeDeploy - ECS</strong></li>
+          <li>Permission policy: <code>AWSCodeDeployRoleForECS</code> (được chọn tự động)</li>
+          <li>Role name: <code>codedeploy-ecs-service-role</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo CodeDeploy application</strong>
+        <p>Vào <strong>CodeDeploy → Applications</strong>, tạo application:</p>
+        <ul class="feature-list">
+          <li>Application name: <code>nodejs-ecs-app</code></li>
+          <li>Compute platform: <strong>Amazon ECS</strong></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo deployment group</strong>
+        <p>Trong application <code>nodejs-ecs-app</code>, tạo deployment group với các thông số:</p>
+        <ul class="feature-list">
+          <li>Deployment group name: <code>nodejs-ecs-dg</code>; Service role: <code>codedeploy-ecs-service-role</code></li>
+          <li>ECS cluster name: <code>codepipeline-lab-cluster</code>; ECS service name: <code>nodejs-service</code></li>
+          <li>Load balancer: <code>codepipeline-lab-alb</code>; Production listener port: <strong>HTTP:80</strong>; Test listener port: <strong>HTTP:81</strong></li>
+          <li>Target group 1 name: <code>nodejs-tg-blue</code>; Target group 2 name: <code>nodejs-tg-green</code></li>
+          <li>Traffic rerouting: <strong>Specify when to reroute traffic</strong> – chờ <strong>10 phút</strong> (cho phép bạn test qua port 81 rồi bấm Reroute traffic thủ công)</li>
+          <li>Deployment configuration: <code>CodeDeployDefault.ECSAllAtOnce</code></li>
+          <li>Original revision termination: chờ <strong>10 phút</strong> sau khi reroute rồi mới terminate task set cũ</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Đưa appspec.yaml, taskdef.json, buildspec.yml vào repository</strong>
+        <p>Copy 3 file trong thư mục <code>lab7_ecs_blue_green</code> đè lên file cùng tên ở thư mục gốc repository <code>nodejs-random-color</code> (repository mẫu đã có sẵn <code>appspec.yaml</code>, <code>taskdef.json</code> với Account ID của tác giả – cần thay bằng bản mới).</p>
+        <p><code>appspec.yaml</code> – <code>&lt;TASK_DEFINITION&gt;</code> được CodePipeline tự điền ARN task definition revision mới:</p>
+        <pre class="code-block"><code class="language-yaml">version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: &lt;TASK_DEFINITION&gt;
+        LoadBalancerInfo:
+          ContainerName: "nodejs-container"
+          ContainerPort: 3000</code></pre>
+        <p><code>taskdef.json</code> – <code>&lt;IMAGE_NAME&gt;</code> được thay bằng image URI trong <code>imageDetail.json</code>, <code>&lt;AWS_ACCOUNT_ID&gt;</code> được buildspec thay bằng lệnh <code>sed</code>:</p>
+        <pre class="code-block"><code class="language-json">{
+    "family": "nodejs-task-definition",
+    "executionRoleArn": "arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:role/nodejs-task-execution-role",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512",
+    "containerDefinitions": [
+        {
+            "name": "nodejs-container",
+            "image": "&lt;IMAGE_NAME&gt;",
+            "essential": true,
+            "portMappings": [{ "containerPort": 3000, "protocol": "tcp", "appProtocol": "http" }],
+            "logConfiguration": { "logDriver": "awslogs", "options": { "...": "..." } }
+        }
+    ]
+}</code></pre>
+        <p>Phần thay đổi của <code>buildspec.yml</code> so với Lab 6:</p>
+        <pre class="code-block"><code class="language-yaml">      - echo Writing imageDetail.json...
+      - printf '{"ImageURI":"%s"}' $REPOSITORY_URI:$COMMIT_HASH > imageDetail.json
+      - cat imageDetail.json
+      - echo Replacing AWS_ACCOUNT_ID placeholder in taskdef.json...
+      - sed -i "s/&lt;AWS_ACCOUNT_ID&gt;/$AWS_ACCOUNT_ID/g" taskdef.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
+    - imageDetail.json
+    - appspec.yaml
+    - taskdef.json</code></pre>
+        <p>Đồng thời sửa text thẻ <code>&lt;h1&gt;</code> trong <code>public/index.html</code> thành <code>Welcome to My Website – v3 Blue/Green</code>, rồi commit &amp; push:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/nodejs-random-color
+git add appspec.yaml taskdef.json buildspec.yml public/index.html
+git commit -m "ci: add appspec and taskdef for ECS blue/green"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Tạo pipeline Blue/Green</strong>
+        <p>Tạo pipeline (Build custom pipeline) với các thông số:</p>
+        <ul class="feature-list">
+          <li>Pipeline name: <code>nodejs-ecs-bluegreen-pipeline</code>; Execution mode: <strong>Superseded</strong>; Service role: <strong>New service role</strong></li>
+          <li>Source: GitHub (via GitHub App), repository <code>nodejs-random-color</code>, branch <code>master</code>, trigger khi push</li>
+          <li>Build: AWS CodeBuild, project <code>nodejs-docker-build</code></li>
+          <li>Test: <strong>Skip</strong></li>
+          <li>Deploy provider: <strong>Amazon ECS (Blue/Green)</strong>; CodeDeploy application: <code>nodejs-ecs-app</code>; Deployment group: <code>nodejs-ecs-dg</code></li>
+          <li>Amazon ECS task definition: <strong>BuildArtifact</strong> – <code>taskdef.json</code></li>
+          <li>AWS CodeDeploy AppSpec file: <strong>BuildArtifact</strong> – <code>appspec.yaml</code></li>
+          <li>Dynamically update task definition image: input artifact <strong>BuildArtifact</strong>, placeholder text <code>IMAGE_NAME</code></li>
+        </ul>
+        <p>Tạo pipeline – execution đầu tiên chạy với commit vừa push ở Bước 5.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Theo dõi deployment &amp; test qua port 81</strong>
+        <p>Khi stage Deploy đang chạy, bấm <strong>Details</strong> để mở deployment trên CodeDeploy. Các bước lần lượt: <em>Deploying replacement task set → Test traffic route setup → Rerouting production traffic (đang chờ) → Wait original task set termination → Terminate original task set</em>.</p>
+        <p>Khi đến bước chờ reroute, so sánh 2 listener (thay <code>&lt;alb-dns-name&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$" data-output="2,4"><code class="language-bash">curl -s http://&lt;alb-dns-name&gt;/ | grep -o "&lt;h1[^&gt;]*&gt;[^&lt;]*"
+&lt;h1 id="welcome" style="color: #3A7BC2;"&gt;Welcome to My Website – v2 Rolling update
+curl -s http://&lt;alb-dns-name&gt;:81/ | grep -o "&lt;h1[^&gt;]*&gt;[^&lt;]*"
+&lt;h1 id="welcome" style="color: #E04F1A;"&gt;Welcome to My Website – v3 Blue/Green</code></pre>
+        <p>Port 80 (production) vẫn là version cũ, port 81 (test) đã là version mới – người dùng thật chưa bị ảnh hưởng.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Reroute traffic &amp; terminate task set cũ</strong>
+        <p>Version mới hoạt động đúng → trên trang deployment bấm <strong>Reroute traffic</strong>. Truy cập lại port 80: đã là v3. Mở ECS service → tab <strong>Deployments / Task sets</strong> để thấy 2 task set đang cùng tồn tại.</p>
+        <p>Bấm <strong>Terminate original task set</strong> để xoá task set cũ ngay (không cần chờ 10 phút). Pipeline chuyển sang <span class="badge badge-green">Succeeded</span>.</p>
+        <p class="code-note">💡 Muốn quay lại version cũ trước khi terminate? Bấm <strong>Stop and roll back deployment</strong> – CodeDeploy đổi listener 80 về Target Group cũ gần như tức thì.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Deployment trên CodeDeploy ở trạng thái <strong>Succeeded</strong>, pipeline <code>nodejs-ecs-bluegreen-pipeline</code> <strong>Succeeded</strong>.</li>
+      <li>Trước khi reroute: port 80 trả về v2, port 81 trả về v3. Sau khi reroute: port 80 trả về v3.</li>
+      <li>Listener 80 của ALB chuyển sang forward tới <code>nodejs-tg-green</code> (lần deploy sau sẽ đổi ngược về Blue).</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>terraform apply</code> lỗi <code>InvalidParameterException</code> khi đổi deployment controller</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> ECS không cho cập nhật trực tiếp deployment controller trong một số trường hợp (ví dụ service đang có deployment chạy).<br/><strong>Giải pháp:</strong> Chờ deployment hiện tại hoàn tất rồi apply lại, hoặc buộc tạo lại service: <code>terraform apply -replace="module.ecs.aws_ecs_service.nodejs"</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Exception while trying to read the task definition artifact file from: BuildArtifact</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>taskdef.json</code> hoặc <code>appspec.yaml</code> không có trong BuildArtifact.<br/><strong>Giải pháp:</strong> Kiểm tra mục <code>artifacts.files</code> trong buildspec và 2 file nằm ở thư mục gốc repository, đúng tên (phân biệt <code>.yaml</code>/<code>.yml</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Task của replacement task set bị dừng, lỗi <code>CannotPullContainerError ... &lt;IMAGE_NAME&gt;</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Placeholder không được thay: thiếu <code>imageDetail.json</code>, hoặc placeholder text trong action khác <code>IMAGE_NAME</code>.<br/><strong>Giải pháp:</strong> Edit stage Deploy, kiểm tra <em>Dynamically update task definition image</em>; kiểm tra log build có nội dung <code>imageDetail.json</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>ECS was unable to assume the role 'arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:role/...'</code> hoặc lỗi <code>iam:PassRole</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>executionRoleArn</code> trong <code>taskdef.json</code> sai Account ID / tên role, hoặc pipeline role không được PassRole.<br/><strong>Giải pháp:</strong> Kiểm tra lệnh <code>sed</code> trong buildspec đã chạy; so sánh với output <code>task_execution_role_arn</code> của Terraform.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Deployment lỗi <code>The ELB could not be found</code> / <code>Primary taskset target group must be behind listener</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Cấu hình listener/Target Group trong deployment group không khớp với ALB thực tế.<br/><strong>Giải pháp:</strong> Kiểm tra listener 80 đang forward tới Target Group mà service đang dùng; chọn lại đúng TG1/TG2 trong deployment group.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>ALB và task Fargate tính phí theo giờ.</strong> Trong lúc Blue/Green, số task tăng gấp đôi – luôn terminate task set cũ sau khi kiểm tra xong.</div>
+  <ul class="feature-list">
+    <li>Nếu học tiếp Lab 8: giữ nguyên toàn bộ (Terraform stack, CodeDeploy application, pipeline).</li>
+    <li>Nếu dừng lại: xoá pipeline <code>nodejs-ecs-bluegreen-pipeline</code>, CodeDeploy application <code>nodejs-ecs-app</code>, sau đó chạy <code>terraform destroy</code> trong thư mục <code>terraform_ecs_stack</code>.</li>
+  </ul>
+
+</body>
+</html>

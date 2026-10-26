@@ -1,0 +1,44 @@
+// Lab 8 – Jenkinsfile đặt ở thư mục gốc của repository nodejs-random-color
+// Job: lab08-pipeline-from-scm | Pipeline definition: Pipeline script from SCM, Script Path: Jenkinsfile
+// Không cần stage Checkout: Jenkins tự checkout repository chứa Jenkinsfile (stage "Declarative: Checkout SCM").
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REPO   = 'nodejs-random-color'
+        IMAGE_TAG  = "ver-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Show commit') {
+            steps {
+                sh 'git log -1 --oneline'
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+        }
+    }
+}

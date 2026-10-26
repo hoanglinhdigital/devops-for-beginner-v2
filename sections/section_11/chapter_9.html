@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Job Clear resource &amp; quy trình release Blue/Green hoàn chỉnh – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">11. Chiến lược deployment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Job Clear resource &amp; quy trình release Blue/Green hoàn chỉnh</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo job <code>bluegreen-job4-clear-resource</code>: nhận tham số môi trường, <strong>scale ECS Service về 0 task</strong> để không tốn chi phí cho môi trường cũ sau khi release ổn định.</li>
+    <li>Job có Safety check: <strong>không bao giờ</strong> được scale về 0 môi trường đang nhận traffic production.</li>
+    <li>Hiểu trade-off giữa tiết kiệm chi phí và tốc độ rollback; tổng kết quy trình release Blue/Green với 4 job.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>End-users"]
+      subgraph ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:24px;height:24px;'/> bluegreen-lab-alb"]
+          L80[":80 production"]
+          L81[":81 test"]
+      end
+      Green["🟩 cluster-green<br/>v2.1.0 · 2 task · LIVE"]
+      Blue["🟦 cluster-blue<br/>nodejs-service<br/>desired 2 → 0"]
+      Job["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:36px;height:36px;'/><br/>bluegreen-job4-clear-resource<br/>TARGET_ENV=blue"]
+      User --> L80 --> Green
+      L81 --> Blue
+      Job -->|"update-service --desired-count 0"| Blue
+  </div>
+  <p class="arch-caption">Chỉ scale task về 0 – Cluster, Service, Target Group vẫn giữ nguyên để lần release sau job Deploy scale lên lại.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 3, trạng thái hiện tại: <code>:80</code> → Green (<code>v2.1.0</code>), <code>:81</code> → Blue (<code>v2.0.0</code>).</li>
+    <li>Source code: <code>sourcecode/section_11_deployment_strategy/lab4_clear_resource/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo job bluegreen-job4-clear-resource</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>bluegreen-job4-clear-resource</code>:</p>
+        <ul class="feature-list">
+          <li>General → tick <strong>This project is parameterized</strong> → <strong>Choice Parameter</strong>: Name <code>TARGET_ENV</code>, Choices (mỗi giá trị 1 dòng): <code>blue</code>, <code>green</code></li>
+          <li>Pipeline → Definition <strong>Pipeline script</strong>, dán nội dung <code>lab4_clear_resource/Jenkinsfile-clear</code></li>
+        </ul>
+        <pre class="code-block"><code class="language-groovy">// Section 11 – Job 4: Clear resource – scale ECS Service của môi trường cũ (idle) về 0 task để tiết kiệm chi phí
+// Job: bluegreen-job4-clear-resource | Pipeline definition: Pipeline script (dán nội dung file này)
+// This project is parameterized:
+//   - Choice parameter TARGET_ENV (blue, green – mỗi giá trị 1 dòng) – môi trường cần dọn dẹp
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        AWS_REGION   = 'ap-southeast-1'
+        ALB_NAME     = 'bluegreen-lab-alb'
+        ECS_CLUSTER  = "bluegreen-lab-cluster-${params.TARGET_ENV}"
+        ECS_SERVICE  = 'nodejs-service'
+        TARGET_GROUP = "bluegreen-lab-tg-${params.TARGET_ENV}"
+    }
+
+    stages {
+        stage('Safety check') {
+            steps {
+                // Tuyệt đối không scale về 0 môi trường đang nhận traffic production
+                sh '''
+                    ALB_ARN=$(aws elbv2 describe-load-balancers --region ${AWS_REGION} --names ${ALB_NAME} --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+                    TARGET_TG_ARN=$(aws elbv2 describe-target-groups --region ${AWS_REGION} --names ${TARGET_GROUP} --query 'TargetGroups[0].TargetGroupArn' --output text)
+                    LIVE_TG_ARNS=$(aws elbv2 describe-listeners --region ${AWS_REGION} --load-balancer-arn ${ALB_ARN} | jq -r '.Listeners[] | select(.Port == 80) | .DefaultActions[0].ForwardConfig.TargetGroups[] | select(.Weight &gt; 0) | .TargetGroupArn')
+
+                    if echo "${LIVE_TG_ARNS}" | grep -q "${TARGET_TG_ARN}"; then
+                        echo "ERROR: Môi trường ${TARGET_ENV} đang nhận traffic production (listener :80). Không được dọn dẹp!"
+                        exit 1
+                    fi
+                    echo "OK: ${TARGET_ENV} không nhận traffic production."
+                '''
+            }
+        }
+
+        stage('Scale service to 0') {
+            steps {
+                // ECS tự stop toàn bộ task khi desired count = 0; Cluster, Service, Target Group vẫn giữ nguyên
+                sh '''
+                    aws ecs update-service --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --desired-count 0 --query 'service.{service:serviceName,desired:desiredCount,running:runningCount}'
+                    aws ecs wait services-stable --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE}
+                    aws ecs describe-services --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --query 'services[0].{desired:desiredCount,running:runningCount}'
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Đã scale ${params.TARGET_ENV} về 0 task. Lần release sau, bluegreen-job2-deploy sẽ tự scale lại."
+        }
+    }
+}</code></pre>
+        <p class="code-note">💡 Phiên bản cũ dùng <code>aws ecs list-tasks | xargs aws ecs stop-task</code> để dừng từng task. Với ECS Service, cách đó không đủ: service sẽ tự khởi động lại task để đạt <em>desired count</em>. Cách đúng là đặt <code>--desired-count 0</code> – ECS tự dừng toàn bộ task.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Thử dọn nhầm môi trường production</strong>
+        <p>Chạy job với <code>TARGET_ENV</code> = <code>green</code>. Job fail ở stage <em>Safety check</em>:</p>
+        <pre class="output-box"><code>ERROR: Môi trường green đang nhận traffic production (listener :80). Không được dọn dẹp!
+ERROR: script returned exit code 1
+Finished: FAILURE</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Dọn môi trường cũ (Blue)</strong>
+        <p>Trong thực tế, bước này thực hiện sau một <strong>khoảng thời gian theo dõi</strong> (vd 1 giờ, hoặc hết ngày làm việc) khi chắc chắn version mới ổn định. Chạy job với <code>TARGET_ENV</code> = <code>blue</code>:</p>
+        <pre class="output-box"><code>OK: blue không nhận traffic production.
++ aws ecs update-service ... --desired-count 0 ...
+{
+    "service": "nodejs-service",
+    "desired": 0,
+    "running": 2
+}
++ aws ecs wait services-stable ...
+{
+    "desired": 0,
+    "running": 0
+}
+Đã scale blue về 0 task. Lần release sau, bluegreen-job2-deploy sẽ tự scale lại.
+Finished: SUCCESS</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Kiểm tra kết quả trên Console &amp; ALB</strong>
+        <p>Trên ECS Console → cluster <code>bluegreen-lab-cluster-blue</code> → service <code>nodejs-service</code>: Desired tasks = 0, Running = 0. Target Group <code>bluegreen-lab-tg-blue</code> không còn target. Kiểm tra bằng lệnh:</p>
+        <pre class="command-line" data-prompt="$" data-output="2-5,7"><code class="language-bash">aws ecs describe-services --cluster bluegreen-lab-cluster-blue --services nodejs-service --region ap-southeast-1 --query 'services[0].{desired:desiredCount,running:runningCount}'
+{
+    "desired": 0,
+    "running": 0
+}
+curl -s -o /dev/null -w '%{http_code}\n' http://&lt;alb-dns-name&gt;:81/
+503</code></pre>
+        <p>Production (<code>:80</code>) vẫn trả về <code>v2.1.0</code> bình thường; test listener (<code>:81</code>) trả <code>503</code> vì Target Group Blue không còn task – đúng như mong đợi.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Thử switch khi môi trường test không có task</strong>
+        <p>Chạy <code>bluegreen-job3-switch-traffic</code>: job dừng ở stage <em>Check current state</em> với thông báo <code>Môi trường test không có target healthy</code> – guardrail ngăn bạn switch người dùng sang môi trường rỗng (downtime 100%).</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Quy trình release Blue/Green hoàn chỉnh</h2>
+  <div class="mermaid">
+  flowchart LR
+      T["🏷️ git tag vX.Y.Z"] --> J1["① Job 1 · Build<br/>image :vX.Y.Z"]
+      J1 --> J2["② Job 2 · Deploy<br/>môi trường IDLE"]
+      J2 --> QA{"③ QA test<br/>qua :81"}
+      QA -->|"Fail"| Fix["Sửa code<br/>tag mới"]
+      Fix --> J1
+      QA -->|"Pass"| J3["④ Job 3 · Switch<br/>:80 ↔ :81"]
+      J3 --> Mon{"⑤ Theo dõi<br/>production"}
+      Mon -->|"Lỗi"| RB["Job 3 · Switch lại<br/>= ROLLBACK"]
+      Mon -->|"Ổn định"| J4["⑥ Job 4 · Clear<br/>môi trường cũ"]
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Job</th><th>Tham số</th><th>Khi nào chạy</th><th>Guardrail</th></tr></thead>
+    <tbody>
+      <tr><td><code>bluegreen-job1-build</code></td><td><code>VERSION</code></td><td>Sau khi tạo Git tag release</td><td>Chỉ build từ tag (không build từ nhánh)</td></tr>
+      <tr><td><code>bluegreen-job2-deploy</code></td><td><code>VERSION</code>, <code>TARGET_ENV</code></td><td>Deploy lên môi trường đang idle</td><td>Chặn deploy lên môi trường LIVE; kiểm tra image tồn tại</td></tr>
+      <tr><td><code>bluegreen-job3-switch-traffic</code></td><td>–</td><td>QA đã pass trên <code>:81</code>; hoặc rollback</td><td>Chặn switch khi môi trường mới không có target healthy; <code>input</code> xác nhận</td></tr>
+      <tr><td><code>bluegreen-job4-clear-resource</code></td><td><code>TARGET_ENV</code></td><td>Sau thời gian theo dõi</td><td>Chặn dọn môi trường LIVE</td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-warning"><strong>Trade-off của bước Clear resource:</strong> sau khi môi trường cũ về 0 task, rollback không còn “tức thì” – phải chạy Job 2 deploy lại version cũ vào môi trường đó (2–4 phút) rồi mới switch. Một số team giữ môi trường cũ ở 1 task (<em>warm standby</em>) để cân bằng giữa chi phí và tốc độ rollback.</div>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Job clear với <code>TARGET_ENV = green</code> (production) bị chặn.</li>
+      <li>Job clear với <code>TARGET_ENV = blue</code> thành công, service Blue có desired = running = 0.</li>
+      <li><code>:80</code> vẫn hiển thị <code>v2.1.0</code>, <code>:81</code> trả về <code>503</code>.</li>
+      <li>Job switch bị chặn khi môi trường test không có task.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Task của Blue vẫn chạy lại sau khi bị stop thủ công trên Console</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> ECS Service luôn duy trì đủ <em>desired count</em>.<br/><strong>Giải pháp:</strong> Dùng job này (đặt desired count = 0) thay vì stop từng task.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>terraform apply</code> lại có làm Blue chạy lại 2 task không?</div>
+    <div class="fix"><strong>Không.</strong> ECS Service trong Terraform có <code>ignore_changes = [task_definition, desired_count]</code> – Terraform không ghi đè số task và revision do Jenkins thay đổi.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ nguyên stack để làm Lab 5 (Canary). Nếu không làm Lab 5, chuyển tới chương <strong>Tổng kết section &amp; dọn dẹp resource</strong> để xoá toàn bộ.</div>
+
+</body>
+</html>

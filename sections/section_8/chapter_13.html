@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu Amazon ECR &amp; Amazon ECS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu Amazon ECR &amp; Amazon ECS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Sau khi đóng gói ứng dụng thành Docker image, bạn cần <strong>nơi lưu trữ image</strong> và <strong>nơi chạy container</strong> trên Cloud.
+    Trên AWS, hai dịch vụ cơ bản đảm nhận vai trò này là <strong>Amazon Elastic Container Registry (ECR)</strong> – registry lưu trữ Docker image, và
+    <strong>Amazon Elastic Container Service (ECS)</strong> – dịch vụ chạy và quản lý container. Đây là nền tảng cho các section CI/CD (CodePipeline, Jenkins, GitHub Actions) phía sau.
+  </p>
+
+  <h2 class="section-heading">Amazon Elastic Container Registry (ECR)</h2>
+  <p class="body-text">ECR là dịch vụ của AWS cung cấp khả năng quản lý và lưu trữ Docker image (và các artifact chuẩn OCI), được thiết kế để làm việc với các dịch vụ chạy container của AWS – tương tự Docker Hub nhưng nằm trong AWS account của bạn và được bảo vệ bằng IAM.</p>
+  <ul class="feature-list">
+    <li><strong>Registry:</strong> mỗi AWS account có 1 private registry cho mỗi region, địa chỉ dạng <code>&lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com</code>.</li>
+    <li><strong>Repository:</strong> đơn vị quản lý trong registry. Thông thường một repository chỉ lưu image của <strong>một ứng dụng</strong> (ví dụ <code>my-httpd</code>, <code>order-service</code>).</li>
+    <li><strong>Image &amp; tag:</strong> tương tự Docker image; image trên repository cần đánh tag (<code>1.0</code>, <code>2.0</code>, commit SHA) để quản lý version. Có thể bật <strong>tag immutability</strong> để chặn ghi đè tag đã tồn tại.</li>
+    <li><strong>Bảo mật:</strong> phân quyền push/pull bằng IAM, mã hoá image khi lưu trữ (AES-256 hoặc KMS), quét lỗ hổng bảo mật (image scanning).</li>
+    <li><strong>Lifecycle policy:</strong> tự động xoá image cũ (ví dụ chỉ giữ 10 image gần nhất) để tiết kiệm chi phí lưu trữ.</li>
+  </ul>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/>Developer / CI"]
+      subgraph Reg["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:28px;height:28px;'/> Private registry: 123456789012.dkr.ecr.ap-southeast-1.amazonaws.com"]
+          direction TB
+          subgraph R1["Repository: my-httpd"]
+              I1["🗂️ :1.0"]
+              I2["🗂️ :2.0"]
+          end
+          subgraph R2["Repository: order-service"]
+              I3["🗂️ :a1b2c3d"]
+          end
+      end
+      ECS["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:40px;height:40px;'/><br/>ECS / EKS"]
+      Dev -->|"docker push"| Reg
+      Reg -->|"pull image"| ECS
+  </div>
+
+  <h2 class="section-heading">Amazon Elastic Container Service (ECS)</h2>
+  <p class="body-text">ECS là dịch vụ quản lý container (container orchestration) do AWS cung cấp, cho phép bạn chạy và quản lý các ứng dụng container trên AWS một cách dễ dàng và linh hoạt – không cần tự cài đặt, vận hành control plane như Kubernetes.</p>
+
+  <h3 class="section-subheading">Các tính năng của ECS</h3>
+  <ul class="feature-list">
+    <li><strong>Quản lý đơn giản:</strong> AWS quản lý control plane; bạn chỉ khai báo chạy image nào, bao nhiêu CPU/RAM, bao nhiêu bản sao.</li>
+    <li><strong>Tích hợp với công cụ container:</strong> chạy trực tiếp Docker image (từ ECR, Docker Hub...) mà không cần thay đổi mã nguồn hoặc cấu hình.</li>
+    <li><strong>Mở rộng linh hoạt:</strong> kết hợp Auto Scaling để scale in/out số lượng task theo CPU, memory, số request.</li>
+    <li><strong>Tích hợp dịch vụ AWS khác:</strong> Elastic Load Balancer, ECR, IAM, CloudWatch Logs, Secrets Manager, Service Connect / Cloud Map.</li>
+    <li><strong>Linh hoạt về hạ tầng chạy container:</strong> <strong>EC2 launch type</strong> (bạn quản lý các EC2 trong cluster) hoặc <strong>Fargate</strong> (serverless, không quản lý server), lựa chọn tuỳ nhu cầu và khả năng customize của dự án.</li>
+  </ul>
+
+  <h3 class="section-subheading">Các thành phần của ECS</h3>
+  <div class="mermaid">
+  flowchart TB
+      TD["📄 <b>Task Definition</b><br/>image · CPU/RAM · port · env · log"]
+      subgraph Cluster["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:28px;height:28px;'/> ECS Cluster (Fargate / EC2)"]
+          direction LR
+          subgraph SvcA["Service: frontend (desired = 2)"]
+              direction TB
+              subgraph TA1["Task"]
+                  CA1["📦 Container 1"]
+              end
+              subgraph TA2["Task"]
+                  CA2["📦 Container 1"]
+              end
+          end
+          subgraph SvcB["Service: backend (desired = 1)"]
+              subgraph TB1["Task"]
+                  direction TB
+                  CB1["📦 Container 2"]
+                  CB2["📦 Container 3<br/>(sidecar)"]
+              end
+          end
+          SvcA <-->|"ECS Service Connect"| SvcB
+      end
+      TD -->|"chỉ dẫn tạo task"| Cluster
+  </div>
+  <ul class="feature-list">
+    <li><strong>Cluster:</strong> đơn vị lớn nhất của ECS, nhóm logic cung cấp tài nguyên cần thiết (EC2, Fargate) để chạy ứng dụng.</li>
+    <li><strong>Task Definition:</strong> bản thiết kế (dạng JSON, có revision) chỉ dẫn ECS cách tạo một task: image, CPU/RAM, port mapping, biến môi trường, IAM role, cấu hình log – tương tự file <code>docker-compose.yaml</code>.</li>
+    <li><strong>Task:</strong> một instance đang chạy của task definition, được cấp phát tài nguyên (CPU, RAM). Một task có thể chứa 1 hoặc nhiều container.</li>
+    <li><strong>Service:</strong> duy trì số lượng task mong muốn (desired count), tự thay thế task lỗi, kết nối với Load Balancer và expose ứng dụng ra bên ngoài hoặc nội bộ cluster.</li>
+    <li><strong>Container:</strong> tương tự Docker container – một image đang chạy.</li>
+    <li><strong>ECS Service Connect:</strong> cung cấp cơ chế giao tiếp service-to-service bằng tên ngắn gọn, kèm metrics và retry.</li>
+  </ul>
+
+  <h3 class="section-subheading">So sánh khái niệm Docker Compose và ECS</h3>
+  <table class="compare-table">
+    <thead><tr><th>Docker / Docker Compose</th><th>Amazon ECS</th></tr></thead>
+    <tbody>
+      <tr><td>Docker Hub / registry</td><td>Amazon ECR</td></tr>
+      <tr><td>Máy chạy Docker (1 host)</td><td>Cluster (nhiều EC2 hoặc Fargate)</td></tr>
+      <tr><td><code>docker-compose.yaml</code> (khai báo service)</td><td>Task Definition</td></tr>
+      <tr><td><code>docker run</code> / container</td><td>Task</td></tr>
+      <tr><td><code>replicas: 3</code> + NGINX (Lab 8)</td><td>Service (desired count = 3) + Application Load Balancer</td></tr>
+      <tr><td>Gọi nhau bằng tên service (DNS nội bộ)</td><td>Service Connect / Cloud Map</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Mô hình kiến trúc mẫu trên AWS sử dụng ECS, ECR</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/>Users"]
+      R53["<img src='../../assets/aws-svg/Route-53.svg' style='width:40px;height:40px;'/><br/>Route 53"]
+      subgraph VPC["VPC"]
+          direction LR
+          subgraph Pub["Public subnet (2 AZ)"]
+              ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:40px;height:40px;'/><br/><b>ALB</b>"]
+          end
+          subgraph Priv["Private subnet (2 AZ)"]
+              direction TB
+              subgraph SVC["ECS Service (Fargate)"]
+                  T1["<img src='../../assets/aws-svg/Fargate.svg' style='width:36px;height:36px;'/><br/>Task AZ-a"]
+                  T2["<img src='../../assets/aws-svg/Fargate.svg' style='width:36px;height:36px;'/><br/>Task AZ-c"]
+              end
+              RDS["<img src='../../assets/aws-svg/RDS.svg' style='width:40px;height:40px;'/><br/>RDS MySQL"]
+              REDIS["<img src='../../assets/aws-svg/ElastiCache.svg' style='width:40px;height:40px;'/><br/>ElastiCache Redis"]
+          end
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:40px;height:40px;'/><br/>ECR"]
+      CW["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:40px;height:40px;'/><br/>CloudWatch Logs"]
+      User --> R53 --> ALB
+      ALB --> T1
+      ALB --> T2
+      SVC --> RDS
+      SVC --> REDIS
+      ECR -.->|"pull image"| SVC
+      SVC -.->|"logs"| CW
+  </div>
+  <p class="arch-caption">Phiên bản “production” của Lab 8: ALB thay cho NGINX, ECS Service (Fargate) thay cho các replica, RDS và ElastiCache thay cho container MySQL, Redis. Các công cụ CI/CD (Jenkins, CodePipeline...) chưa thể hiện trong hình.</p>
+
+  <h2 class="section-heading">Trade-off: Fargate vs EC2 launch type</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Fargate</th><th>EC2 launch type</th></tr></thead>
+    <tbody>
+      <tr><td>Quản lý server</td><td>Không cần (serverless)</td><td>Tự quản lý EC2: patch OS, scale cluster, AMI</td></tr>
+      <tr><td>Tính phí</td><td>Theo vCPU/RAM của task, theo giây</td><td>Theo EC2 instance (dù task có dùng hết hay không)</td></tr>
+      <tr><td>Chi phí khi tải lớn, ổn định</td><td>Thường cao hơn</td><td>Rẻ hơn nếu tận dụng tốt (Reserved, Spot, Savings Plans)</td></tr>
+      <tr><td>Tuỳ biến</td><td>Hạn chế (không SSH vào host, không GPU)</td><td>Toàn quyền: instance type, GPU, daemon, agent riêng</td></tr>
+      <tr><td>Phù hợp</td><td>Team nhỏ, bắt đầu nhanh, workload biến động</td><td>Workload lớn, ổn định, cần tối ưu chi phí hoặc phần cứng đặc biệt</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Web application / API</h4>
+      <p>ECS Service + ALB chạy nhiều task ở nhiều AZ, Auto Scaling theo số request, deploy version mới bằng rolling update.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Batch job / scheduled task</h4>
+      <p>Chạy task Fargate theo lịch (EventBridge Scheduler) để xử lý dữ liệu, xuất báo cáo; chỉ trả tiền trong thời gian task chạy.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Pipeline CI/CD container</h4>
+      <p>Pipeline build image → push lên ECR → cập nhật task definition → ECS Service deploy version mới (các section CI/CD tiếp theo).</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Chi phí ECR:</strong> tính theo dung lượng lưu trữ (khoảng 0,10 USD/GB/tháng) và data transfer ra Internet/khác region. Dùng lifecycle policy để xoá image cũ.</li>
+    <li><strong>Chi phí ECS:</strong> bản thân ECS không tính phí; bạn trả tiền cho Fargate (vCPU, RAM theo giây) hoặc EC2, cùng các tài nguyên đi kèm (ALB, NAT Gateway, Public IPv4, CloudWatch Logs).</li>
+    <li><strong>Kiến trúc CPU:</strong> Fargate hỗ trợ <code>X86_64</code> và <code>ARM64</code> (Graviton – rẻ hơn ~20%). Image phải build đúng kiến trúc khai báo trong task definition.</li>
+    <li><strong>Pull image từ private subnet</strong> cần NAT Gateway hoặc VPC Endpoint cho ECR/S3 (đều có phí). Lab trong khoá học dùng public subnet + Public IP để tiết kiệm chi phí.</li>
+  </ul>
+
+</body>
+</html>

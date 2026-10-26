@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Docker Compose Multi Container</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        table { border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
+    </style>
+</head>
+
+<body>
+    <h1 style="color:green;">Welcome to Docker Compose v1.0</h1>
+    <p>Container xử lý request: <strong id="hostname">...</strong></p>
+    <p>Số lượt truy cập (lưu trên Redis): <strong id="visits">...</strong></p>
+
+    <h2>Danh sách nhân viên (đọc từ MySQL)</h2>
+    <table>
+        <thead>
+            <tr><th>ID</th><th>Name</th><th>Age</th><th>Department</th><th>Salary</th></tr>
+        </thead>
+        <tbody id="employees"></tbody>
+    </table>
+
+    <script>
+        fetch('/api/info').then(r => r.json()).then(data => {
+            document.getElementById('hostname').textContent = data.hostname;
+            document.getElementById('visits').textContent = data.visits ?? data.error;
+        });
+
+        fetch('/api/employees').then(r => r.json()).then(data => {
+            const tbody = document.getElementById('employees');
+            if (!Array.isArray(data)) {
+                tbody.innerHTML = '<tr><td colspan="5">Lỗi: ' + data.error + '</td></tr>';
+                return;
+            }
+            data.forEach(e => {
+                const tr = document.createElement('tr');
+                [e.id, e.name, e.age, e.department, e.salary].forEach(v => {
+                    const td = document.createElement('td');
+                    td.textContent = v;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        });
+    </script>
+</body>
+
+</html>

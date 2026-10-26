@@ -1,0 +1,23 @@
+version: 0.2
+
+# Biến S3_BUCKET được khai báo trong phần Environment variables của CodeBuild project
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo Installing NPM dependencies...
+      - npm install
+  build:
+    commands:
+      - echo Build started on `date`
+      - npm run build
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Uploading static files to s3://$S3_BUCKET/nodejs_artifacts/
+      - aws s3 cp --recursive ./dist s3://$S3_BUCKET/nodejs_artifacts/
+
+cache:
+  paths:
+    - 'node_modules/**/*'

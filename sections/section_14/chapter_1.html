@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Container Orchestration &amp; Giới thiệu Kubernetes – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Container Orchestration &amp; Giới thiệu Kubernetes</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu section</h2>
+  <p class="body-text">Ở Section 8 bạn đã biết đóng gói ứng dụng thành Docker image và chạy container. Nhưng khi có hàng chục, hàng trăm container chạy trên nhiều máy chủ, việc quản lý thủ công là bất khả thi. Section này giới thiệu <strong>Kubernetes</strong> – công cụ giúp bạn tự động hoá việc chạy và vận hành container ở quy mô lớn:</p>
+  <ul class="feature-list">
+    <li>Hiểu <strong>Kubernetes là gì</strong> và vì sao nó được dùng phổ biến.</li>
+    <li>Nắm các <strong>thành phần cơ bản</strong> của một Kubernetes cluster (Control Plane, Worker Node, kubectl).</li>
+    <li>Nắm các <strong>khái niệm cơ bản</strong>: Pod, ReplicaSet, Deployment, Service, Ingress, Namespace, ConfigMap, Secret, PersistentVolume, StatefulSet.</li>
+    <li>Thao tác cơ bản với Kubernetes bằng <strong>Minikube</strong>.</li>
+    <li>Triển khai một cluster đơn giản bằng <strong>kops</strong> và EC2.</li>
+    <li>Triển khai một <strong>ứng dụng mẫu</strong> (React + Express + MongoDB) lên Kubernetes cluster.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Container Orchestration</strong> là quá trình tự động hoá việc triển khai, quản lý, mở rộng, di chuyển và giám sát các container.
+    Các công nghệ như <strong>Kubernetes</strong>, Docker Swarm và Mesos được thiết kế để làm việc này.
+    <strong>Kubernetes</strong> (viết tắt k8s – 8 chữ cái giữa chữ "k" và "s") là nền tảng container orchestration mã nguồn mở do <strong>Google</strong> phát triển, giúp quản lý và tự động hoá việc triển khai container, đồng thời cung cấp khả năng mở rộng và linh hoạt cho ứng dụng. Đây là công cụ quan trọng trong việc xây dựng hệ thống phân tán và hiệu quả.
+  </p>
+
+  <h2 class="section-heading">Các công việc container orchestration đảm nhận</h2>
+  <ul class="feature-list">
+    <li><strong>Quản lý vòng đời container:</strong> tạo, chạy, dừng và huỷ container theo ý muốn.</li>
+    <li><strong>Auto scaling:</strong> tự động tăng/giảm số lượng container theo tải thực tế.</li>
+    <li><strong>Recovery (tự phục hồi):</strong> khi container lỗi hoặc node chết, tự khởi động lại ở nơi khác.</li>
+    <li><strong>Load balancing:</strong> phân phối traffic đều giữa các container giống nhau.</li>
+    <li><strong>Networking:</strong> cung cấp kênh giao tiếp ổn định giữa các container.</li>
+    <li><strong>Security:</strong> cung cấp cơ chế bảo mật (phân quyền, cô lập, mạng) cho container.</li>
+    <li><strong>Quản lý cấp phát tài nguyên:</strong> gán CPU/RAM và giới hạn cho từng container.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/svg-icon/developer.svg' style='width:34px;height:34px;'/><br/>Developer<br/>Docker image"]
+      CO["<img src='../../assets/svg-icon/kubernetes.svg' style='width:34px;height:34px;'/><br/>Container Orchestration<br/>(Kubernetes)"]
+      subgraph Nodes["Cluster: nhiều máy chủ (node)"]
+          N1["<img src='../../assets/aws-svg/eks-node.svg' style='width:32px;height:32px;'/><br/>Node 1"]
+          N2["<img src='../../assets/aws-svg/eks-node.svg' style='width:32px;height:32px;'/><br/>Node 2"]
+          N3["<img src='../../assets/aws-svg/eks-node.svg' style='width:32px;height:32px;'/><br/>Node 3"]
+      end
+      Dev -->|"push image"| CO
+      CO -->|"scheduling · scaling · recovery · networking"| Nodes
+  </div>
+  <p class="arch-caption">Thay vì tự tay chọn máy chạy container và theo dõi trạng thái, bạn chỉ cần khai báo trạng thái mong muốn; Kubernetes tự phân bổ, mở rộng và phục hồi container trên toàn bộ các node.</p>
+
+  <h2 class="section-heading">Lịch sử hình thành Kubernetes</h2>
+  <table class="compare-table">
+    <thead><tr><th>Năm</th><th>Sự kiện</th></tr></thead>
+    <tbody>
+      <tr><td>2003–2004</td><td>Google xây dựng hệ thống <strong>Borg</strong> – hệ thống quản lý cluster nội bộ quy mô lớn, chạy hàng trăm nghìn task từ nhiều ứng dụng trên nhiều cụm máy chủ.</td></tr>
+      <tr><td>2013</td><td>Google giới thiệu <strong>Omega</strong>, hệ thống quản lý cluster linh hoạt hơn, mở rộng cho các cụm máy tính lớn.</td></tr>
+      <tr><td>2014</td><td>Google ra mắt <strong>Kubernetes</strong> như phiên bản mã nguồn mở của Borg. Ngày 7/6 push lên GitHub; ngày 10/7 Microsoft, RedHat, IBM và Docker gia nhập cộng đồng.</td></tr>
+      <tr><td>2015</td><td>Kubernetes <strong>v1.0</strong> phát hành. Google hợp tác với Linux Foundation thành lập <strong>CNCF</strong> (Cloud Native Computing Foundation) để xây dựng hệ sinh thái cloud-native.</td></tr>
+      <tr><td>2016</td><td>Kubernetes trở nên <strong>chính thức</strong>: Helm (trình quản lý gói) phát hành, nhiều công ty (Deis, OpenShift, Huawei, Gondor...) tham gia phát triển.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Vì sao Kubernetes được dùng phổ biến?</h2>
+  <ul class="feature-list">
+    <li><strong>Tự động hoá:</strong> định nghĩa rule &amp; policy để Kubernetes tự thực hiện việc triển khai, mở rộng và quản lý thay bạn.</li>
+    <li><strong>Mở rộng linh hoạt:</strong> scale-out thêm container mới dễ dàng mà không làm gián đoạn dịch vụ.</li>
+    <li><strong>Cô lập &amp; độ tin cậy:</strong> các container được cô lập; khi một container gặp sự cố, Kubernetes tự khởi động lại.</li>
+    <li><strong>Phân tán &amp; hiệu quả:</strong> triển khai ứng dụng trên nhiều máy chủ, tận dụng tối đa tài nguyên.</li>
+    <li><strong>Cộng đồng mạnh mẽ:</strong> dự án mã nguồn mở, cộng đồng lớn, nhiều tài liệu và công cụ hỗ trợ.</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Chuẩn hoá cách chạy container, chạy được trên mọi cloud (AWS, GCP, Azure) và cả on-premise.</li>
+        <li>Tự phục hồi và tự mở rộng, giảm công vận hành thủ công.</li>
+        <li>Hệ sinh thái khổng lồ: Helm, Istio, Prometheus, ArgoCD... hỗ trợ mọi nhu cầu.</li>
+        <li>Khai báo bằng YAML (declarative), dễ review, dễ đưa vào CI/CD và GitOps.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Đường cong học tập dốc; nhiều khái niệm và thành phần cần nắm.</li>
+        <li>Tự vận hành cluster phức tạp và tốn kém (control plane, upgrade, bảo mật).</li>
+        <li>Với ứng dụng nhỏ chỉ vài container, Kubernetes có thể là "quá mức cần thiết".</li>
+        <li>Khó quản lý stateful app (database) một cách triệt để.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="body-text"><strong>Khi nào nên dùng:</strong> ứng dụng nhiều container cần scale, chạy lâu dài và cần vận hành tự động. <strong>Khi nào không nên:</strong> ứng dụng đơn giản chỉ 1–2 container hoặc chạy ngắn hạn — dùng Docker Compose / ECS có thể đơn giản hơn.</p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Nền tảng microservices</h4>
+      <p>Hàng chục service độc lập được đóng gói thành container, triển khai và scale riêng từng service, giao tiếp qua Service/Ingress.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Hạ tầng multi-cloud / hybrid</h4>
+      <p>Cùng một manifest chạy được trên AWS (EKS), GCP (GKE), Azure (AKS) hay on-premise, giúp dễ di chuyển giữa các nhà cung cấp.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Nền tảng CI/CD &amp; môi trường dev</h4>
+      <p>Dựng môi trường dev/test/staging nhanh bằng Minikube/kind, triển khai bằng GitOps (ArgoCD) để mọi thay đổi đều qua Git.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Các công nghệ tương tự:</strong> Docker Swarm (đơn giản, ít tính năng), Apache Mesos/Marathon (ít phổ biến hơn), Nomad (Hashicorp). Kubernetes hiện là lựa chọn "de facto" của ngành.</li>
+    <li><strong>Tên gọi:</strong> "Kubernetes" tiếng Hy Lạp nghĩa là "người lái tàu / hoa tiêu"; logo là hình bánh lái 7 nan. "k8s" là cách viết tắt thường gặp.</li>
+    <li><strong>Trên AWS:</strong> bạn có thể tự cài Kubernetes lên EC2 (dùng kops – sẽ thực hành ở Lab 4) hoặc dùng dịch vụ managed <strong>Amazon EKS</strong> (học ở Section 14) để AWS lo phần control plane.</li>
+    <li><strong>Liên hệ kiến thức cũ:</strong> image được build ở Section 8 (Docker), đẩy lên ECR; Kubernetes chỉ là nơi <em>chạy</em> image. Một image tốt là điều kiện tiên quyết để Kubernetes hoạt động trơn tru.</li>
+  </ul>
+
+</body>
+</html>

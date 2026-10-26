@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jenkins Pipeline: Jenkinsfile, Declarative vs Scripted – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Jenkins Pipeline: Jenkinsfile, Declarative vs Scripted</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Job <strong>Freestyle</strong> cấu hình hoàn toàn bằng giao diện – dễ bắt đầu nhưng khó review, khó tái sử dụng và không có lịch sử thay đổi.
+    <strong>Jenkins Pipeline</strong> giải quyết vấn đề này bằng cách mô tả toàn bộ luồng CI/CD dưới dạng code (<strong>Pipeline as Code</strong>), viết bằng
+    cú pháp dựa trên Groovy và thường lưu trong file <code>Jenkinsfile</code> cùng repository với source code. Pipeline có 2 kiểu cú pháp:
+    <strong>Declarative</strong> (khuyến khích dùng) và <strong>Scripted</strong> (kiểu cũ, linh hoạt hơn).
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Pipeline as Code:</strong> <code>Jenkinsfile</code> được commit, review qua Pull Request và có lịch sử trên Git như mọi file code khác.</li>
+    <li><strong>Chia stage rõ ràng:</strong> Checkout → Build → Test → Push → Deploy hiển thị trực quan trên giao diện (Stage View / Pipeline Graph), biết ngay stage nào lỗi.</li>
+    <li><strong>Bền vững (durable):</strong> pipeline có thể tiếp tục sau khi Jenkins restart; hỗ trợ chờ input (approval), chạy song song (<code>parallel</code>).</li>
+    <li><strong>Xử lý kết quả:</strong> khối <code>post</code> (always / success / failure) để dọn dẹp, gửi notification.</li>
+    <li><strong>Điều kiện &amp; tham số:</strong> <code>when</code> để bật/tắt stage, <code>parameters</code> để nhận input khi build.</li>
+    <li><strong>Tái sử dụng:</strong> cùng một <code>Jenkinsfile</code> chạy được cho nhiều nhánh (Multibranch Pipeline), có thể tách hàm dùng chung thành <em>Shared Library</em>.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">Một job CI và một job CD điển hình</h3>
+  <div class="mermaid">
+  flowchart LR
+      subgraph CI["🔁 Job CI"]
+          direction LR
+          C1["📥 Checkout<br/>source code"] --> C2["🔨 Build<br/>mvn · npm · docker"]
+          C2 --> C3["🧪 Test<br/>unit test · scan"]
+          C3 --> C4["📦 Push artifact<br/>S3 · ECR"]
+      end
+      subgraph CD["🚀 Job CD (một hoặc kết hợp)"]
+          direction TB
+          D1["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> <img src='../../assets/aws-svg/Elastic-Beanstalk.svg' style='width:26px;height:26px;'/> Deploy lên EC2 / Beanstalk"]
+          D2["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:26px;height:26px;'/> <img src='../../assets/aws-svg/EKS.svg' style='width:26px;height:26px;'/> Rollout trên ECS / EKS"]
+          D3["<img src='../../assets/aws-svg/S3.svg' style='width:26px;height:26px;'/> <img src='../../assets/aws-svg/CloudFront.svg' style='width:26px;height:26px;'/> Upload S3 + clear cache CloudFront"]
+          D4["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:26px;height:26px;'/> Blue/Green · Canary với ALB / CodeDeploy"]
+      end
+      C4 --> CD
+  </div>
+  <p class="arch-caption">Job CI tạo ra artifact; job CD đưa artifact đó lên môi trường đích. Hai phần có thể nằm chung một pipeline (Lab 9) hoặc tách thành 2 job (Lab 6 + Lab 7).</p>
+
+  <h3 class="section-subheading">Cấu trúc một Declarative Pipeline</h3>
+  <div class="mermaid">
+  flowchart TB
+      P["<b>pipeline { }</b>"] --> A["agent – chạy ở đâu"]
+      P --> O["options · tools · parameters · environment<br/>cấu hình chung"]
+      P --> S["<b>stages { }</b>"]
+      S --> S1["stage('Build') { steps { sh ... } }"]
+      S --> S2["stage('Deploy') { when { ... } steps { ... } }"]
+      P --> PO["post { always · success · failure }"]
+  </div>
+  <pre class="code-block"><code class="language-groovy">pipeline {
+    agent any                          // chạy trên agent bất kỳ (lab: built-in node)
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+    }
+
+    tools {
+        maven 'M3'                     // tool khai báo ở Manage Jenkins -&gt; Tools
+    }
+
+    parameters {
+        choice(name: 'ACTION', choices: ['BuildAndDeploy', 'OnlyBuild'])
+    }
+
+    environment {
+        AWS_REGION = 'ap-southeast-1'  // biến môi trường cho mọi stage
+        IMAGE_TAG  = "ver-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                sh 'mvn -B clean package'
+            }
+        }
+        stage('Deploy') {
+            when {
+                expression { params.ACTION == 'BuildAndDeploy' }
+            }
+            steps {
+                echo "Deploying ${IMAGE_TAG} to ${AWS_REGION}"
+            }
+        }
+    }
+
+    post {
+        always  { echo 'Luôn chạy – dọn dẹp workspace, docker image...' }
+        success { echo 'Gửi notification thành công' }
+        failure { echo 'Gửi notification lỗi' }
+    }
+}</code></pre>
+
+  <table class="compare-table">
+    <thead><tr><th>Directive</th><th>Ý nghĩa</th><th>Dùng ở lab</th></tr></thead>
+    <tbody>
+      <tr><td><code>agent</code></td><td>Nơi chạy pipeline: <code>any</code>, theo label, hoặc trong Docker container</td><td>Mọi lab</td></tr>
+      <tr><td><code>tools</code></td><td>Thêm JDK, Maven... đã khai báo vào <code>PATH</code></td><td>Lab 4</td></tr>
+      <tr><td><code>environment</code></td><td>Khai báo biến môi trường; có thể lấy credential bằng <code>credentials('id')</code></td><td>Lab 4 → 12</td></tr>
+      <tr><td><code>parameters</code></td><td>Khai báo tham số ngay trong Jenkinsfile (thay cho tick "This project is parameterized")</td><td>Lab 3 (tham khảo)</td></tr>
+      <tr><td><code>options</code></td><td><code>timeout</code>, <code>disableConcurrentBuilds</code>, <code>buildDiscarder</code>...</td><td>Lab 7, 9, 10</td></tr>
+      <tr><td><code>stages / stage / steps</code></td><td>Các giai đoạn và các bước thực thi (<code>sh</code>, <code>echo</code>, <code>git</code>, <code>archiveArtifacts</code>...)</td><td>Mọi lab</td></tr>
+      <tr><td><code>when</code></td><td>Điều kiện chạy stage: theo branch, theo expression, theo parameter</td><td>Lab 10</td></tr>
+      <tr><td><code>post</code></td><td>Hành động sau khi pipeline/stage kết thúc theo kết quả</td><td>Lab 4, 6, 12</td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-tip"><strong>Nháy đơn hay nháy kép?</strong> <code>sh 'echo ${IMAGE_TAG}'</code> (nháy đơn) – <strong>shell</strong> đọc biến môi trường lúc chạy; <code>sh "echo ${IMAGE_TAG}"</code> (nháy kép) – <strong>Groovy</strong> thay giá trị vào chuỗi trước khi gửi cho shell. Với secret, luôn dùng nháy đơn để giá trị không bị Groovy chèn thẳng vào script và log.</div>
+
+  <h3 class="section-subheading">Scripted Pipeline</h3>
+  <p class="body-text">Scripted Pipeline là dạng cũ của Jenkins Pipeline, viết bằng Groovy gần như "tự do": bắt đầu bằng khối <code>node</code> và thực thi tuần tự từ đầu đến cuối trong khối đó. Bạn sẽ thực hành ở Lab 11.</p>
+  <pre class="code-block"><code class="language-groovy">node {
+    try {
+        stage('Checkout') {
+            git branch: 'master', url: 'https://github.com/&lt;your-github-username&gt;/nodejs-random-color.git'
+        }
+        stage('Build') {
+            def tags = ["ver-${env.BUILD_NUMBER}", 'latest']   // biến &amp; logic Groovy tuỳ ý
+            for (t in tags) {
+                sh "docker build -t nodejs-random-color:${t} ."
+            }
+        }
+    } catch (err) {
+        currentBuild.result = 'FAILURE'
+        throw err
+    } finally {
+        echo "Kết quả: ${currentBuild.currentResult}"           // tương đương post { always }
+    }
+}</code></pre>
+
+  <h2 class="section-heading">Trade-off: Freestyle vs Declarative vs Scripted</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Freestyle</th><th>Declarative Pipeline</th><th>Scripted Pipeline</th></tr></thead>
+    <tbody>
+      <tr><td>Cách định nghĩa</td><td>Giao diện web</td><td>Code, cú pháp cố định: <code>pipeline</code>, <code>agent</code>, <code>stages</code>, <code>steps</code>, <code>post</code></td><td>Code Groovy linh hoạt, bắt đầu bằng <code>node</code></td></tr>
+      <tr><td>Độ phức tạp</td><td>Đơn giản, hạn chế cho luồng nhiều bước</td><td>Dễ đọc, dễ học, đủ cho đa số trường hợp</td><td>Cho phép logic phức tạp (vòng lặp, hàm, try/catch)</td></tr>
+      <tr><td>Quản lý lỗi</td><td>Post-build actions</td><td>Khối <code>post</code> có sẵn</td><td>Tự viết <code>try / catch / finally</code></td></tr>
+      <tr><td>Kiểm tra cú pháp</td><td>–</td><td>Validate trước khi chạy, báo lỗi rõ ràng</td><td>Lỗi chỉ phát hiện khi chạy tới dòng đó</td></tr>
+      <tr><td>Version control</td><td>Không (chỉ lưu XML trên server)</td><td>Có (<code>Jenkinsfile</code>)</td><td>Có (<code>Jenkinsfile</code>)</td></tr>
+      <tr><td>Khuyến nghị</td><td>Job rất đơn giản, thử nghiệm nhanh</td><td><strong>Mặc định nên dùng</strong></td><td>Hệ thống cũ, hoặc dùng khối <code>script { }</code> bên trong Declarative khi cần logic phức tạp</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Các phương án tạo &amp; quản lý job</h3>
+  <table class="compare-table">
+    <thead><tr><th>Phương án</th><th>Mô tả</th><th>Ưu / nhược điểm</th><th>Lab</th></tr></thead>
+    <tbody>
+      <tr><td>Freestyle project</td><td>Cấu hình bằng các ô nhập liệu trên Dashboard</td><td>Dễ nhất; không review/version được</td><td>2, 3, 4</td></tr>
+      <tr><td>Pipeline – <em>Pipeline script</em></td><td>Dán Jenkinsfile trực tiếp vào ô script của job</td><td>Nhanh để học &amp; thử; script vẫn nằm trên server</td><td>4 → 7, 10 → 12</td></tr>
+      <tr><td>Pipeline – <em>Pipeline script from SCM</em></td><td>Jenkins đọc <code>Jenkinsfile</code> từ repository Git</td><td><strong>Best practice</strong>: code &amp; pipeline cùng repository, review qua PR</td><td>8, 9</td></tr>
+      <tr><td>Repository riêng chứa định nghĩa job</td><td>Một repo độc lập chứa Jenkinsfile của nhiều dự án, hoặc dùng Job DSL / Configuration as Code (JCasC)</td><td>Quản lý tập trung cho nhiều team; phức tạp hơn</td><td>–</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Chuẩn hoá CI cho cả công ty</h4>
+      <p>Mỗi repository có một <code>Jenkinsfile</code> Declarative theo mẫu chung (Checkout → Build → Test → Scan → Push). Thay đổi pipeline được review qua Pull Request như code.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Release có điều kiện</h4>
+      <p>Pipeline nhận parameter <code>ACTION</code>, dùng <code>when</code> để chỉ build, chỉ deploy (rollback về version cũ) hoặc cả hai – một job phục vụ nhiều tình huống vận hành.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Logic phức tạp</h4>
+      <p>Deploy lần lượt lên danh sách 10 region, retry khi lỗi, đọc file cấu hình để quyết định bước tiếp theo – dùng khối <code>script { }</code> trong Declarative hoặc Scripted Pipeline.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Pipeline Syntax / Snippet Generator:</strong> trong trang cấu hình Pipeline job có link <em>Pipeline Syntax</em> – chọn step (ví dụ <code>git</code>, <code>withCredentials</code>, <code>checkout</code>) và điền form để Jenkins sinh code giúp bạn.</li>
+    <li><strong>Replay:</strong> với Pipeline job, có thể sửa tạm script và chạy lại một build cũ mà không cần sửa job – tiện để debug.</li>
+    <li><strong>Mỗi <code>sh</code> là một process riêng:</strong> biến shell khai báo trong <code>sh</code> trước không tồn tại ở <code>sh</code> sau – gộp các lệnh liên quan vào một khối <code>sh '''...'''</code>, hoặc ghi ra file / dùng <code>environment</code>.</li>
+    <li><strong>Đừng chạy logic nặng bằng Groovy:</strong> code Groovy chạy trên controller; công việc build/test nên nằm trong <code>sh</code> để chạy trên agent.</li>
+    <li><strong>Multibranch Pipeline:</strong> tự tạo job con cho mỗi nhánh/PR có <code>Jenkinsfile</code> – bước tiếp theo nên tìm hiểu sau khi hoàn thành section.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 7: Docker Compose – Multi container (Node.js, Redis, MySQL) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 7: Docker Compose – Multi container (Node.js, Redis, MySQL)</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Viết file <code>docker-compose.yaml</code> start 3 service: <strong>web</strong> (Node.js), <strong>cache</strong> (Redis), <strong>db</strong> (MySQL).</li>
+    <li>Tạo <strong>named volume</strong> riêng cho MySQL để dữ liệu không mất khi xoá container.</li>
+    <li>Dùng <code>healthcheck</code> + <code>depends_on</code> để web chỉ start khi MySQL đã sẵn sàng; quản lý password bằng file <code>.env</code>.</li>
+    <li>Truy cập website Node.js (đọc dữ liệu từ MySQL, đếm lượt truy cập bằng Redis) và kết nối MySQL qua host port bằng MySQL Workbench.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/>Browser"]
+      WB["<img src='../../assets/svg-icon/mysql-workbench.svg' style='width:40px;height:40px;'/><br/>MySQL Workbench"]
+      subgraph Proj["Compose project: lab7_compose_multi (network lab7_compose_multi_default)"]
+          direction LR
+          WEB["📦 <b>web</b><br/>Node.js :3000"]
+          CACHE["<img src='../../assets/aws-svg/ElastiCache.svg' style='width:36px;height:36px;'/><br/><b>cache</b><br/>redis:7-alpine :6379"]
+          DB["<img src='../../assets/svg-icon/database.svg' style='width:36px;height:36px;'/><br/><b>db</b><br/>mysql:8.4 :3306"]
+          VOL["💾 volume<br/>db-data"]
+          WEB -->|"INCR visits"| CACHE
+          WEB -->|"SELECT employee"| DB
+          DB --- VOL
+      end
+      User -->|"localhost:8080"| WEB
+      WB -->|"localhost:3306"| DB
+  </div>
+  <p class="arch-caption">Chỉ <code>web</code> (8080) và <code>db</code> (3306) được publish ra host; <code>cache</code> chỉ truy cập được từ bên trong network của Compose.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 6, port <code>8080</code> và <code>3306</code> trên host đang trống.</li>
+    <li>(Tuỳ chọn) MySQL Workbench để kiểm tra database. Nếu dùng EC2: Security Group mở port <code>3306</code> cho My IP.</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab7_compose_multi/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu cấu trúc project</strong>
+        <pre class="file-tree"><span class="dir">lab7_compose_multi/</span>
+├── <span class="file">docker-compose.yaml</span>
+├── <span class="file">.env.example</span>        <span class="desc"># mẫu biến môi trường (password)</span>
+├── <span class="file">commands.sh</span>
+├── <span class="dir">db/</span>
+│   └── <span class="file">init.sql</span>        <span class="desc"># tạo bảng employee + 10 dòng dữ liệu mẫu</span>
+└── <span class="dir">web/</span>
+    ├── <span class="file">Dockerfile</span>
+    ├── <span class="file">index.js</span>        <span class="desc"># API /api/info (Redis) và /api/employees (MySQL)</span>
+    ├── <span class="file">package.json</span>    <span class="desc"># express, mysql2, redis</span>
+    └── <span class="dir">public/</span>
+        └── <span class="file">index.html</span></pre>
+        <p>Trong <code>index.js</code>, ứng dụng kết nối tới MySQL bằng host <code>db</code> và Redis bằng host <code>cache</code> – chính là <strong>tên service</strong> trong file compose. Docker cung cấp DNS nội bộ để phân giải các tên này thành IP của container.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo file .env chứa password</strong>
+        <p>Không hard-code password trong file compose. Copy file mẫu thành <code>.env</code>, sau đó mở <code>.env</code> và đổi password theo ý bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd lab7_compose_multi
+cp .env.example .env</code></pre>
+        <pre class="code-block"><code class="language-bash">MYSQL_ROOT_PASSWORD=ChangeMeRoot123
+MYSQL_PASSWORD=ChangeMeApp123</code></pre>
+        <p class="code-note">💡 File <code>.env</code> đã có trong <code>.gitignore</code> của repository – không commit password lên Git.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Viết file docker-compose.yaml</strong>
+        <pre class="code-block"><code class="language-yaml">services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: compose-multi-web:1.0
+    ports:
+      - "8080:3000"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=db
+      - DB_USER=appuser
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=testdb
+      - REDIS_HOST=cache
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.4
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=testdb
+      - MYSQL_USER=appuser
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      # Named volume: dữ liệu MySQL được giữ lại kể cả khi container bị xoá
+      - db-data:/var/lib/mysql
+      # Script khởi tạo bảng &amp; dữ liệu mẫu (chỉ chạy lần đầu khi volume rỗng)
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  db-data:</code></pre>
+        <ul class="feature-list">
+          <li><code>${MYSQL_PASSWORD}</code>: Compose thay bằng giá trị trong <code>.env</code>. <code>$${...}</code> (2 dấu <code>$</code>) giữ nguyên biến để shell <strong>bên trong container</strong> tự đọc.</li>
+          <li>Image <code>mysql</code> tự tạo database <code>testdb</code> và user <code>appuser</code> từ các biến <code>MYSQL_*</code>, rồi chạy các file trong <code>/docker-entrypoint-initdb.d/</code>.</li>
+          <li><code>condition: service_healthy</code>: <code>web</code> chỉ start khi healthcheck của <code>db</code> trả về thành công.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Start toàn bộ service</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose config
+docker compose up -d --build</code></pre>
+        <p>MySQL cần khoảng 20–40 giây để khởi tạo lần đầu. Theo dõi trạng thái tới khi <code>db</code> là <strong>(healthy)</strong> và <code>web</code> là <strong>Up</strong>:</p>
+        <pre class="command-line" data-prompt="$" data-output="2-5"><code class="language-bash">docker compose ps
+NAME                         IMAGE                   SERVICE   STATUS                    PORTS
+lab7_compose_multi-cache-1   redis:7-alpine          cache     Up 40 seconds             6379/tcp
+lab7_compose_multi-db-1      mysql:8.4               db        Up 40 seconds (healthy)   0.0.0.0:3306-&gt;3306/tcp, 33060/tcp
+lab7_compose_multi-web-1     compose-multi-web:1.0   web       Up 8 seconds              0.0.0.0:8080-&gt;3000/tcp</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose logs -f db</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Truy cập website Node.js</strong>
+        <p>Mở <code>http://localhost:8080</code> (hoặc <code>http://&lt;EC2_PUBLIC_IP&gt;:8080</code>): trang hiển thị hostname của container, số lượt truy cập (tăng mỗi lần refresh) và bảng 10 nhân viên đọc từ MySQL.</p>
+        <pre class="command-line" data-prompt="$" data-output="2,4"><code class="language-bash">curl http://localhost:8080/api/info
+{"hostname":"e7ce29911252","visits":1}
+curl http://localhost:8080/api/employees
+[{"id":1,"name":"John Doe","age":30,"department":"IT","salary":"5000.00"},...]</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Kiểm tra Redis &amp; MySQL từ bên trong</strong>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">docker compose exec cache redis-cli GET visits
+"3"</code></pre>
+        <p>Nhập giá trị <code>MYSQL_PASSWORD</code> trong <code>.env</code> khi được hỏi password:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose exec db mysql -uappuser -p testdb -e "SELECT COUNT(*) FROM employee;"</code></pre>
+        <p>Kiểm tra network, volume do Compose tạo và DNS nội bộ:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker network ls
+docker volume ls
+docker compose exec web ping -c 2 db</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kết nối MySQL bằng MySQL Workbench</strong>
+        <p>Tạo connection mới trong MySQL Workbench với các thông số:</p>
+        <ul class="feature-list">
+          <li>Hostname: <code>127.0.0.1</code> (hoặc <code>&lt;EC2_PUBLIC_IP&gt;</code>), Port: <code>3306</code></li>
+          <li>Username: <code>appuser</code>, Password: giá trị <code>MYSQL_PASSWORD</code> trong <code>.env</code></li>
+          <li>Default Schema: <code>testdb</code></li>
+        </ul>
+        <p>Chạy câu lệnh <code>SELECT * FROM employee;</code>, sau đó thử thêm 1 nhân viên mới và refresh website để thấy dữ liệu mới:</p>
+        <pre class="code-block"><code class="language-sql">INSERT INTO employee (id, name, age, department, salary) VALUES (11, 'Your Name', 25, 'DevOps', 8000.00);</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Kiểm chứng dữ liệu được giữ lại nhờ volume</strong>
+        <p><code>down</code> xoá toàn bộ container và network, nhưng named volume <code>db-data</code> vẫn còn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose down
+docker volume ls
+docker compose up -d
+curl http://localhost:8080/api/employees</code></pre>
+        <p>Nhân viên số 11 vẫn còn. Ngược lại, bộ đếm <code>visits</code> của Redis bắt đầu lại từ đầu vì service <code>cache</code> không dùng volume.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>3 service ở trạng thái Up, <code>db</code> có trạng thái <strong>(healthy)</strong>.</li>
+      <li>Website hiển thị số lượt truy cập tăng dần và danh sách nhân viên từ MySQL.</li>
+      <li>Kết nối được MySQL bằng MySQL Workbench qua port 3306.</li>
+      <li>Sau <code>down</code> → <code>up</code>, dữ liệu MySQL vẫn còn.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Bind for 0.0.0.0:3306 failed: port is already allocated</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Máy bạn đã có MySQL (cài trực tiếp hoặc container khác) dùng port 3306.<br/><strong>Giải pháp:</strong> Đổi mapping thành <code>"3307:3306"</code> trong file compose và dùng port 3307 khi kết nối từ MySQL Workbench. Kết nối giữa <code>web</code> và <code>db</code> không bị ảnh hưởng vì dùng port nội bộ 3306.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>dependency failed to start: container lab7_compose_multi-db-1 is unhealthy</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> MySQL khởi tạo lỗi (thường do thiếu file <code>.env</code> nên password rỗng) hoặc máy yếu khởi tạo quá lâu.<br/><strong>Giải pháp:</strong> Kiểm tra <code>docker compose config</code> có giá trị password; xem <code>docker compose logs db</code>; chạy lại <code>docker compose up -d</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>/api/employees</code> trả về <code>Table 'testdb.employee' doesn't exist</code> hoặc <code>Access denied for user 'appuser'</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Script init và các biến <code>MYSQL_*</code> chỉ có tác dụng khi volume <strong>rỗng</strong>. Nếu volume đã được tạo từ lần chạy lỗi trước đó (hoặc bạn đổi password sau lần chạy đầu), MySQL bỏ qua bước khởi tạo.<br/><strong>Giải pháp:</strong> <code>docker compose down -v</code> để xoá volume rồi <code>docker compose up -d</code> lại (dữ liệu cũ sẽ mất).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>WARN The "MYSQL_PASSWORD" variable is not set. Defaulting to a blank string.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa tạo file <code>.env</code>, hoặc file nằm sai thư mục.<br/><strong>Giải pháp:</strong> Tạo <code>.env</code> cùng thư mục với <code>docker-compose.yaml</code> (Bước 2).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">docker compose down -v --rmi local</code></pre>
+  <p class="body-text"><code>-v</code> xoá named volume <code>db-data</code> (toàn bộ dữ liệu MySQL), <code>--rmi local</code> xoá image do Compose build (<code>compose-multi-web:1.0</code>).</p>
+  <div class="alert alert-info">Nếu dùng EC2, hãy xoá inbound rule port <code>3306</code> trong Security Group khi không còn cần kết nối MySQL Workbench.</div>
+
+</body>
+</html>

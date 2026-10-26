@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Volume trong EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Volume trong EKS</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt <strong>EBS CSI Driver</strong> cho cluster.</li>
+    <li>Sử dụng <strong>EBS</strong> làm StorageClass, cấp volume qua <strong>PV &amp; PVC</strong> cho MongoDB.</li>
+    <li>Kiểm tra khả năng <strong>persist data</strong> khi Pod MongoDB bị xoá.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      SC["🗂️ StorageClass ebs-sc"]
+      PVC["📄 PVC mongo-pvc (4Gi)"]
+      EBS["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:32px;height:32px;'/><br/>EBS Volume<br/>4GB"]
+      P["<img src='../../assets/svg-icon/eks-pod.svg' style='width:30px;height:30px;'/><br/>MongoDB Pod<br/>mount /data/db"]
+      SC --> PVC --> EBS
+      P --> PVC
+  </div>
+  <p class="arch-caption">MongoDB Pod gắn EBS volume (qua PVC) vào <code>/data/db</code>. Khi Pod bị xoá, volume vẫn giữ nguyên dữ liệu.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã có EKS Cluster (Lab 1) và AWS Load Balancer Controller (Lab 2).</li>
+    <li>Source code: <code>sourcecode/section_14_eks_basic/lab3_ebs_volume/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo IAM Role cho EBS CSI Driver</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create iamserviceaccount \
+    --name ebs-csi-controller-sa \
+    --namespace kube-system \
+    --cluster devops-test-cluster \
+    --role-name AmazonEKS_EBS_CSI_DriverRole \
+    --role-only \
+    --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+    --approve</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cài đặt EBS CSI Driver add-on</strong>
+        <p>Thay <code>&lt;AWS_ACCOUNT_ID&gt;</code> bằng Account ID của bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl create addon --name aws-ebs-csi-driver --cluster devops-test-cluster \
+    --service-account-role-arn arn:aws:iam::&lt;AWS_ACCOUNT_ID&gt;:role/AmazonEKS_EBS_CSI_DriverRole --force</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Chuẩn bị resource sử dụng EBS StorageClass</strong>
+        <p>Tạo file <code>demo-app.yaml</code> gồm StorageClass, PVC, Deployment MongoDB gắn volume. Tham khảo các phần chính:</p>
+        <pre class="code-block"><code class="language-yaml"># Storage class
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-sc
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+---
+# Persistent Volume Claim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ebs-sc
+  resources:
+    requests:
+      storage: 4Gi
+---
+# MongoDB Deployment (gắn PVC vào /data/db)
+spec:
+  containers:
+  - name: mongo
+    image: public.ecr.aws/docker/library/mongo:4.2.24
+    volumeMounts:
+    - name: mongo-data
+      mountPath: /data/db
+  volumes:
+  - name: mongo-data
+    persistentVolumeClaim:
+      claimName: mongo-pvc</code></pre>
+        <p class="code-note">💡 File đầy đủ (kèm backend/frontend/Ingress) tại <code>lab3_ebs_volume/demo-app.yaml</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Apply resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f demo-app.yaml</code></pre>
+        <p>Kiểm tra các resource:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get storageclass
+kubectl get pvc
+kubectl get pv
+kubectl get pods
+kubectl get deployment
+kubectl get service
+kubectl get ingress</code></pre>
+        <p>Vào AWS Console kiểm tra EBS volume đã được tạo (tên <code>devops-test-cluster-dynamic-pvc-xxxxx</code>, size <strong>4GB</strong>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Insert dữ liệu</strong>
+        <p>Truy cập ứng dụng qua DNS của ALB và thêm vài dữ liệu vào MongoDB.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Xoá Pod MongoDB để test persist data</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods
+kubectl delete pod &lt;pod-name&gt;</code></pre>
+        <p>Quan sát Pod mới được tạo lại (do Deployment quản lý).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kiểm tra data còn hay mất</strong>
+        <p>Truy cập lại ứng dụng qua ALB, kiểm tra dữ liệu đã insert vẫn còn (vì nằm trong EBS volume, không mất theo Pod).</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get pvc</code> cho thấy PVC <code>mongo-pvc</code> ở trạng thái <strong>Bound</strong>.</li>
+      <li>EBS volume 4GB xuất hiện trên AWS Console.</li>
+      <li>Sau khi xoá Pod MongoDB, dữ liệu vẫn còn khi truy cập lại ứng dụng.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">PVC mãi ở trạng thái <code>Pending</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> EBS CSI Driver chưa cài đúng hoặc thiếu IAM Role.<br/><strong>Giải pháp:</strong> kiểm tra add-on <code>aws-ebs-csi-driver</code>, xem log Pod <code>ebs-csi-controller</code> trong <code>kube-system</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pod không thể mount volume</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> volume ở AZ khác node chạy Pod (nếu không dùng <code>WaitForFirstConsumer</code>).<br/><strong>Giải pháp:</strong> dùng <code>volumeBindingMode: WaitForFirstConsumer</code> để volume được tạo cùng AZ với node.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Data bị mất sau khi xoá Pod</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Pod không gắn PVC đúng <code>mountPath</code> (mongo lưu ở <code>/data/db</code>).<br/><strong>Giải pháp:</strong> kiểm tra <code>volumeMounts.mountPath</code> phải là <code>/data/db</code> và volume tham chiếu đúng <code>claimName: mongo-pvc</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> EBS volume + ALB + node EC2 tính phí theo giờ. Xoá hết khi không dùng.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f demo-app.yaml
+eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

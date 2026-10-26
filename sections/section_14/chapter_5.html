@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Namespace trong Kubernetes – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Namespace trong Kubernetes</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Namespace</strong> là một cách chia tài nguyên cluster một cách <strong>logic</strong> giữa các nhóm resource.
+    Mỗi namespace cung cấp một phạm vi cho tên tài nguyên: các resource trong một namespace là riêng biệt và không truy cập được từ namespace khác (trừ khi khai báo rõ).
+    Namespace không thể lồng nhau; khi tạo resource mà không chỉ định namespace, nó sẽ thuộc namespace <code>default</code>.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Phân chia logic:</strong> cùng một cluster có thể chứa nhiều namespace độc lập với nhau.</li>
+    <li><strong>Phạm vi tên:</strong> hai resource cùng tên có thể tồn tại ở hai namespace khác nhau.</li>
+    <li><strong>Namespace mặc định:</strong> <code>default</code> (cho resource thường), <code>kube-system</code> (hệ thống), <code>kube-public</code> (công khai), <code>kube-node-lease</code> (lease của node).</li>
+    <li><strong>Không lồng nhau:</strong> namespace là cấp cao nhất, không có namespace con.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart TB
+      Cluster["<img src='../../assets/svg-icon/kubernetes.svg' style='width:34px;height:34px;'/><br/>Kubernetes Cluster"]
+      subgraph NS1["Namespace: dev"]
+          P1["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>Pod A"]
+          S1["Service A"]
+      end
+      subgraph NS2["Namespace: prod"]
+          P2["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>Pod A (cùng tên)"]
+          S2["Service A"]
+      end
+      Cluster --> NS1
+      Cluster --> NS2
+      P1 -.-|"không truy cập trực tiếp"| P2
+  </div>
+  <p class="arch-caption">Cùng một cluster, namespace <code>dev</code> và <code>prod</code> có thể có các resource trùng tên (Pod A, Service A) mà không xung đột, và được cô lập với nhau.</p>
+
+  <h2 class="section-heading">Use Cases của Namespace</h2>
+  <ul class="feature-list">
+    <li><strong>Phân chia giữa nhiều người dùng / nhóm:</strong> mỗi team dùng một namespace riêng trên cùng cluster.</li>
+    <li><strong>Phân quyền khác nhau:</strong> áp dụng chính sách RBAC riêng cho từng namespace.</li>
+    <li><strong>Phân biệt môi trường:</strong> tách <code>dev</code>, <code>test</code>, <code>production</code> trên cùng một cluster.</li>
+    <li><strong>Cô lập ứng dụng:</strong> mỗi ứng dụng/dịch vụ được triển khai trong namespace riêng, giảm xung đột và tăng bảo mật.</li>
+  </ul>
+
+  <h2 class="section-heading">Một số resource KHÔNG thuộc namespace</h2>
+  <p class="body-text">Hầu hết resource thuộc về một namespace, nhưng có vài resource mang tính toàn cluster, không thuộc namespace nào:</p>
+  <table class="compare-table">
+    <thead><tr><th>Resource</th><th>Lý do</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Nodes</strong></td><td>Mỗi node đại diện cho một máy chủ vật lý/ảo, dùng chung cho cả cluster.</td></tr>
+      <tr><td><strong>PersistentVolumes</strong></td><td>Tồn tại độc lập với mọi namespace (Pod ở namespace nào cũng có thể claim được).</td></tr>
+      <tr><td><strong>ClusterRoles / ClusterRoleBindings</strong></td><td>Định nghĩa quyền ở phạm vi toàn cluster.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Thao tác với Namespace</h2>
+  <p class="body-text">Thực hành nhanh (lệnh tham khảo tại <code>sourcecode/section_13_kubernetes_k8s_basic/namespace/commands.sh</code>):</p>
+  <pre class="command-line" data-prompt="$"><code class="language-bash"># Tạo namespace mới
+kubectl create namespace demo-namespace
+
+# Đặt namespace mặc định cho context hiện tại
+kubectl config set-context --current --namespace=demo-namespace
+
+# Xem namespace đang dùng
+kubectl config view --minify | grep namespace:
+
+# Trả về namespace mặc định
+kubectl config set-context --current --namespace=default</code></pre>
+  <p class="code-note">💡 Thay vì đổi namespace mặc định, bạn có thể chỉ định namespace cho từng lệnh bằng cờ <code>-n &lt;tên&gt;</code> (ví dụ <code>kubectl get pods -n demo-namespace</code>).</p>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Liệt kê namespace:</strong> <code>kubectl get namespaces</code>.</li>
+    <li><strong>Xem resource mọi namespace:</strong> <code>kubectl get pods --all-namespaces</code> (hoặc <code>-A</code>).</li>
+    <li><strong>Xoá namespace:</strong> <code>kubectl delete namespace demo-namespace</code> – cẩn thận, xoá namespace sẽ xoá toàn bộ resource bên trong.</li>
+    <li><strong>Mẹo thực tế:</strong> đừng nhét mọi thứ vào <code>default</code>; tách theo môi trường hoặc theo team để dễ quản lý và phân quyền.</li>
+  </ul>
+
+</body>
+</html>

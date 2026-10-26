@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu về Amazon EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu về Amazon EKS</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu section</h2>
+  <p class="body-text">Ở Section 13 bạn đã nắm được Kubernetes và tự dựng cluster bằng kops. Section này giới thiệu <strong>Amazon EKS</strong> – dịch vụ managed Kubernetes của AWS giúp bạn không phải tự vận hành control plane:</p>
+  <ul class="feature-list">
+    <li>Hiểu <strong>EKS là gì</strong>, mô hình cluster và <strong>chi phí</strong>.</li>
+    <li>Thực hành tạo một <strong>EKS Cluster</strong> và kết nối bằng kubectl.</li>
+    <li>Kết hợp <strong>Application Load Balancer</strong> (AWS Load Balancer Controller) với EKS.</li>
+    <li>Sử dụng <strong>EBS Volume</strong> cho service, hiểu <strong>Autoscaling</strong> và <strong>Security</strong>.</li>
+    <li>Thực hành <strong>RBAC</strong>: thêm IAM User vào EKS Cluster.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Amazon Elastic Kubernetes Service (EKS)</strong> là dịch vụ quản lý Kubernetes do AWS cung cấp.
+    EKS giúp bạn chạy các ứng dụng container trên AWS mà <strong>không cần tự cài đặt, vận hành hay bảo trì</strong> phần Control Plane (master node) của Kubernetes.
+    Thay vì phải lo etcd, API Server, Scheduler... như khi dựng cluster bằng kops ở Section 13, với EKS AWS lo toàn bộ phần "bộ não" của cluster cho bạn.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm / tính năng chính</h2>
+  <ul class="feature-list">
+    <li><strong>Quản lý Kubernetes:</strong> EKS tự động xử lý các tác vụ như cài đặt, cập nhật và quản lý các master node (control plane).</li>
+    <li><strong>Tích hợp với các dịch vụ AWS:</strong> Load Balancer, Fargate, ECR, S3, VPC, CloudWatch... tạo nền tảng mạnh mẽ cho ứng dụng container.</li>
+    <li><strong>Security &amp; Compliance:</strong> hỗ trợ các tính năng bảo mật và tuân thủ của AWS như IAM, VPC và Audit logging.</li>
+    <li><strong>Scalability:</strong> hỗ trợ Horizontal Pod Autoscaler và Cluster Autoscaler, giúp mở rộng ứng dụng linh hoạt.</li>
+    <li><strong>Hỗ trợ cộng đồng:</strong> hỗ trợ phiên bản Kubernetes mới nhất và tương thích với các công cụ, plugin phổ biến từ cộng đồng.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình cluster của EKS</h2>
+  <div class="figure-centered">
+    <img src="../../images/section14/eks-cluster-model.png" alt="Mô hình cluster của EKS: Control Plane do AWS quản lý, worker node là EC2/Fargate, tích hợp với các dịch vụ AWS" />
+    <div class="figure-title">Mô hình cluster của EKS</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Master Node (Control Plane)</strong> của cluster do <strong>AWS quản lý</strong> – bạn không thấy và không phải lo về nó.</li>
+    <li><strong>Worker Node</strong> là các EC2 instance, có thể do AWS quản lý (managed node group) hoặc tự quản lý bằng custom AMI (self-managed).</li>
+    <li>EKS có thể kết hợp với <strong>Fargate</strong> để chạy Pod mà không cần quản lý node.</li>
+    <li>Các instance trong EKS cũng hỗ trợ các <strong>purchase options</strong> như On-Demand, Reserved, Spot instance...</li>
+  </ul>
+
+  <h2 class="section-heading">Chi phí cho EKS</h2>
+  <p class="body-text">Chi phí của Amazon EKS được tính dựa trên các yếu tố sau:</p>
+  <ul class="feature-list">
+    <li><strong>Phí dịch vụ EKS (Master node / control plane):</strong> tính phí theo giờ, <strong>không phụ thuộc vào kích thước cluster</strong> (một cluster dù 1 hay 100 node đều trả phí control plane như nhau).</li>
+    <li><strong>Chi phí cho các resources:</strong> EC2 Instance (worker node), EBS/EFS (lưu trữ), Fargate (nếu dùng), Data transfer...</li>
+    <li><strong>Data transfer out:</strong> phí dữ liệu truyền từ cluster ra Internet hoặc sang các dịch vụ AWS khác.</li>
+    <li><strong>Dịch vụ bổ sung:</strong> các chi phí liên quan đến dịch vụ bổ sung như Monitoring (CloudWatch, Managed Prometheus...).</li>
+  </ul>
+  <div class="alert alert-info">
+    <strong>Tiết kiệm chi phí:</strong> bạn có thể <em>disable extended support</em> cho cluster (dùng <code>aws eks update-cluster-config --upgrade-policy supportType=STANDARD</code>) để không bị tính phí hỗ trợ bản Kubernetes quá hạn, và luôn xoá cluster khi không dùng.
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Không phải vận hành control plane: AWS lo cập nhật, backup etcd, đảm bảo HA.</li>
+        <li>Tích hợp sâu với AWS: IAM, VPC, ALB/NLB, EBS/EFS, CloudWatch.</li>
+        <li>Chuẩn Kubernetes upstream: tương thích với công cụ/plugin của cộng đồng.</li>
+        <li>Được AWS hỗ trợ, phù hợp doanh nghiệp cần SLA và compliance.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Phí control plane theo giờ (cao hơn so với tự dựng cluster bằng kops).</li>
+        <li>Vẫn phải quản lý worker node (EC2) nếu không dùng Fargate.</li>
+        <li>Đường cong học tập vẫn cao nếu chưa nắm vững Kubernetes.</li>
+        <li>Với nhu cầu nhỏ, ECS/Fargate có thể đơn giản và rẻ hơn.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="body-text"><strong>Khi nào nên dùng:</strong> cần chạy Kubernetes chuẩn, nhiều container cần scale, hoặc muốn tận dụng hệ sinh thái K8s (Helm, ArgoCD, Istio...) mà không muốn tự vận hành control plane. <strong>Khi nào không nên:</strong> ứng dụng đơn giản chỉ vài container — dùng ECS/Fargate hoặc App Runner nhẹ nhàng hơn.</p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Nền tảng microservices</h4>
+      <p>Chạy hàng chục service container với service mesh (Istio), GitOps (ArgoCD), Helm chart, scale từng service độc lập.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Ứng dụng cần hybrid / multi-cloud</h4>
+      <p>Dùng cùng manifest Kubernetes chạy trên EKS (AWS), GKE (GCP), AKS (Azure) hoặc on-premise, dễ di chuyển giữa các cloud.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Nền tảng CI/CD &amp; batch/AI workload</h4>
+      <p>Triển khai ArgoCD/Jenkins runner trên EKS, chạy batch job (Spark, ML training) với khả năng scale linh hoạt.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>So với kops (Section 13):</strong> kops giúp bạn tự dựng control plane trên EC2 (tự chịu trách nhiệm vận hành), còn EKS là dịch vụ managed — AWS lo control plane, bạn chỉ lo workload.</li>
+    <li><strong>Phiên bản Kubernetes:</strong> EKS hỗ trợ nhiều phiên bản; AWS thường xuyên công bố và có lịch trình hỗ trợ (standard/extended) cho từng version.</li>
+    <li><strong>Control plane endpoint:</strong> có thể để public (truy cập từ Internet) hoặc private (chỉ trong VPC) tuỳ nhu cầu bảo mật.</li>
+    <li><strong>Tài liệu chính thức:</strong> <a href="https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html" target="_blank" rel="noopener">docs.aws.amazon.com/eks</a>.</li>
+  </ul>
+
+</body>
+</html>

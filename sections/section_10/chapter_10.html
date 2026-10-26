@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 8: Pipeline from SCM &amp; private repository (SSH key) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 8: Pipeline from SCM &amp; private repository (SSH key)</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Chuyển repository <code>nodejs-random-color</code> sang chế độ <strong>Private</strong> và cấp quyền checkout cho Jenkins bằng <strong>SSH key</strong> (GitHub Deploy key – chỉ đọc, chỉ cho 1 repository).</li>
+    <li>Lưu private key vào Jenkins credential loại <strong>SSH Username with private key</strong>, cấu hình <strong>Git Host Key Verification</strong>.</li>
+    <li>Đưa <code>Jenkinsfile</code> vào repository và tạo job <strong>Pipeline script from SCM</strong> – pipeline được quản lý cùng source code.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>PC Local</b><br/>ssh-keygen<br/>git push Jenkinsfile"]
+      subgraph GH["<img src='../../assets/aws-svg/github.svg' style='width:26px;height:26px;'/> GitHub – Private repository"]
+          direction TB
+          REPO["nodejs-random-color<br/>Dockerfile · Jenkinsfile"]
+          DK["🔑 Deploy key<br/>jenkins_github.pub (read-only)"]
+      end
+      subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server"]
+          direction TB
+          CRED["🔐 Credential<br/>github-ssh-key<br/>(private key)"]
+          JOB["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:30px;height:30px;'/><br/>lab08-pipeline-from-scm<br/>Pipeline script from SCM"]
+          CRED --> JOB
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR"]
+      PC -->|"public key"| DK
+      PC -->|"private key"| CRED
+      PC -->|"git push"| REPO
+      JOB -->|"git@github.com (SSH)"| REPO
+      JOB -->|"docker push"| ECR
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 6 (Docker trên Jenkins, ECR repository). Repository <code>nodejs-random-color</code> đã clone về máy local.</li>
+    <li>Biết tạo SSH key và dùng SSH với GitHub (Section 7 – Lab 2).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab8_pipeline_from_scm/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo SSH key pair riêng cho Jenkins</strong>
+        <p>Trên máy local (Git Bash / Terminal), tạo key <strong>không có passphrase</strong> (Jenkins cần dùng key tự động):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh-keygen -t ed25519 -C "jenkins-deploy-key" -f ~/.ssh/jenkins_github -N ""
+ls -la ~/.ssh/jenkins_github*</code></pre>
+        <p class="code-note">💡 Không dùng lại SSH key cá nhân của bạn: key cho Jenkins nên tách riêng để có thể thu hồi độc lập và chỉ cấp đúng quyền cần thiết.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Thêm Deploy key vào repository &amp; chuyển repository sang Private</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cat ~/.ssh/jenkins_github.pub</code></pre>
+        <p>Trên GitHub, mở repository <code>nodejs-random-color</code> của bạn → <strong>Settings → Deploy keys → Add deploy key</strong>:</p>
+        <ul class="feature-list">
+          <li>Title: <code>jenkins-server</code>; Key: dán nội dung file <code>.pub</code>; <strong>Allow write access: không tick</strong></li>
+        </ul>
+        <p>Sau đó vào <strong>Settings → General → Danger Zone → Change repository visibility → Make private</strong>.</p>
+        <p class="code-note">💡 Từ lúc này job <code>lab06-docker-ecr</code> (checkout bằng URL HTTPS, không có credential) sẽ lỗi khi build – đúng như mong đợi với repository Private. Các lab sau đều checkout bằng URL SSH + credential <code>github-ssh-key</code>.</p>
+        <table class="compare-table">
+          <thead><tr><th>Cách cấp quyền</th><th>Phạm vi</th><th>Khi nào dùng</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Deploy key</strong> (lab này)</td><td>1 repository, mặc định chỉ đọc</td><td>Jenkins chỉ cần checkout vài repository</td></tr>
+            <tr><td>SSH key trên account GitHub</td><td>Mọi repository account đó truy cập được</td><td>Không khuyến khích – lộ key là lộ toàn bộ</td></tr>
+            <tr><td>GitHub App / Personal Access Token (fine-grained)</td><td>Chọn repository &amp; quyền cụ thể, dùng HTTPS</td><td>Nhiều repository, cần gọi thêm GitHub API (Multibranch, status check)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình Git Host Key Verification</strong>
+        <p>Lần đầu SSH tới <code>github.com</code>, Jenkins cần tin tưởng host key của GitHub. Vào <strong>Manage Jenkins → Security → Git Host Key Verification Configuration</strong>:</p>
+        <ul class="feature-list">
+          <li>Host Key Verification Strategy: <strong>Accept first connection</strong></li>
+        </ul>
+        <p class="code-note">💡 <em>Accept first connection</em> lưu host key ở lần kết nối đầu vào <code>/var/lib/jenkins/.ssh/known_hosts</code>. Chặt chẽ hơn là <em>Manually provided keys</em> – dán sẵn host key chính thức của GitHub.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo credential SSH trên Jenkins</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cat ~/.ssh/jenkins_github</code></pre>
+        <p>Vào <strong>Manage Jenkins → Credentials → System → Global credentials → Add Credentials</strong>:</p>
+        <ul class="feature-list">
+          <li>Kind: <strong>SSH Username with private key</strong></li>
+          <li>ID: <code>github-ssh-key</code>; Description: <code>GitHub deploy key – nodejs-random-color</code></li>
+          <li>Username: <code>git</code></li>
+          <li>Private Key: <strong>Enter directly</strong> → Add → dán toàn bộ nội dung private key (gồm cả dòng <code>-----BEGIN OPENSSH PRIVATE KEY-----</code> và <code>-----END OPENSSH PRIVATE KEY-----</code>); Passphrase để trống</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Đưa Jenkinsfile vào repository</strong>
+        <p>Copy file <code>lab8_pipeline_from_scm/Jenkinsfile</code> vào <strong>thư mục gốc</strong> repository <code>nodejs-random-color</code> trên máy local. Pipeline này giống Lab 6 nhưng <strong>không có stage Checkout</strong>:</p>
+        <pre class="code-block"><code class="language-groovy">pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REPO   = 'nodejs-random-color'
+        IMAGE_TAG  = "ver-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Show commit') {
+            steps {
+                sh 'git log -1 --oneline'
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+        }
+    }
+}</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/jenkins-labs/nodejs-random-color
+git add Jenkinsfile
+git commit -m "ci: add Jenkinsfile for pipeline from SCM"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Tạo job Pipeline script from SCM</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab08-pipeline-from-scm</code>, mục <strong>Pipeline</strong>:</p>
+        <ul class="feature-list">
+          <li>Definition: <strong>Pipeline script from SCM</strong>; SCM: <strong>Git</strong></li>
+          <li>Repository URL: <code>git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git</code> (URL dạng <strong>SSH</strong>)</li>
+          <li>Credentials: <code>git (GitHub deploy key – nodejs-random-color)</code></li>
+          <li>Branch Specifier: <code>*/master</code>; Script Path: <code>Jenkinsfile</code></li>
+        </ul>
+        <p class="code-note">💡 Nếu credential đúng, ô Repository URL không còn báo lỗi đỏ <code>Failed to connect to repository</code>. Lỗi này xuất hiện nếu bạn dùng URL HTTPS cho repository Private mà không có credential.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Build &amp; kiểm tra</strong>
+        <p><strong>Build Now</strong>. Pipeline có thêm stage <strong>Declarative: Checkout SCM</strong> do Jenkins tự thêm – checkout đúng repository và commit chứa <code>Jenkinsfile</code>:</p>
+        <pre class="output-box"><code>Obtained Jenkinsfile from git git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git
+...
+[Pipeline] { (Declarative: Checkout SCM)
+using credential github-ssh-key
+ &gt; git fetch --tags --force --progress -- git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git ...
+...
+[Pipeline] { (Show commit)
++ git log -1 --oneline
+a1b2c3d ci: add Jenkinsfile for pipeline from SCM
+...
+Finished: SUCCESS</code></pre>
+        <p>Thử sửa <code>Jenkinsfile</code> (ví dụ thêm <code>sh 'docker images | head -5'</code> vào stage Show commit), push lên GitHub rồi build lại: job tự dùng Jenkinsfile mới mà <strong>không cần sửa cấu hình job</strong>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Repository <code>nodejs-random-color</code> ở chế độ <strong>Private</strong>, có Deploy key <code>jenkins-server</code> (read-only).</li>
+      <li>Job <code>lab08-pipeline-from-scm</code> build <strong>SUCCESS</strong>, log có <code>using credential github-ssh-key</code>.</li>
+      <li>ECR có image tag mới do job này push.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>No ED25519 host key is known for github.com and you have requested strict checking. Host key verification failed.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cấu hình Git Host Key Verification.<br/><strong>Giải pháp:</strong> Làm lại Bước 3, chọn <strong>Accept first connection</strong>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>git@github.com: Permission denied (publickey)</code> / <code>Repository not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai private key, Deploy key thêm nhầm repository, hoặc job chưa chọn credential.<br/><strong>Giải pháp:</strong> Kiểm tra cặp key (<code>jenkins_github</code> ↔ <code>jenkins_github.pub</code>), Deploy key nằm đúng repository, Username credential là <code>git</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unable to find Jenkinsfile from git ...</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa push <code>Jenkinsfile</code>, sai tên file (phân biệt hoa/thường) hoặc sai branch.<br/><strong>Giải pháp:</strong> Kiểm tra file trên GitHub ở nhánh <code>master</code>, Script Path đúng <code>Jenkinsfile</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Load key "...": invalid format</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Private key dán thiếu dòng BEGIN/END hoặc thiếu ký tự xuống dòng cuối.<br/><strong>Giải pháp:</strong> Copy lại toàn bộ output của <code>cat ~/.ssh/jenkins_github</code>, cập nhật credential.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại credential <code>github-ssh-key</code> và Deploy key cho Lab 9 → Lab 12. Lab này không tạo resource tính phí mới; nếu Terraform stack của Lab 7 vẫn đang chạy mà bạn nghỉ học, hãy <code>terraform destroy</code> và <strong>Stop</strong> Jenkins server.</div>
+
+</body>
+</html>

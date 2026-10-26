@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Test ở local, xem log &amp; cập nhật nhanh với sam sync – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Test ở local, xem log &amp; cập nhật nhanh với sam sync</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Chạy <strong>unit test</strong> cho Lambda mà không cần AWS.</li>
+    <li>Dùng <code>sam local invoke</code> và <code>sam local start-api</code> để test function ngay trên máy trước khi deploy.</li>
+    <li>Xem log của function đã deploy bằng <code>sam logs --tail</code>.</li>
+    <li>Dùng <code>sam sync --watch</code> để sửa code và thấy thay đổi trên AWS gần như tức thì.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph PC["<img src='../../assets/aws-svg/developer.svg' style='width:26px;height:26px;'/> Local PC"]
+          CLI["<img src='../../assets/aws-svg/Command-Line-Interface.svg' style='width:34px;height:34px;'/><br/>SAM CLI"]
+          DOCKER["<img src='../../assets/svg-icon/docker.svg' style='width:34px;height:34px;'/><br/>Docker container<br/>Lambda runtime"]
+      end
+      subgraph AWS["AWS Cloud"]
+          DDB["<img src='../../assets/aws-svg/DynamoDB.svg' style='width:34px;height:34px;'/><br/>DynamoDB<br/>(table thật)"]
+          FN["<img src='../../assets/aws-svg/Lambda.svg' style='width:34px;height:34px;'/><br/>Lambda<br/>(đã deploy)"]
+          CW["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:34px;height:34px;'/><br/>CloudWatch Logs"]
+      end
+      CLI -->|"sam local invoke / start-api"| DOCKER
+      DOCKER -->|"boto3"| DDB
+      CLI -->|"sam sync --watch"| FN
+      FN --> CW
+      CW -->|"sam logs --tail"| CLI
+  </div>
+  <p class="arch-caption">Function chạy trong container ở local nhưng vẫn gọi DynamoDB thật trên AWS bằng credential của bạn.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 2</strong>: stack <code>url-shorten-app</code> đang chạy (lấy tên DynamoDB table từ Outputs).</li>
+    <li>Docker đang chạy; Python 3.13 và <code>pip</code> trên máy.</li>
+    <li>Source code: <code>sourcecode/section_12_serverless_application_model/lab3_local_test_and_sync/commands.sh</code>; các thao tác thực hiện trong thư mục project của Lab 2.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Lưu ý:</strong> test local gọi vào DynamoDB <strong>thật</strong> của stack, nên dữ liệu bạn tạo ở local sẽ nằm trong table trên AWS.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chạy unit test</strong>
+        <p>Thư mục <code>tests/unit</code> chứa test kiểm tra các trường hợp đầu vào sai (body rỗng, JSON lỗi, thiếu <code>url</code>) – không cần kết nối AWS.</p>
+        <pre class="command-line" data-prompt="$" data-output="3"><code class="language-bash">cd sourcecode/section_12_serverless_application_model/lab2_url_shorten_app
+pip install -r tests/requirements.txt
+python -m pytest tests/unit -v
+3 passed</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Chuẩn bị file biến môi trường cho local</strong>
+        <p>Ở local, biến <code>TABLE_NAME</code> trong template chỉ là tham chiếu logic, nên cần ghi đè bằng tên table thật. Lấy tên table:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam list stack-outputs --stack-name url-shorten-app</code></pre>
+        <p>Copy file mẫu thành <code>env.json</code> (đã được gitignore) rồi sửa giá trị <code>TABLE_NAME</code> bằng tên table thật:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cp env.json.example env.json</code></pre>
+        <pre class="code-block"><code class="language-json">{
+  "Parameters": {
+    "TABLE_NAME": "url-shorten-app-UrlShortenTable-XXXXXXXXXXXX"
+  }
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Invoke function ở local</strong>
+        <p>Build rồi invoke <code>GenerateShortUrlFunction</code> với event mẫu <code>events/generate.json</code> (giả lập request từ API Gateway):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam build
+sam local invoke GenerateShortUrlFunction --event events/generate.json --env-vars env.json</code></pre>
+        <p>Kết quả hiển thị log của function và response <code>statusCode: 200</code> cùng <code>short_url_code</code>. Sửa file <code>events/get.json</code> thay <code>THAY_BANG_MA_RUT_GON</code> bằng mã vừa nhận rồi thử với function còn lại:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam local invoke GetUrlFunction --event events/get.json --env-vars env.json</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Chạy API ở local</strong>
+        <p>SAM đọc <code>Events</code> trong template để dựng các route:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam local start-api --env-vars env.json</code></pre>
+        <p>Mở terminal thứ hai và gọi API local:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -X POST http://127.0.0.1:3000/generate-short-url -H "Content-Type: application/json" -d '{"url": "https://docs.aws.amazon.com/"}'
+curl -i http://127.0.0.1:3000/link/&lt;short_url_code&gt;</code></pre>
+        <p>Mỗi request SAM khởi động một container (hoặc dùng lại container nếu đang warm). Nhấn <code>Ctrl + C</code> để dừng khi xong. Sửa code trong <code>app.py</code> rồi <code>sam build</code> lại để thấy thay đổi.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Xem thông tin endpoint và log của stack đã deploy</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam list endpoints --stack-name url-shorten-app</code></pre>
+        <p>Mở log của function theo thời gian thực (giữ terminal này mở), sau đó gọi API từ terminal khác để thấy log xuất hiện:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam logs --stack-name url-shorten-app --name GenerateShortUrlFunction --tail</code></pre>
+        <p>Có thể lọc log: <code>--filter "ERROR"</code> hoặc xem trong khoảng thời gian: <code>--start-time '10min ago'</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Cập nhật nhanh với sam sync</strong>
+        <p>Chạy <code>sam sync</code> ở chế độ watch. Lần đầu SAM đồng bộ toàn bộ stack (mất vài phút), sau đó theo dõi file thay đổi:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam sync --stack-name url-shorten-app --watch</code></pre>
+        <p>Giữ terminal này chạy. Mở <code>generate_short_url/app.py</code>, sửa dòng cuối thành trả thêm URL gốc rồi lưu file:</p>
+        <pre class="code-block"><code class="language-python">    return response(200, {"short_url_code": short_url, "original_url": original_url})</code></pre>
+        <p>SAM phát hiện thay đổi và cập nhật code Lambda trong vài giây (không qua change set). Gọi lại API <code>POST /generate-short-url</code> trên AWS và thấy field mới. Nhấn <code>Ctrl + C</code> để dừng watch.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Đưa trạng thái về đúng với template bằng sam deploy</strong>
+        <p><code>sam sync</code> có thể làm code trên AWS khác với bản đã đóng gói. Trước khi tiếp tục, hoàn tác thay đổi ở bước 6 (hoặc giữ lại nếu muốn) và deploy chính thức để đồng bộ:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam build
+sam deploy</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>3 unit test pass.</li>
+      <li><code>sam local invoke</code> và <code>sam local start-api</code> trả về kết quả đúng, item mới xuất hiện trong DynamoDB.</li>
+      <li><code>sam logs --tail</code> hiển thị log khi bạn gọi API.</li>
+      <li>Sửa code khi <code>sam sync --watch</code> đang chạy, response của API trên AWS thay đổi theo sau vài giây.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>KeyError: 'TABLE_NAME'</code> hoặc <code>ResourceNotFoundException: Requested resource not found</code> khi chạy local</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Quên truyền <code>--env-vars env.json</code> hoặc <code>TABLE_NAME</code> chưa phải tên table thật.<br/><strong>Giải pháp:</strong> Kiểm tra lại <code>env.json</code> và region của AWS CLI (phải là <code>ap-southeast-1</code>, cùng region với table).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>botocore.exceptions.NoCredentialsError</code> / <code>Unable to locate credentials</code> trong container</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> SAM không tìm thấy credential để truyền vào container.<br/><strong>Giải pháp:</strong> Cấu hình lại AWS CLI; nếu dùng profile khác <code>default</code>, thêm <code>--profile &lt;tên&gt;</code> cho lệnh <code>sam local</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>ModuleNotFoundError: No module named 'pytest'</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cài dependency test.<br/><strong>Giải pháp:</strong> Chạy <code>pip install -r tests/requirements.txt</code> (nên dùng virtual environment).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>sam sync</code> báo lỗi "Stack ... does not exist" hoặc dùng sai region</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Stack chưa deploy hoặc region mặc định khác.<br/><strong>Giải pháp:</strong> Thêm <code>--region ap-southeast-1</code> hoặc kiểm tra <code>samconfig.toml</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo thêm resource mới. Tiếp tục giữ stack <code>url-shorten-app</code> cho Lab 4. Tắt các terminal đang chạy <code>sam local start-api</code> và <code>sam sync --watch</code>.</div>
+
+</body>
+</html>

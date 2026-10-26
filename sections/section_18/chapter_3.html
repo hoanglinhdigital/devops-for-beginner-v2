@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Final Assignment: Hướng dẫn phần triển khai lên AWS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">18. Final Assignment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Final assignment: Hướng dẫn phần triển khai lên AWS</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Build Docker image cho ứng dụng React (frontend) và Spring Boot (backend) rồi push lên <strong>ECR</strong>.</li>
+    <li>Triển khai hạ tầng 3 tầng (VPC, ALB, ECS Fargate, MongoDB trên EC2) bằng <strong>Terraform</strong>.</li>
+    <li>Truy cập ứng dụng thành công qua DNS của ALB.</li>
+    <li>Dựng pipeline <strong>CI/CD</strong> (Jenkins hoặc CodePipeline) để tự động build &amp; deploy khi push code.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:40px;height:40px;'/><br/><b>User</b>"]
+      subgraph VPC["VPC 10.18.0.0/16"]
+          direction LR
+          ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:44px;height:44px;'/><br/><b>ALB</b><br/>:80"]
+          subgraph FEPub["Frontend (public subnet)"]
+              FE["<img src='../../assets/aws-svg/Fargate.svg' style='width:40px;height:40px;'/><br/>React<br/>:80"]
+          end
+          subgraph BEPriv["Backend (private subnet)"]
+              BE["<img src='../../assets/aws-svg/Fargate.svg' style='width:40px;height:40px;'/><br/>Spring Boot<br/>:8080"]
+          end
+          DB["<img src='../../assets/aws-svg/EC2.svg' style='width:40px;height:40px;'/><br/>MongoDB<br/>:27017"]
+      end
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:44px;height:44px;'/><br/><b>ECR</b>"]
+      User -->|"HTTP /"| ALB
+      ALB -->|"/"| FE
+      ALB -->|"/api/*"| BE
+      BE --> DB
+      ECR -.->|"pull image"| FE
+      ECR -.->|"pull image"| BE
+  </div>
+  <p class="arch-caption">Người dùng truy cập qua ALB; request thường được route tới frontend, các request <code>/api/*</code> được route tới backend; backend gọi MongoDB ở private subnet. Image được ECS pull từ ECR.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>AWS CLI v2 đã cấu hình profile (<code>aws configure</code>), region <code>ap-southeast-1</code>.</li>
+    <li>Terraform &gt;= 1.6 và Docker đã cài đặt.</li>
+    <li>Đã có một EC2 key pair (tạo ở <strong>EC2 → Key Pairs</strong>) để SSH vào MongoDB khi cần.</li>
+    <li>Đã đọc kỹ file <code>README</code> của repository đề bài.</li>
+    <li>Bộ source code tham khảo tại <code>sourcecode/section_18_final_assignment/</code> (Dockerfile, Terraform, CI/CD).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị source code</strong>
+        <p>Clone repository của đề bài và xem cấu trúc project:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git clone https://github.com/hoanglinhdigital/react-spring-mongo-full-stack-demo
+cd react-spring-mongo-full-stack-demo
+ls -la</code></pre>
+        <p>Đọc kỹ <code>README.md</code> để hiểu cách chạy ứng dụng ở local (frontend, backend, MongoDB) và các biến cấu hình cần thiết.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Build Docker image cho frontend &amp; backend</strong>
+        <p>Sử dụng 2 file Dockerfile trong thư mục <code>docker/</code> của bộ source code tham khảo (điều chỉnh cho khớp với cấu trúc repo của bạn):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build -f docker/Dockerfile.frontend -t final-assignment-frontend .
+docker build -f docker/Dockerfile.backend  -t final-assignment-backend  .</code></pre>
+        <p>Kiểm tra image đã được tạo:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker images | grep final-assignment</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo ECR repository &amp; push image</strong>
+        <p>Tạo 2 repository trên ECR:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr create-repository --repository-name final-assignment-frontend --region ap-southeast-1
+aws ecr create-repository --repository-name final-assignment-backend  --region ap-southeast-1</code></pre>
+        <p>Đăng nhập ECR, tag và push image (thay <code>&lt;ACCOUNT_ID&gt;</code> bằng Account ID của bạn):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin &lt;ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com
+docker tag final-assignment-frontend:latest &lt;ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/final-assignment-frontend:latest
+docker tag final-assignment-backend:latest  &lt;ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/final-assignment-backend:latest
+docker push &lt;ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/final-assignment-frontend:latest
+docker push &lt;ACCOUNT_ID&gt;.dkr.ecr.ap-southeast-1.amazonaws.com/final-assignment-backend:latest</code></pre>
+        <p>Nếu build image trên máy Windows/Mac, hãy build đúng nền tảng <code>linux/amd64</code> để chạy được trên Fargate:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build --platform linux/amd64 -f docker/Dockerfile.frontend -t final-assignment-frontend .</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Triển khai hạ tầng bằng Terraform</strong>
+        <p>Sao chép bộ Terraform tham khảo (hoặc tự viết theo thiết kế của bạn), tạo file biến và điền thông tin:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_18_final_assignment/terraform
+cp terraform.tfvars.example terraform.tfvars
+# Sửa key_name, my_ip_cidr... trong terraform.tfvars cho khớp tài khoản của bạn</code></pre>
+        <p>Khởi tạo và triển khai:</p>
+        <pre class="command-line" data-prompt="$" data-output="2, 5"><code class="language-bash">terraform init
+terraform plan --var-file terraform.tfvars
+terraform apply --var-file terraform.tfvars</code></pre>
+        <p>Terraform sẽ tạo: VPC (public + private subnet, NAT Gateway), Security Groups, ECR repos, EC2 chạy MongoDB, ALB và ECS cluster với 2 service.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra ứng dụng qua ALB</strong>
+        <p>Lấy DNS của ALB và truy cập trên trình duyệt:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform output alb_dns_name</code></pre>
+        <p>Mở <code>http://&lt;alb_dns_name&gt;</code> để xem giao diện frontend, và thử gọi API backend:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl http://&lt;alb_dns_name&gt;/api/health</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Triển khai CI/CD (chọn Jenkins hoặc CodePipeline)</strong>
+        <p><strong>Phương án Jenkins:</strong> dựng Jenkins server trên EC2 (tham khảo Section 10), tạo pipeline từ file <code>cicd/jenkins/Jenkinsfile</code>, cấu hình webhook từ GitHub.</p>
+        <p><strong>Phương án CodePipeline:</strong> tạo pipeline Source (GitHub) → Build (CodeBuild chạy <code>cicd/codepipeline/buildspec.yml</code>) → Deploy (ECS), tham khảo Section 9.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Trigger pipeline &amp; quan sát</strong>
+        <p>Push một thay đổi nhỏ lên repository (hoặc chạy thủ công) và theo dõi pipeline build image → push ECR → deploy ECS tự động. Kiểm tra tab <strong>Deployments</strong> của ECS service để thấy task mới được thay thế.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Bài nộp được đánh giá là đạt khi</h4>
+    <ul class="feature-list">
+      <li>Các task frontend &amp; backend trong ECS đều ở trạng thái <code>RUNNING</code> và Target Group có target <strong>healthy</strong>.</li>
+      <li>Truy cập DNS ALB hiển thị giao diện React; gọi <code>/api/*</code> nhận được dữ liệu từ backend.</li>
+      <li>MongoDB nhận kết nối từ backend (kiểm tra log của backend).</li>
+      <li>Pipeline CI/CD chạy thành công end-to-end khi push code mới.</li>
+      <li>Đã chụp đủ evidence các sơ đồ thiết kế và kết quả trên AWS Console.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Task ECS không pull được image từ ECR (<code>CannotPullContainerError</code>)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> task ở private subnet không có route ra ECR (thiếu NAT Gateway / VPC endpoint), hoặc execution role thiếu quyền ECR.<br/><strong>Giải pháp:</strong> kiểm tra NAT Gateway trong route table của private subnet; gắn policy <code>AmazonECSTaskExecutionRolePolicy</code> cho execution role.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Backend không kết nối được MongoDB</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group của MongoDB chưa cho phép port <code>27017</code> từ SG backend, hoặc biến <code>MONGO_HOST</code> sai.<br/><strong>Giải pháp:</strong> sửa inbound rule của MongoDB SG (source = SG backend), kiểm tra biến môi trường <code>MONGO_HOST</code> trỏ đúng private IP của MongoDB.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Target Group backend <code>unhealthy</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> health check path sai (Spring Boot không có endpoint <code>/api/health</code>), hoặc container port không phải <code>8080</code>.<br/><strong>Giải pháp:</strong> đặt health check path đúng endpoint tồn tại (vd <code>/</code> hoặc actuator <code>/actuator/health</code>), xác nhận <code>server.port=8080</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Truy cập <code>/api/*</code> bị trả về trang frontend (hoặc 404)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> listener rule <code>/api/*</code> chưa được tạo hoặc ưu tiên (priority) thấp hơn rule khác.<br/><strong>Giải pháp:</strong> kiểm tra <code>aws_lb_listener_rule</code> với <code>path_pattern = ["/api/*"]</code> và đảm bảo priority hợp lý.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">
+    <strong>ALB, NAT Gateway, ECS Fargate task, EBS và Elastic IP tính phí theo giờ</strong> kể cả khi không có traffic.
+    Hãy chụp đầy đủ evidence rồi xoá toàn bộ ngay sau khi hoàn thành để tránh phát sinh chi phí.
+  </div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy --var-file terraform.tfvars</code></pre>
+  <p class="body-text">Kiểm tra thêm ở <strong>EC2 → Elastic IPs</strong>, <strong>ECR</strong> và <strong>CloudWatch → Log groups</strong> để chắc chắn không còn resource sót lại.</p>
+
+</body>
+</html>

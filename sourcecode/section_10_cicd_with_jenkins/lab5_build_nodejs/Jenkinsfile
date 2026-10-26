@@ -1,0 +1,46 @@
+// Lab 5 – Build Node.js project (Vue 3 + Webpack 5), upload thư mục dist lên S3
+// Job: lab05-vue-webpack | Pipeline definition: Pipeline script (dán nội dung file này)
+pipeline {
+    agent any
+
+    environment {
+        // Thay <your-github-username> và <your-suffix> bằng giá trị của bạn
+        GIT_REPO  = 'https://github.com/<your-github-username>/simple-vue-webpack.git'
+        S3_BUCKET = 'jenkins-artifact-<your-suffix>'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}"
+            }
+        }
+
+        stage('Clear old build') {
+            steps {
+                sh 'rm -rf "${WORKSPACE}/dist"'
+            }
+        }
+
+        stage('Install dependencies') {
+            steps {
+                sh 'node --version'
+                sh 'npm install'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm run build'
+                sh 'ls -la dist'
+            }
+        }
+
+        stage('Upload artifact to S3') {
+            steps {
+                // sync + --delete: đồng bộ đúng nội dung dist, xoá file cũ không còn dùng
+                sh 'aws s3 sync "${WORKSPACE}/dist/" "s3://${S3_BUCKET}/lab05-vue/" --delete'
+            }
+        }
+    }
+}

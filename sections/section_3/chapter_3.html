@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevOps thay đổi cách làm việc &amp; vai trò DevOps Engineer – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">3. Giới thiệu về DevOps &amp; CICD</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">DevOps thay đổi cách làm việc &amp; vai trò DevOps Engineer</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Cách dễ nhất để hiểu giá trị của DevOps là so sánh một dự án <strong>khi không có DevOps</strong> và <strong>khi có DevOps</strong>.
+    Chương này cũng làm rõ <strong>vai trò của DevOps Engineer</strong> — người gắn kết nhóm phát triển và nhóm vận hành, đảm bảo quy trình phát triển
+    và triển khai phần mềm diễn ra suôn sẻ, hiệu quả.
+  </p>
+
+  <h2 class="section-heading">Quy trình KHÔNG có DevOps</h2>
+  <p class="body-text">
+    Hai team làm việc tách biệt. Dev viết code, build ra artifact rồi “ném qua tường” cho Ops. Ops nhận package, tự chuẩn bị môi trường, cài đặt và deploy — thường là thủ công.
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      subgraph DevTeam["<img src='../../assets/svg-icon/developer.svg' style='width:28px;height:28px;'/> Development Team"]
+          direction TB
+          D1["💻 Coding trên máy local"]
+          D2["🧪 Unit · Integration · Security Testing"]
+          D3["🔨 Build source code"]
+          D1 --> D2 --> D3
+      end
+      Art["📦 <b>Artifacts</b>"]
+      subgraph OpsTeam["<img src='../../assets/svg-icon/operator.svg' style='width:28px;height:28px;'/> Operation Team"]
+          direction TB
+          O1["📥 Nhận package"]
+          O2["🖥️ Chuẩn bị môi trường<br/>Server · VM · Database"]
+          O3["⚙️ Cài tool / middleware"]
+          O4["🚀 Deploy artifact"]
+          O5["🌐 Network · Monitoring<br/>Backup &amp; restore"]
+          O1 --> O2 --> O3 --> O4 --> O5
+      end
+      D3 --> Art -->|"“Ném qua tường”"| O1
+      O4 -->|"💥 boom!"| Err["🔥 <b>Lỗi trên môi trường thật</b>"]
+  </div>
+  <p class="arch-caption">Quy trình tách biệt: Dev và Ops chỉ “gặp nhau” ở artifact, và thường là lúc có sự cố.</p>
+
+  <h3 class="section-subheading">Khi sự cố xảy ra…</h3>
+  <div class="compare-grid">
+    <div class="compare-card blue">
+      <h4>👨‍💻 Developer</h4>
+      <ul>
+        <li class="cross">“Code của tôi chạy ngon ở local cơ mà? Rõ ràng là môi trường của anh có vấn đề!!!”</li>
+        <li class="cross">“Lần release này môi trường vẫn thế mà?”</li>
+      </ul>
+    </div>
+    <div class="compare-card orange">
+      <h4>🛠️ Operator</h4>
+      <ul>
+        <li class="cross">“Anh đâu có đưa chỉ dẫn đầy đủ những tool cần thiết phải cài?”</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="section-subheading">Vấn đề là gì?</h3>
+  <ul class="feature-list">
+    <li><strong>Thiếu sự cộng tác</strong> giữa hai team.</li>
+    <li>Team Dev <strong>không ý thức được sự khác biệt</strong> giữa software chạy trên môi trường thật và chạy trên máy local.</li>
+    <li>Team Ops <strong>không tham gia ngay từ đầu</strong> dự án để tư vấn cần thiết cho team Dev.</li>
+    <li>Quy trình làm việc giữa hai team <strong>không được định nghĩa rõ ràng</strong> và đầy đủ.</li>
+    <li><strong>Không áp dụng Automation &amp; CICD</strong> để tăng hiệu suất công việc.</li>
+  </ul>
+
+  <h2 class="section-heading">Quy trình CÓ DevOps</h2>
+  <p class="body-text">
+    Dev và Ops ngồi cùng nhau <strong>ngay từ đầu dự án</strong>, thống nhất kiến trúc, chiến lược triển khai và tự động hoá.
+  </p>
+  <div class="compare-grid">
+    <div class="compare-card green">
+      <h4>👨‍💻 Team Development</h4>
+      <ul>
+        <li>Chia sẻ về kiến trúc, framework của phần mềm dự kiến phát triển.</li>
+        <li>Xác định các công việc cần team Operation hỗ trợ (vd: software scan, automation test).</li>
+        <li>Có các chỉ dẫn cần thiết cho việc deploy, dựa trên tư vấn từ team Operation.</li>
+      </ul>
+    </div>
+    <div class="compare-card green">
+      <h4>🛠️ Team Operation</h4>
+      <ul>
+        <li>Tham gia ngay từ đầu trong việc tư vấn và thiết kế hệ thống.</li>
+        <li>Xác định và lên chiến lược cụ thể cho các thành phần cần triển khai.</li>
+        <li>Chiến lược Automation, CICD &amp; release lên các môi trường.</li>
+        <li>Phương án Monitor, Backup, Scaling cho các thành phần của hệ thống.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="mermaid">
+  flowchart LR
+      PM["📋 <b>Project Manager</b>"]
+      Dev["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/><b>Developer</b>"]
+      Tester["🧪 <b>Tester / QA</b>"]
+      Ops["<img src='../../assets/svg-icon/operator.svg' style='width:32px;height:32px;'/><br/><b>Operator</b>"]
+      DevOps["♾️ <b>DevOps Engineer</b><br/>CICD · IaC · Monitoring"]
+      Pipeline["🔁 <b>CICD Pipeline</b><br/>Build → Test → Deploy"]
+      Env["<img src='../../assets/aws-svg/aws-logo.svg' style='width:32px;height:32px;'/><br/><b>Môi trường</b><br/>Test · Staging · Prod"]
+      PM <--> DevOps
+      Dev <--> DevOps
+      Tester <--> DevOps
+      Ops <--> DevOps
+      Dev -->|"git push"| Pipeline
+      DevOps -->|"Xây dựng &amp; duy trì"| Pipeline
+      Pipeline -->|"Deploy tự động"| Env
+      Env -.->|"Monitoring feedback"| Dev
+  </div>
+  <p class="arch-caption">Khi có DevOps: mọi vai trò cùng chia sẻ một quy trình chung; CICD pipeline thay thế việc “bàn giao artifact” thủ công.</p>
+
+  <h2 class="section-heading">Vai trò của DevOps Engineer trong dự án</h2>
+  <ul class="feature-list">
+    <li><strong>Tự động hoá quy trình:</strong> thiết lập và duy trì công cụ, quy trình tự động — bao gồm xây dựng hạ tầng tự động (IaC), automation test, CI/CD pipeline.</li>
+    <li><strong>Quản lý hệ thống và môi trường:</strong> giám sát, quản lý, tối ưu hệ thống; cấu hình và triển khai Server, Database; đảm bảo tính sẵn sàng và bảo mật.</li>
+    <li><strong>Continuous Integration:</strong> xây dựng và duy trì hệ thống tích hợp liên tục để kiểm tra source code, chạy automation test, đảm bảo ứng dụng ổn định.</li>
+    <li><strong>Continuous Deployment:</strong> xây dựng và duy trì quy trình tự động triển khai phiên bản mới lên các môi trường (Test, Staging, Production).</li>
+    <li><strong>Bảo mật và giám sát:</strong> áp dụng biện pháp bảo mật cho hệ thống và dữ liệu; xây dựng hệ thống Monitoring theo dõi hiệu suất và cảnh báo sự cố.</li>
+    <li><strong>Hỗ trợ và sửa lỗi:</strong> khi có sự cố trong triển khai hoặc vận hành, tìm ra nguyên nhân và khắc phục nhanh chóng.</li>
+    <li><strong>Hợp tác và giao tiếp:</strong> làm việc chặt chẽ với Developer, PM, Tester, QA, System Admin, Operator để đạt mục tiêu chung của dự án.</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>Không có DevOps</th><th>Có DevOps</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Thời điểm Ops tham gia</td><td>Cuối dự án, khi nhận artifact</td><td>Ngay từ đầu, tham gia thiết kế</td></tr>
+      <tr><td>Deploy</td><td>Thủ công, theo tài liệu (nếu có)</td><td>Tự động qua CICD pipeline</td></tr>
+      <tr><td>Môi trường</td><td>Mỗi môi trường một kiểu, khó tái tạo</td><td>Đồng nhất, tạo bằng code (IaC, Docker)</td></tr>
+      <tr><td>Khi có sự cố</td><td>Đổ lỗi cho nhau</td><td>Cùng điều tra dựa trên log, metric</td></tr>
+      <tr><td>Chi phí ban đầu</td><td>Thấp</td><td>Cao hơn (xây pipeline, đào tạo team)</td></tr>
+      <tr><td>Chi phí dài hạn</td><td>Cao (lỗi lặp lại, release chậm)</td><td>Thấp hơn nhờ tự động hoá</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>“Chạy ngon ở local” nhưng lỗi trên server</h4>
+      <p>Đóng gói ứng dụng bằng Docker và dùng chung image cho mọi môi trường, loại bỏ sự khác biệt giữa máy developer và server.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Release mất cả đêm</h4>
+      <p>Thay checklist deploy 30 bước thủ công bằng một pipeline; release chỉ còn là việc merge code và approve.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Sự cố Production lúc nửa đêm</h4>
+      <p>Hệ thống Monitoring cảnh báo qua Slack/email trước khi khách hàng phát hiện; log tập trung giúp tìm nguyên nhân nhanh.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Lưu ý:</strong> DevOps Engineer không thay thế Developer hay Operator. Vai trò của họ là xây dựng “đường ray” (pipeline, hạ tầng tự động, giám sát) để các team khác chạy nhanh và an toàn hơn.
+  </div>
+
+</body>
+</html>

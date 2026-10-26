@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Merge vs Rebase vs Squash &amp; các lệnh stash, reset – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Merge vs Rebase vs Squash &amp; các lệnh stash, reset</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Khi đưa code từ nhánh feature vào nhánh chính (ví dụ <code>develop</code>), có 3 phương án thường dùng: <strong>Merge</strong>, <strong>Rebase</strong> và <strong>Squash commit</strong>.
+    Cả 3 đều cho ra cùng một nội dung code cuối cùng, chỉ khác nhau ở <strong>hình dạng lịch sử commit</strong> – ảnh hưởng tới việc đọc log, review và revert sau này.
+    Chương này cũng giới thiệu các lệnh hay dùng hằng ngày: <code>git stash</code> (cất tạm công việc dang dở), <code>git reset</code> (di chuyển branch về commit cũ) và <code>git reflog</code> (cứu commit “bị mất”).
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Merge:</strong> tạo ra một commit mới (“nút thắt”) nối hai nhánh lại với nhau, giữ nguyên toàn bộ lịch sử của cả hai nhánh.</li>
+    <li><strong>Rebase:</strong> đem toàn bộ commit của nhánh source “đặt lại” lên đầu nhánh target theo đúng thứ tự, tạo lịch sử thẳng một đường. Commit được tạo lại với hash mới.</li>
+    <li><strong>Squash commit:</strong> gom toàn bộ commit của nhánh source thành <strong>một commit duy nhất</strong> và đặt lên đầu nhánh target.</li>
+    <li><strong>git stash:</strong> lưu tạm thay đổi chưa commit vào một “ngăn kéo” để chuyển sang branch khác, sau đó lấy lại.</li>
+    <li><strong>git reset:</strong> di chuyển branch hiện tại về một commit chỉ định với 3 chế độ <code>--soft</code>, <code>--mixed</code>, <code>--hard</code>.</li>
+    <li><strong>git reflog:</strong> nhật ký mọi vị trí HEAD đã đi qua ở local – giúp tìm lại commit sau khi lỡ <code>reset --hard</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình: so sánh lịch sử sau khi combine</h2>
+  <p class="body-text">Tình huống ban đầu: nhánh <code>feature</code> có 2 commit F1, F2 tạo từ C2; trong lúc đó <code>main</code> có thêm commit C3.</p>
+
+  <h3 class="section-subheading">1. Merge – lịch sử phân nhánh, có merge commit</h3>
+  <div class="mermaid">
+  gitGraph
+      commit id: "C1"
+      commit id: "C2"
+      branch feature
+      checkout feature
+      commit id: "F1"
+      commit id: "F2"
+      checkout main
+      commit id: "C3"
+      merge feature id: "Merge feature"
+  </div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout main
+git merge --no-ff feature</code></pre>
+
+  <h3 class="section-subheading">2. Rebase – lịch sử thẳng, F1/F2 được tạo lại (F1', F2')</h3>
+  <div class="mermaid">
+  gitGraph
+      commit id: "C1"
+      commit id: "C2"
+      commit id: "C3"
+      commit id: "F1'"
+      commit id: "F2'"
+  </div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout feature
+git rebase main
+git checkout main
+git merge feature</code></pre>
+
+  <h3 class="section-subheading">3. Squash – 1 commit duy nhất đại diện cho cả feature</h3>
+  <div class="mermaid">
+  gitGraph
+      commit id: "C1"
+      commit id: "C2"
+      commit id: "C3"
+      commit id: "S = F1 + F2" type: HIGHLIGHT
+  </div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout main
+git merge --squash feature
+git commit -m "feat: add feature (F1 + F2)"</code></pre>
+  <p class="arch-caption">Trên GitHub, 3 phương án này tương ứng 3 lựa chọn của nút Merge trong Pull Request: <strong>Create a merge commit</strong>, <strong>Rebase and merge</strong>, <strong>Squash and merge</strong>.</p>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Merge</th><th>Rebase</th><th>Squash</th></tr></thead>
+    <tbody>
+      <tr><td>Lịch sử</td><td>Đầy đủ, đúng thực tế, nhưng nhiều nhánh rẽ</td><td>Thẳng, dễ đọc</td><td>Gọn nhất: 1 feature = 1 commit</td></tr>
+      <tr><td>Giữ chi tiết từng commit</td><td>✅</td><td>✅ (hash mới)</td><td>❌ mất các commit nhỏ trên nhánh chính</td></tr>
+      <tr><td>Viết lại lịch sử</td><td>Không</td><td>Có – <strong>không rebase branch đã chia sẻ</strong> với người khác</td><td>Không viết lại nhánh chính</td></tr>
+      <tr><td>Revert cả feature</td><td><code>git revert -m 1 &lt;merge&gt;</code></td><td>Phải revert từng commit</td><td>Revert đúng 1 commit – dễ nhất</td></tr>
+      <tr><td>Xử lý conflict</td><td>Một lần duy nhất</td><td>Có thể phải xử lý ở từng commit</td><td>Một lần duy nhất</td></tr>
+      <tr><td>Phù hợp khi</td><td>Merge <code>release</code>/<code>hotfix</code> vào <code>main</code>, cần truy vết</td><td>Cập nhật feature branch cá nhân theo <code>develop</code> mới nhất</td><td>Feature branch có nhiều commit lặt vặt (“fix typo”, “wip”)</td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-danger"><strong>Quy tắc vàng của rebase:</strong> không rebase những commit đã push lên branch mà người khác đang dùng (ví dụ <code>develop</code>, <code>main</code>). Rebase tạo commit mới với hash mới, buộc phải <code>push --force</code> và làm lệch lịch sử của cả team.</div>
+
+  <h2 class="section-heading">Các lệnh hữu ích khác</h2>
+
+  <h3 class="section-subheading">git stash – cất tạm công việc dang dở</h3>
+  <p class="body-text">Đang code dở tính năng A thì có bug khẩn cấp cần chuyển sang branch khác, nhưng chưa muốn commit code dở dang:</p>
+  <table class="compare-table">
+    <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><code>git stash</code></td><td>Cất thay đổi của các file <strong>đã được track</strong> (file mới chưa <code>git add</code> lần nào sẽ không được cất)</td></tr>
+      <tr><td><code>git stash push --include-untracked -m "msg"</code></td><td>Cất cả file untracked, kèm mô tả</td></tr>
+      <tr><td><code>git stash list</code></td><td>Liệt kê các stash (<code>stash@{0}</code> là mới nhất)</td></tr>
+      <tr><td><code>git stash apply</code></td><td>Lấy thay đổi đã stash xuống branch hiện tại, <strong>vẫn giữ</strong> trong danh sách stash</td></tr>
+      <tr><td><code>git stash pop</code></td><td>Lấy thay đổi xuống và <strong>xoá</strong> khỏi danh sách stash</td></tr>
+      <tr><td><code>git stash drop</code></td><td>Xoá một stash</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">git reset – di chuyển branch về commit chỉ định</h3>
+  <div class="mermaid">
+  flowchart LR
+      R["⏪ <b>git reset COMMIT</b><br/>branch quay về commit chỉ định"]
+      R --> S["🟢 <b>--soft</b><br/>thay đổi giữ ở <b>Staged</b><br/>commit lại ngay được"]
+      R --> M["🟡 <b>--mixed</b> (mặc định)<br/>thay đổi giữ ở <b>Unstaged</b><br/>review &amp; add lại"]
+      R --> H["🔴 <b>--hard</b><br/><b>xoá bỏ</b> mọi thay đổi<br/>sau commit đó"]
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Lệnh</th><th>Ý nghĩa</th><th>Ví dụ sử dụng</th></tr></thead>
+    <tbody>
+      <tr><td><code>git reset --soft &lt;commit&gt;</code></td><td>Di chuyển branch về commit chỉ định, các file đã thay đổi được giữ ở trạng thái <strong>staged</strong>. Chạy lại <code>git commit</code> là xong.</td><td>Gộp 3 commit gần nhất thành 1: <code>git reset --soft HEAD~3</code> rồi commit lại</td></tr>
+      <tr><td><code>git reset --mixed &lt;commit&gt;</code></td><td>Di chuyển branch về commit chỉ định, các file đã thay đổi chuyển thành <strong>unstaged</strong>. Bạn review và add lại file cần thiết.</td><td>Lỡ commit thừa file, muốn chọn lại</td></tr>
+      <tr><td><code>git reset --hard &lt;commit&gt;</code></td><td>Di chuyển branch về commit chỉ định và <strong>discard toàn bộ thay đổi</strong> sau commit đó.</td><td>Bỏ hết thử nghiệm ở local: <code>git reset --hard origin/develop</code></td></tr>
+    </tbody>
+  </table>
+  <p class="code-note">💡 <code>HEAD~1</code> = commit ngay trước HEAD, <code>HEAD~3</code> = lùi 3 commit. Có thể dùng hash commit thay thế.</p>
+
+  <h2 class="section-heading">Thực hành nhanh trên repository local</h2>
+  <p class="body-text">Phần thực hành dùng một repository local mới (không cần GitHub) để thoải mái thử nghiệm. Toàn bộ lệnh có trong <code>sourcecode/section_7_git_basic_operation/git_merge_rebase_squash/commands.sh</code>. Sau mỗi phần, chạy <code>git log --oneline --graph --all</code> (hoặc xem bằng SourceTree) để so sánh hình dạng lịch sử.</p>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo repository playground</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/git-labs/git-playground
+cd ~/git-labs/git-playground
+git init -b main
+echo "line 1" &gt; app.txt
+git add app.txt
+git commit -m "C1: init app"
+echo "line 2" &gt;&gt; app.txt
+git commit -am "C2: add line 2"</code></pre>
+        <p class="code-note">💡 <code>git commit -am</code> = add tất cả file <strong>đã được track</strong> + commit (không áp dụng cho file mới).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Merge</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout -b feature/merge-demo
+echo "merge feature" &gt; merge.txt
+git add merge.txt
+git commit -m "M1: add merge.txt"
+echo "merge feature 2" &gt;&gt; merge.txt
+git commit -am "M2: update merge.txt"
+git checkout main
+echo "main change" &gt; main.txt
+git add main.txt
+git commit -m "C3: add main.txt"
+git merge --no-ff feature/merge-demo -m "Merge branch feature/merge-demo"
+git log --oneline --graph --all</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Rebase</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout -b feature/rebase-demo
+echo "rebase feature" &gt; rebase.txt
+git add rebase.txt
+git commit -m "R1: add rebase.txt"
+echo "rebase feature 2" &gt;&gt; rebase.txt
+git commit -am "R2: update rebase.txt"
+git checkout main
+echo "main change 2" &gt;&gt; main.txt
+git commit -am "C4: update main.txt"
+git checkout feature/rebase-demo
+git log --oneline -3
+git rebase main
+git log --oneline -3
+git checkout main
+git merge feature/rebase-demo
+git log --oneline --graph -8</code></pre>
+        <p>So sánh hash của R1, R2 trước và sau <code>rebase</code> – hash đã thay đổi vì commit được tạo lại. Lệnh <code>merge</code> cuối cùng là <strong>fast-forward</strong>: không có merge commit, lịch sử thẳng.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Squash</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout -b feature/squash-demo
+echo "squash 1" &gt; squash.txt
+git add squash.txt
+git commit -m "S1: add squash.txt"
+echo "squash 2" &gt;&gt; squash.txt
+git commit -am "S2: fix typo"
+echo "squash 3" &gt;&gt; squash.txt
+git commit -am "S3: fix typo again"
+git checkout main
+git merge --squash feature/squash-demo
+git status
+git commit -m "feat: add squash feature (S1+S2+S3)"
+git log --oneline --graph -8</code></pre>
+        <p>Sau <code>merge --squash</code>, thay đổi nằm ở staging area và chưa có commit – bạn tự commit với message mới. Trên <code>main</code> chỉ có 1 commit thay cho S1, S2, S3.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Stash</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">echo "work in progress" &gt;&gt; app.txt
+echo "new file" &gt; draft.txt
+git status
+git stash
+git status
+git stash pop</code></pre>
+        <p>Quan sát: sau <code>git stash</code>, <code>app.txt</code> trở về như cũ nhưng <code>draft.txt</code> (untracked) vẫn còn. Cất cả file untracked rồi chuyển branch:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git stash push --include-untracked -m "wip: draft"
+git status
+git stash list
+git checkout -b hotfix/urgent
+git checkout main
+git stash pop
+git status
+git add .
+git commit -m "C5: finish wip"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Reset soft / mixed / hard</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">echo "reset 1" &gt; reset.txt
+git add reset.txt
+git commit -m "X1: add reset.txt"
+echo "reset 2" &gt;&gt; reset.txt
+git commit -am "X2: update reset.txt"
+git log --oneline -3</code></pre>
+        <p><strong>--soft:</strong> commit X2 bị gỡ, thay đổi vẫn ở staged (<em>Changes to be committed</em>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git reset --soft HEAD~1
+git status
+git commit -m "X2: update reset.txt (commit again)"</code></pre>
+        <p><strong>--mixed:</strong> thay đổi chuyển về unstaged (<em>Changes not staged for commit</em>), phải add lại:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git reset --mixed HEAD~1
+git status
+git add reset.txt
+git commit -m "X2: update reset.txt (commit again)"</code></pre>
+        <p><strong>--hard:</strong> thay đổi của X2 bị xoá hoàn toàn khỏi working directory:</p>
+        <pre class="command-line" data-prompt="$" data-output="3"><code class="language-bash">git reset --hard HEAD~1
+cat reset.txt
+reset 1</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Cứu commit bằng reflog</strong>
+        <p>Commit X2 không còn trên branch nhưng vẫn còn trong reflog (local, giữ mặc định khoảng 90 ngày). Tìm hash của dòng <em>commit: X2: update reset.txt (commit again)</em> và reset về đó:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git reflog -10
+git reset --hard &lt;COMMIT_HASH&gt;
+cat reset.txt</code></pre>
+        <p><code>reset.txt</code> có lại dòng <em>reset 2</em>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Team quy định “Squash and merge” cho PR vào develop</h4>
+      <p>Mỗi PR = 1 commit trên <code>develop</code> kèm mã ticket, lịch sử gọn, dễ tạo release note và revert nguyên một tính năng bằng một lệnh.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Cập nhật feature branch cá nhân</h4>
+      <p>Trước khi tạo PR, developer chạy <code>git pull --rebase origin develop</code> trên branch của riêng mình để đặt commit lên đầu <code>develop</code> mới nhất, PR không có merge commit thừa.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Bug khẩn cấp khi đang code dở</h4>
+      <p><code>git stash push -u</code> → <code>git checkout -b hotfix/...</code> từ <code>main</code> → sửa bug, tạo PR → quay lại branch cũ và <code>git stash pop</code> tiếp tục công việc.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Chỉ dùng <code>reset --hard</code>, <code>rebase</code>, <code>commit --amend</code> với commit <strong>chưa push</strong> hoặc trên branch chỉ mình bạn dùng. Với branch chung, dùng <code>git revert</code>.</li>
+    <li>Nếu bắt buộc phải force push branch cá nhân, dùng <code>git push --force-with-lease</code> thay vì <code>--force</code> – lệnh sẽ từ chối nếu trên remote có commit mới của người khác.</li>
+    <li>Trên GitHub có thể bật/tắt từng kiểu merge tại <strong>Settings → General → Pull Requests</strong> để cả team dùng thống nhất một kiểu.</li>
+    <li>Dọn dẹp sau khi thực hành: <code>rm -rf ~/git-labs/git-playground</code>.</li>
+  </ul>
+
+</body>
+</html>

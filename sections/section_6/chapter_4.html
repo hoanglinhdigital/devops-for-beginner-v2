@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>User, Group &amp; phân quyền trong Linux – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">User, Group &amp; phân quyền trong Linux</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Linux là hệ điều hành <strong>đa người dùng</strong>: nhiều người và nhiều phần mềm cùng sử dụng một server. <strong>User</strong> và <strong>Group</strong> là hai khái niệm dùng để xác định “ai” đang thao tác,
+    còn <strong>Permission</strong> (quyền) trên từng file/folder quyết định “ai được làm gì”. Hiểu rõ cơ chế này giúp bạn cấp quyền vừa đủ cho từng thành viên dự án và tránh lỗi <code>Permission denied</code> khi triển khai ứng dụng.
+  </p>
+
+  <h2 class="section-heading">Các khái niệm chính</h2>
+  <ul class="feature-list">
+    <li><strong>User:</strong> tài khoản đăng nhập hoặc chạy chương trình. Mỗi user có một định danh duy nhất là <strong>UID</strong> (User ID). Thông tin user lưu ở <code>/etc/passwd</code>, mật khẩu (đã mã hoá) lưu ở <code>/etc/shadow</code>.</li>
+    <li><strong>Group:</strong> tập hợp nhiều user để cấp quyền chung. Mỗi group có định danh <strong>GID</strong>, lưu ở <code>/etc/group</code>.</li>
+    <li><strong>Primary group &amp; Secondary group:</strong> mỗi user thuộc đúng một <em>primary group</em> (mặc định trùng tên user, là group sở hữu file user tạo ra) và có thể thuộc nhiều <em>secondary group</em> khác.</li>
+    <li><strong>root (superuser):</strong> user đặc biệt có UID = 0, có toàn quyền trên hệ thống, không bị giới hạn bởi permission. Không thể đổi tên hay xoá root.</li>
+    <li><strong>sudo:</strong> cho phép user thường chạy một lệnh với quyền root (hoặc user khác). Danh sách ai được sudo cấu hình ở <code>/etc/sudoers</code> và thư mục <code>/etc/sudoers.d/</code>.</li>
+    <li><strong>System user:</strong> user do phần mềm tạo ra để chạy service (ví dụ <code>apache</code>, <code>sshd</code>, <code>chrony</code>), thường có UID &lt; 1000 và không đăng nhập được.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình User – Group – Permission</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Users["👥 Users"]
+          direction TB
+          U1["<img src='../../assets/svg-icon/user.svg' style='width:32px;height:32px;'/><br/><b>ec2-user</b><br/>UID 1000"]
+          U2["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/><b>developer1</b><br/>UID 1001"]
+          U3["👑 <b>root</b><br/>UID 0"]
+      end
+      subgraph Groups["🏷️ Groups"]
+          direction TB
+          G1["<b>ec2-user</b><br/>primary group"]
+          G2["<b>wheel</b><br/>được sudo"]
+          G3["<b>developer_group</b>"]
+      end
+      F["📄 <b>/opt/project/app.conf</b><br/>owner: ec2-user · group: developer_group<br/>-rw-r-----"]
+      U1 --> G1
+      U1 --> G2
+      U2 --> G3
+      G1 -.->|"owner: rw-"| F
+      G3 -.->|"group: r--"| F
+      U3 ==>|"bỏ qua permission"| F
+  </div>
+  <p class="arch-caption">User thuộc một hoặc nhiều group. Mỗi file có 1 owner (user) và 1 group sở hữu; quyền được chia cho 3 đối tượng: owner, group và other.</p>
+
+  <h2 class="section-heading">Phân quyền File / Folder</h2>
+  <p class="body-text">Chạy <code>ls -l</code> sẽ thấy thông tin quyền của từng file/folder, ví dụ:</p>
+  <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2"><code class="language-bash">ls -ld /etc/ssh
+drwxr-xr-x. 4 root root 4096 Oct 20 06:06 /etc/ssh</code></pre>
+  <table class="compare-table">
+    <thead><tr><th>Phần</th><th>Giá trị</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td>Ký tự đầu</td><td><code>d</code></td><td>Loại: <code>d</code> = thư mục, <code>-</code> = file thường, <code>l</code> = symbolic link</td></tr>
+      <tr><td>Bộ 3 ký tự thứ nhất</td><td><code>rwx</code></td><td>Quyền của <strong>Owner</strong>: read + write + execute</td></tr>
+      <tr><td>Bộ 3 ký tự thứ hai</td><td><code>r-x</code></td><td>Quyền của <strong>Group</strong>: read + execute, không có write</td></tr>
+      <tr><td>Bộ 3 ký tự thứ ba</td><td><code>r-x</code></td><td>Quyền của <strong>Other</strong> (mọi user còn lại): read + execute</td></tr>
+      <tr><td>Số</td><td><code>4</code></td><td>Số hard link</td></tr>
+      <tr><td>Owner / Group</td><td><code>root root</code></td><td>User sở hữu / group sở hữu</td></tr>
+      <tr><td>Size, thời gian, tên</td><td><code>4096 Oct 20 06:06 /etc/ssh</code></td><td>Kích thước (byte), thời gian sửa đổi gần nhất, tên</td></tr>
+    </tbody>
+  </table>
+  <p class="code-note">💡 Dấu <code>.</code> ở cuối chuỗi quyền (<code>drwxr-xr-x.</code>) cho biết file có SELinux context — có thể bỏ qua ở mức cơ bản.</p>
+
+  <h3 class="section-subheading">Ý nghĩa của r, w, x với file và folder</h3>
+  <table class="compare-table">
+    <thead><tr><th>Quyền</th><th>Với file</th><th>Với folder</th></tr></thead>
+    <tbody>
+      <tr><td><strong>r</strong> (read)</td><td>Xem nội dung file (<code>cat</code>, <code>less</code>)</td><td>Liệt kê danh sách file bên trong (<code>ls</code>)</td></tr>
+      <tr><td><strong>w</strong> (write)</td><td>Sửa nội dung file</td><td>Tạo, xoá, đổi tên file bên trong folder</td></tr>
+      <tr><td><strong>x</strong> (execute)</td><td>Chạy file như một chương trình/script (tương tự <code>.exe</code> trên Windows)</td><td>“Đi qua” folder (<code>cd</code> vào, truy cập file bên trong nếu biết tên)</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Biểu diễn quyền dạng số (octal)</h3>
+  <p class="body-text">Mỗi quyền tương ứng một giá trị: <strong>r = 4, w = 2, x = 1</strong>. Cộng lại sẽ ra một chữ số cho mỗi đối tượng owner / group / other:</p>
+  <table class="compare-table">
+    <thead><tr><th>Số</th><th>Ký hiệu</th><th>Read</th><th>Write</th><th>Execute</th><th>Giải thích (bit rwx)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>0</strong></td><td><code>---</code></td><td>No</td><td>No</td><td>No</td><td>000 → 0</td></tr>
+      <tr><td><strong>4</strong></td><td><code>r--</code></td><td>Yes</td><td>No</td><td>No</td><td>100 → 4</td></tr>
+      <tr><td><strong>5</strong></td><td><code>r-x</code></td><td>Yes</td><td>No</td><td>Yes</td><td>101 → 4 + 1</td></tr>
+      <tr><td><strong>6</strong></td><td><code>rw-</code></td><td>Yes</td><td>Yes</td><td>No</td><td>110 → 4 + 2</td></tr>
+      <tr><td><strong>7</strong></td><td><code>rwx</code></td><td>Yes</td><td>Yes</td><td>Yes</td><td>111 → 4 + 2 + 1</td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Ví dụ: muốn file <code>run.sh</code> có quyền <code>rwx r-x ---</code> (owner toàn quyền, group đọc + chạy, other không có quyền) → <code>chmod 750 run.sh</code>. Một số giá trị hay gặp: <code>644</code> (file thường), <code>755</code> (script, thư mục), <code>600</code> (file bí mật như private key), <code>700</code> (thư mục <code>.ssh</code>).</p>
+
+  <h3 class="section-subheading">Linux kiểm tra quyền như thế nào?</h3>
+  <div class="mermaid">
+  flowchart TB
+      Start["👤 User truy cập file"] --> Root{"Là root?"}
+      Root -->|"Có"| Allow["✅ Cho phép"]
+      Root -->|"Không"| Owner{"Là owner<br/>của file?"}
+      Owner -->|"Có"| UseOwner["Dùng quyền <b>Owner</b>"]
+      Owner -->|"Không"| Group{"Thuộc group<br/>sở hữu file?"}
+      Group -->|"Có"| UseGroup["Dùng quyền <b>Group</b>"]
+      Group -->|"Không"| UseOther["Dùng quyền <b>Other</b>"]
+      UseOwner --> Check{"Có đủ quyền<br/>r / w / x?"}
+      UseGroup --> Check
+      UseOther --> Check
+      Check -->|"Có"| Allow
+      Check -->|"Không"| Deny["⛔ Permission denied"]
+  </div>
+  <p class="arch-caption">Linux chỉ áp dụng <strong>một</strong> bộ quyền theo thứ tự owner → group → other. Ngoài ra, để mở được file, user cần quyền <code>x</code> trên <strong>tất cả</strong> thư mục cha trong đường dẫn.</p>
+
+  <h2 class="section-heading">Các lệnh quản lý thường dùng</h2>
+  <div class="two-col">
+    <div class="card">
+      <h4>User &amp; Group</h4>
+      <ul class="feature-list">
+        <li><code>useradd</code> / <code>userdel -r</code>: tạo / xoá user (kèm home)</li>
+        <li><code>passwd</code>: đặt, đổi mật khẩu</li>
+        <li><code>usermod -aG &lt;group&gt; &lt;user&gt;</code>: thêm user vào group</li>
+        <li><code>groupadd</code> / <code>groupmod</code> / <code>groupdel</code>: tạo / sửa / xoá group</li>
+        <li><code>id</code>, <code>groups</code>, <code>whoami</code>: xem thông tin user</li>
+        <li><code>su - &lt;user&gt;</code>, <code>sudo &lt;lệnh&gt;</code>, <code>visudo</code>: chuyển user, chạy lệnh quyền root, sửa sudoers</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>File &amp; Folder</h4>
+      <ul class="feature-list">
+        <li><code>ls -l</code>, <code>ls -ld</code>: xem quyền file / folder</li>
+        <li><code>chmod 750 file</code>: đổi quyền dạng số</li>
+        <li><code>chmod u+x,g-w,o= file</code>: đổi quyền dạng ký hiệu</li>
+        <li><code>chown user[:group] file</code>: đổi owner (và group)</li>
+        <li><code>chown -R user:group folder</code>: đổi owner cho cả thư mục con</li>
+        <li><code>chgrp group file</code>: chỉ đổi group sở hữu</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Trade-off khi cấp quyền</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Cách làm</th><th>Ưu điểm</th><th>Nhược điểm / Rủi ro</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Dùng chung một user (ví dụ <code>ec2-user</code>) cho cả team</td><td>Đơn giản, nhanh</td><td>Không biết ai đã làm gì (không audit được), không thu hồi quyền riêng từng người khi nghỉ việc</td></tr>
+      <tr><td>Mỗi người một user, cấp quyền qua group</td><td>Truy vết được, thu hồi dễ, cấp quyền theo nhóm</td><td>Tốn công quản lý hơn khi có nhiều server (giải pháp: tự động hoá bằng Ansible, SSM, IAM Identity Center)</td></tr>
+      <tr><td><code>chmod 777</code> / cấp sudo cho tất cả</td><td>“Hết lỗi permission” ngay lập tức</td><td>Ai cũng sửa/xoá được file, mã độc dễ khai thác. <strong>Không bao giờ dùng trên production</strong></td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Nguyên tắc chung: <strong>Least privilege</strong> — chỉ cấp quyền vừa đủ để làm việc, giống như nguyên tắc thiết kế IAM Policy trên AWS.</p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Cấp quyền cho thành viên dự án</h4>
+      <p>Tạo user riêng cho từng developer, thêm vào group <code>developer_group</code>; chỉ group <code>ops</code> mới có quyền <code>sudo</code> để restart service hoặc cài phần mềm.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Chạy ứng dụng bằng user riêng</h4>
+      <p>Ứng dụng Node.js/Java chạy bằng user <code>appuser</code> không có quyền sudo. Nếu ứng dụng bị khai thác, kẻ tấn công cũng không chiếm được toàn bộ server.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Bảo vệ file bí mật</h4>
+      <p>File chứa cấu hình kết nối database đặt quyền <code>640</code>, owner là <code>root</code>, group là group của ứng dụng — chỉ ứng dụng đọc được, user khác không xem được.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Trên Amazon Linux, <code>ec2-user</code> thuộc group <code>wheel</code> và được sudo không cần mật khẩu (cấu hình bởi cloud-init tại <code>/etc/sudoers.d/90-cloud-init-users</code>).</li>
+    <li>Luôn sửa sudoers bằng <code>visudo</code> (có kiểm tra cú pháp). Sửa trực tiếp file sai cú pháp có thể khiến <strong>không ai dùng được sudo nữa</strong>.</li>
+    <li>Thay đổi group của user chỉ có hiệu lực ở <strong>phiên đăng nhập mới</strong> — cần logout/login lại.</li>
+    <li>Khi tạo file mới, quyền mặc định được quyết định bởi <code>umask</code> (thường là <code>0022</code> → file <code>644</code>, folder <code>755</code>).</li>
+    <li>Quyền nâng cao (tự tìm hiểu thêm): <strong>SUID, SGID, Sticky bit</strong> (ví dụ thư mục <code>/tmp</code> có quyền <code>drwxrwxrwt</code>), ACL (<code>setfacl</code>/<code>getfacl</code>).</li>
+  </ul>
+
+</body>
+</html>

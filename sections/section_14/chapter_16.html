@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Tạo Kubernetes cluster bằng kops – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Tạo Kubernetes cluster bằng kops</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu <strong>kops</strong> (Kubernetes Operations) là gì và tại sao dùng để tạo cluster trên AWS.</li>
+    <li>Tạo một Kubernetes cluster thật trên EC2 (1 control-plane + các worker node) bằng kops.</li>
+    <li>Kết nối tới cluster từ EC2 và từ máy cá nhân.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu kops</h2>
+  <p class="body-text">
+    <strong>kops</strong> (Kubernetes Operations) là công cụ giúp bạn <strong>tạo, xoá, nâng cấp và duy trì</strong> cụm Kubernetes trên các nền tảng cloud như AWS, GCE, DigitalOcean.
+    Một số tính năng nổi bật: tự động provisioning cluster <strong>High Availability</strong>, mô hình state-sync cho phép <strong>dry-run</strong> và <strong>idempotency</strong> (chạy nhiều lần vẫn ra cùng kết quả), và khả năng sinh ra <strong>Terraform</strong>.
+  </p>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Admin["<img src='../../assets/svg-icon/developer.svg' style='width:32px;height:32px;'/><br/>EC2 admin<br/>(kops + kubectl)"]
+      S3["<img src='../../assets/aws-svg/S3.svg' style='width:32px;height:32px;'/><br/>S3 bucket<br/>(state)"]
+      CP["<img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/><br/>Control-plane EC2"]
+      WN["<img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/><br/>Worker EC2 x2"]
+      R53["<img src='../../assets/aws-svg/Route-53.svg' style='width:32px;height:32px;'/><br/>Route53 domain"]
+      Admin -->|"kops create/update cluster"| S3
+      S3 -.-> CP
+      S3 -.-> WN
+      CP --- R53
+      WN --- R53
+  </div>
+  <p class="arch-caption">kops lưu state vào S3, đọc domain từ Route53, và tạo các EC2 làm control-plane và worker node. Sau đó bạn dùng kubectl để thao tác với cluster.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Một EC2 chạy <strong>Ubuntu</strong> (làm "admin server").</li>
+    <li>EC2 có <strong>IAM Role</strong> với policy <code>AdministratorAccess</code>.</li>
+    <li>Một <strong>domain</strong> (có thể mua tại Route53) – thay <code>hoanglinhdigital.com</code> bằng domain của bạn.</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/lab4_kops/commands.sh</code>.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> kops tạo EC2 (control-plane + worker), Elastic IP, NAT... tính phí theo giờ. <strong>Nhớ xoá cluster ngay sau khi thực hành.</strong></div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài AWS CLI trên EC2</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo apt update
+sudo apt install awscli -y
+aws --version</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cài kubectl</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+kubectl help</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cài kops</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -Lo kops https://github.com/kubernetes/kops/releases/download/$(curl -s https://api.github.com/repos/kubernetes/kops/releases/latest | grep tag_name | cut -d '"' -f 4)/kops-linux-amd64
+chmod +x kops
+sudo mv kops /usr/local/bin/kops
+kops version</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Chuẩn bị domain &amp; S3 bucket</strong>
+        <p>Kiểm tra domain (thay <code>hoanglinhdigital.com</code> bằng domain của bạn):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">nslookup -type=ns hoanglinhdigital.com</code></pre>
+        <p>Tạo S3 bucket lưu state của kops (thay <code>udemy-devops-kops</code> bằng tên bạn chọn):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3api create-bucket --bucket udemy-devops-kops --region ap-southeast-1</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo cluster bằng kops</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kops create cluster --name hoanglinhdigital.com --state=s3://udemy-devops-kops \
+  --zones=ap-southeast-1a,ap-southeast-1c \
+  --node-count=2 --node-size=t3.small \
+  --master-size=t3.small \
+  --dns-zone hoanglinhdigital.com \
+  --node-volume-size=10 --master-volume-size=10</code></pre>
+        <p class="code-note">💡 Lệnh này chỉ "khai báo" cluster (chưa tạo resource thật). <code>--node-count</code> là số worker node; control-plane sẽ được tạo riêng.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Áp dụng thay đổi thực sự và validate</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kops update cluster --name hoanglinhdigital.com --state=s3://udemy-devops-kops --yes --admin
+kops validate cluster --name hoanglinhdigital.com --state=s3://udemy-devops-kops --wait 10m</code></pre>
+        <p>Kiểm tra các node:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get nodes</code></pre>
+        <p>Kết quả mong đợi gồm 1 node <code>control-plane</code> và các node <code>node</code> ở trạng thái Ready.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kết nối từ máy cá nhân</strong>
+        <p>Xem file kube config trên EC2:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cat ~/.kube/config</code></pre>
+        <p>Copy nội dung và paste vào file <code>~/.kube/config</code> trên máy local (Windows: <code>C:\Users\&lt;user&gt;\.kube\config</code>). Sau đó kiểm tra:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl cluster-info
+kubectl get nodes</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kops validate cluster</code> báo cluster hợp lệ.</li>
+      <li><code>kubectl get nodes</code> hiển thị control-plane và worker node ở trạng thái <strong>Ready</strong>.</li>
+      <li>Từ máy cá nhân chạy <code>kubectl cluster-info</code> thấy cluster (sau khi copy config).</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>error: unable to recognize ... no matches for kind</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> phiên bản kubectl cũ hơn nhiều so với cluster.<br/><strong>Giải pháp:</strong> cài kubectl mới theo link chính thức hoặc dùng <code>kops export kubecfg</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không tạo được cluster, lỗi liên quan IAM/DNS</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> EC2 thiếu quyền (IAM Role) hoặc domain chưa trỏ đúng Route53.<br/><strong>Giải pháp:</strong> gắn IAM Role <code>AdministratorAccess</code>; kiểm tra <code>nslookup -type=ns</code> trả về name server của Route53.</div>
+  </div>
+
+</body>
+</html>

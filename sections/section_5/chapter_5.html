@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Template Terraform đầu tiên – EC2 &amp; Security Group – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Template Terraform đầu tiên – EC2 &amp; Security Group</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Chuẩn bị một keypair (1 private key + 1 public key) dùng chung cho các lab.</li>
+    <li>Viết Terraform template đầu tiên gồm 1 EC2 instance và 1 Security Group với cấu hình cơ bản.</li>
+    <li>Thực hành đầy đủ các bước <code>init → plan → apply → destroy</code> và hiểu output của từng bước.</li>
+    <li>Thay đổi thông số resource (instance type) và apply thay đổi.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["💻 <b>PC Local</b><br/><img src='../../assets/svg-icon/terraform.svg' style='width:36px;height:36px;'/><br/>terraform apply"]
+      subgraph AWS["☁️ AWS – ap-southeast-1"]
+          subgraph VPC["Default VPC"]
+              SG["🛡️ <b>Security Group</b><br/>22, 80, 443"]
+              EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:44px;height:44px;'/><br/><b>EC2</b><br/>t3.micro · Amazon Linux 2023"]
+              SG --- EC2
+          end
+          KP["🔑 <b>Key pair</b><br/>udemy-keypair"]
+          KP -.-> EC2
+      end
+      PC -->|"AWS API"| AWS
+      PC -->|"SSH :22"| EC2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1: đã cài AWS CLI v2 (đã <code>aws configure</code>), Terraform &gt;= 1.10, VS Code.</li>
+    <li>Region <code>ap-southeast-1</code> (Singapore) có <strong>Default VPC</strong>. Kiểm tra tại <strong>VPC → Your VPCs</strong>, cột <em>Default VPC = Yes</em>. Nếu đã lỡ xoá, tạo lại bằng <strong>Actions → Create default VPC</strong>.</li>
+    <li>Thư mục làm việc <code>~/terraform-labs</code> đã tạo ở Lab 1.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo keypair bằng ssh-keygen</strong>
+        <p>Keypair này sẽ được dùng lại cho tất cả các lab sau trong section. Chạy trong Git Bash (Windows) hoặc Terminal (Mac):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/terraform-labs
+ssh-keygen -t rsa -b 4096 -C "udemy-terraform" -f ./keypair/udemy-key -N ""</code></pre>
+        <p>Kết quả tạo ra 2 file: <code>keypair/udemy-key</code> (private key – giữ bí mật, dùng để SSH) và <code>keypair/udemy-key.pub</code> (public key – sẽ upload lên AWS).</p>
+        <div class="alert alert-warning">Không commit thư mục <code>keypair</code> lên Git. Source code khoá học đã có sẵn <code>.gitignore</code> để loại trừ thư mục này.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo template Terraform</strong>
+        <p>Tạo thư mục <code>lab2_ec2_basic</code>, mở bằng VS Code, tạo file <code>main.tf</code> và copy nội dung sau:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab2_ec2_basic
+cd ~/terraform-labs/lab2_ec2_basic
+code .</code></pre>
+        <p class="code-note">📄 <code>lab2_ec2_basic/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "ap-southeast-1"
+}
+
+# Data source: tra cứu AMI Amazon Linux 2023 mới nhất (không cần hard-code AMI ID)
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+# Đăng ký public key lên AWS để SSH vào EC2
+resource "aws_key_pair" "udemy_keypair" {
+  key_name   = "udemy-keypair"
+  public_key = file("../keypair/udemy-key.pub")
+}
+
+resource "aws_security_group" "demo_sg" {
+  name        = "demo-security-group"
+  description = "Allow HTTP, HTTPS, SSH"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_instance" "demo_instance" {
+  ami                    = data.aws_ami.amazon_linux.id
+  instance_type          = "t3.micro"
+  key_name               = aws_key_pair.udemy_keypair.key_name
+  vpc_security_group_ids = [aws_security_group.demo_sg.id]
+
+  tags = {
+    Name   = "Udemy Demo"
+    Domain = "DevOps"
+  }
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tìm hiểu các thành phần trong template</strong>
+        <table class="compare-table">
+          <thead><tr><th>Block</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>terraform { required_providers }</code></td><td>Khai báo version Terraform tối thiểu và provider <code>hashicorp/aws</code> (bản 6.x).</td></tr>
+            <tr><td><code>provider "aws"</code></td><td>Deploy vào region Singapore, credential lấy từ <code>aws configure</code>.</td></tr>
+            <tr><td><code>data "aws_ami"</code></td><td><strong>Data source</strong>: tra cứu AMI Amazon Linux 2023 mới nhất, tránh hard-code AMI ID (AMI ID khác nhau theo region và thay đổi theo thời gian).</td></tr>
+            <tr><td><code>resource "aws_key_pair"</code></td><td>Upload public key lên AWS. Hàm <code>file()</code> đọc nội dung file.</td></tr>
+            <tr><td><code>resource "aws_security_group"</code></td><td>Mở inbound 22 (SSH), 80 (HTTP), 443 (HTTPS); cho phép toàn bộ outbound. Không chỉ định <code>vpc_id</code> nên được tạo trong Default VPC.</td></tr>
+            <tr><td><code>resource "aws_instance"</code></td><td>EC2 tham chiếu tới AMI, keypair và Security Group ở trên → Terraform tự biết phải tạo keypair, SG trước rồi mới tạo EC2.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: terraform init</strong>
+        <p>Khởi tạo thư mục làm việc, Terraform sẽ tải AWS provider về thư mục <code>.terraform</code> và tạo file <code>.terraform.lock.hcl</code> để khoá version provider:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform init
+Terraform has been successfully initialized!</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: terraform plan</strong>
+        <p>Xem trước những gì sẽ được tạo. Ký hiệu <code>+</code> là tạo mới; dòng cuối cùng tóm tắt số resource thêm/sửa/xoá:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform plan
+Plan: 3 to add, 0 to change, 0 to destroy.</code></pre>
+        <p>Các giá trị hiển thị <code>(known after apply)</code> như <code>id</code>, <code>public_ip</code> chỉ có sau khi AWS tạo resource.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: terraform apply</strong>
+        <p>Terraform hiển thị lại plan và hỏi xác nhận, gõ <code>yes</code> để thực thi:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform apply
+Apply complete! Resources: 3 added, 0 changed, 0 destroyed.</code></pre>
+        <p>Vào <strong>EC2 → Instances</strong> trên AWS Console để thấy instance <code>Udemy Demo</code> đang ở trạng thái <em>Running</em>, kèm Security Group <code>demo-security-group</code> và key pair <code>udemy-keypair</code>. Trong thư mục lab xuất hiện file <code>terraform.tfstate</code> — đây là nơi Terraform ghi nhớ những gì nó đã tạo.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: SSH vào EC2</strong>
+        <p>Lấy public IP của instance từ state:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform state show aws_instance.demo_instance | grep public_ip</code></pre>
+        <p>Trên Mac/Linux cần giới hạn quyền file private key trước khi SSH:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">chmod 400 ../keypair/udemy-key</code></pre>
+        <p>SSH vào instance (thay <code>&lt;PUBLIC_IP&gt;</code> bằng IP vừa lấy được, user mặc định của Amazon Linux là <code>ec2-user</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh -i ../keypair/udemy-key ec2-user@&lt;PUBLIC_IP&gt;</code></pre>
+        <p>Gõ <code>exit</code> để thoát khỏi EC2.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Thay đổi thông số resource và apply</strong>
+        <p>Trong <code>main.tf</code>, sửa resource <code>aws_instance.demo_instance</code>:</p>
+        <ul class="feature-list">
+          <li><code>instance_type</code>: <code>"t3.micro"</code> → <code>"t3.small"</code></li>
+          <li>Thêm một tag mới trong <code>tags</code>: <code>Owner = "Udemy"</code></li>
+        </ul>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform plan
+Plan: 0 to add, 1 to change, 0 to destroy.</code></pre>
+        <p>Ký hiệu <code>~</code> nghĩa là <strong>update in-place</strong>: Terraform sẽ stop instance, đổi instance type rồi start lại, không tạo instance mới. Chạy <code>terraform apply</code> và kiểm tra trên Console instance type đã đổi thành <code>t3.small</code>.</p>
+        <div class="tip-box"><strong>Thử thêm:</strong> đổi <code>name</code> của Security Group rồi chạy <code>terraform plan</code>. Bạn sẽ thấy ký hiệu <code>-/+</code> (<em>must be replaced</em>) — một số thuộc tính không sửa tại chỗ được, Terraform phải xoá và tạo lại resource. Đây là lý do luôn phải đọc kỹ plan trước khi apply.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Destroy resources</strong>
+        <p>Xoá toàn bộ resource đã tạo trong lab, gõ <code>yes</code> để xác nhận:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform destroy
+Destroy complete! Resources: 3 destroyed.</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>terraform apply</code> tạo thành công 3 resource; EC2 <code>Udemy Demo</code> ở trạng thái Running.</li>
+      <li>SSH được vào EC2 bằng private key <code>udemy-key</code>.</li>
+      <li>Sau khi đổi instance type, plan hiển thị <code>1 to change</code> và instance trên Console chuyển thành <code>t3.small</code>.</li>
+      <li><code>terraform destroy</code> xoá sạch resource; <code>terraform state list</code> không còn trả về dòng nào.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Invalid value for "path" parameter: no file exists at "../keypair/udemy-key.pub"</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa tạo keypair, hoặc cấu trúc thư mục không đúng (thư mục <code>keypair</code> phải nằm cùng cấp với <code>lab2_ec2_basic</code>).<br/><strong>Giải pháp:</strong> Thực hiện lại Bước 1 và kiểm tra bằng <code>ls ../keypair</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>VPCIdNotSpecified: No default VPC for this user</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Region không có Default VPC.<br/><strong>Giải pháp:</strong> Vào <strong>VPC → Your VPCs → Actions → Create default VPC</strong>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>InvalidKeyPair.Duplicate: The keypair already exists</code> / <code>InvalidGroup.Duplicate</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Đã có key pair/Security Group cùng tên (tạo tay hoặc từ lần chạy trước chưa destroy).<br/><strong>Giải pháp:</strong> Xoá resource trùng tên trên Console (EC2 → Key Pairs / Security Groups) rồi apply lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>WARNING: UNPROTECTED PRIVATE KEY FILE!</code> hoặc <code>Permission denied (publickey)</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File private key có quyền quá rộng, hoặc dùng sai user/sai key.<br/><strong>Giải pháp:</strong> Chạy <code>chmod 400 ../keypair/udemy-key</code>; dùng user <code>ec2-user</code> cho Amazon Linux.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>No valid credential sources found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Terraform không tìm thấy credential AWS.<br/><strong>Giải pháp:</strong> Chạy lại <code>aws configure</code> và <code>aws sts get-caller-identity</code> (xem Lab 1).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Luôn xoá resource sau khi thực hành để tránh phát sinh chi phí. Giữ lại thư mục <code>keypair</code> để dùng cho các lab sau.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+
+</body>
+</html>

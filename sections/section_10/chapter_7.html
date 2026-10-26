@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: Build Node.js (Vue + Webpack) &amp; upload lên S3 – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: Build Node.js (Vue + Webpack) &amp; upload lên S3</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài <strong>Node.js 22 LTS</strong> trên Jenkins server.</li>
+    <li><strong>Phần 1:</strong> tạo Pipeline job checkout project <strong>Vue 3 + Webpack 5</strong>, build bằng <code>npm install</code> + <code>npm run build</code>, kiểm tra thư mục <code>dist</code>.</li>
+    <li><strong>Phần 2:</strong> upload toàn bộ file tĩnh (html, css, js) trong <code>dist</code> lên S3 bằng <code>aws s3 sync</code>.</li>
+    <li><strong>Phần 3 (tuỳ chọn):</strong> bật <strong>S3 Static website hosting</strong> để xem website do Jenkins build ra.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>simple-vue-webpack"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server · Node.js 22"]
+              direction TB
+              J1["① Checkout"] --> J2["② npm install"]
+              J2 --> J3["③ npm run build<br/>→ dist/"]
+              J3 --> J4["④ aws s3 sync"]
+          end
+          S3A["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>jenkins-artifact-‹suffix›<br/>/lab05-vue/"]
+          S3W["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>jenkins-web-‹suffix›<br/>Static website (tuỳ chọn)"]
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Browser"]
+      GH --> J1
+      J4 --> S3A
+      J4 -.-> S3W
+      User -.->|"http"| S3W
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 4: S3 bucket <code>jenkins-artifact-&lt;your-suffix&gt;</code>.</li>
+    <li>Fork repository <a href="https://github.com/hoanglinhdigital/simple-vue-webpack" target="_blank" rel="noopener"><code>hoanglinhdigital/simple-vue-webpack</code></a> (branch <code>master</code>) về GitHub account của bạn (bỏ qua nếu đã fork ở Section 9).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab5_build_nodejs/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài Node.js 22 trên Jenkins server</strong>
+        <p>SSH vào Jenkins server và cài Node.js từ repository của <a href="https://github.com/nodesource/distributions" target="_blank" rel="noopener">NodeSource</a>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh
+sudo -E bash nodesource_setup.sh
+sudo apt install -y nodejs
+rm nodesource_setup.sh
+node --version
+npm --version</code></pre>
+        <p class="code-note">💡 Node.js cài vào <code>/usr/bin/node</code> nên mọi job thấy ngay, không cần khai báo ở Tools. Muốn mỗi project dùng một version Node khác nhau, có thể dùng plugin <strong>NodeJS</strong> (khai báo ở Tools như Maven) hoặc build trong Docker container (Lab 6).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2 (Phần 1 + 2): Tạo Pipeline job</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab05-vue-webpack</code>, Definition <strong>Pipeline script</strong>, dán nội dung <code>lab5_build_nodejs/Jenkinsfile</code> và sửa <code>GIT_REPO</code>, <code>S3_BUCKET</code>:</p>
+        <pre class="code-block"><code class="language-groovy">pipeline {
+    agent any
+
+    environment {
+        // Thay &lt;your-github-username&gt; và &lt;your-suffix&gt; bằng giá trị của bạn
+        GIT_REPO  = 'https://github.com/&lt;your-github-username&gt;/simple-vue-webpack.git'
+        S3_BUCKET = 'jenkins-artifact-&lt;your-suffix&gt;'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}"
+            }
+        }
+
+        stage('Clear old build') {
+            steps {
+                sh 'rm -rf "${WORKSPACE}/dist"'
+            }
+        }
+
+        stage('Install dependencies') {
+            steps {
+                sh 'node --version'
+                sh 'npm install'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm run build'
+                sh 'ls -la dist'
+            }
+        }
+
+        stage('Upload artifact to S3') {
+            steps {
+                // sync + --delete: đồng bộ đúng nội dung dist, xoá file cũ không còn dùng
+                sh 'aws s3 sync "${WORKSPACE}/dist/" "s3://${S3_BUCKET}/lab05-vue/" --delete'
+            }
+        }
+    }
+}</code></pre>
+        <p class="code-note">💡 Stage <strong>Clear old build</strong> xoá thư mục <code>dist</code> của lần build trước (workspace được giữ lại giữa các build – Lab 2) để chắc chắn file upload lên S3 là file vừa build.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Build &amp; kiểm tra artifact</strong>
+        <p><strong>Build Now</strong>. Lần build đầu tốn 1–2 phút cho <code>npm install</code>. Log stage Build có dạng:</p>
+        <pre class="output-box"><code>+ npm run build
+&gt; vue@1.0.0 build
+&gt; webpack --mode production
+...
+webpack 5.x.x compiled successfully in 5123 ms
++ ls -la dist
+-rw-r--r-- 1 jenkins jenkins   ... index.html
+-rw-r--r-- 1 jenkins jenkins   ... main.js
+...</code></pre>
+        <p>Kiểm tra file trên S3:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 ls s3://jenkins-artifact-&lt;your-suffix&gt;/lab05-vue/ --recursive</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4 (Phần 3 – tuỳ chọn): Tạo bucket static website</strong>
+        <p>Tạo bucket mới để public website (không public bucket artifact):</p>
+        <ul class="feature-list">
+          <li>Bucket name: <code>jenkins-web-&lt;your-suffix&gt;</code>, region <code>ap-southeast-1</code></li>
+          <li>Block all public access: <strong>bỏ tick</strong> (xác nhận cảnh báo)</li>
+          <li>Tab <strong>Properties → Static website hosting</strong>: Enable, Index document <code>index.html</code></li>
+          <li>Tab <strong>Permissions → Bucket policy</strong>: dán nội dung <code>lab5_build_nodejs/bucket-policy.json</code> (thay <code>&lt;your-suffix&gt;</code>)</li>
+        </ul>
+        <pre class="code-block"><code class="language-json">{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadForStaticWebsite",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::jenkins-web-&lt;your-suffix&gt;/*"
+    }
+  ]
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5 (Phần 3 – tuỳ chọn): Deploy website bằng Jenkins</strong>
+        <p>Vào <strong>Configure</strong> của job, sửa dòng <code>aws s3 sync</code> để upload vào gốc bucket website, Save và build lại:</p>
+        <pre class="code-block"><code class="language-groovy">sh 'aws s3 sync "${WORKSPACE}/dist/" "s3://jenkins-web-&lt;your-suffix&gt;/" --delete'</code></pre>
+        <p>Truy cập <strong>Bucket website endpoint</strong> (tab Properties), dạng <code>http://jenkins-web-&lt;your-suffix&gt;.s3-website-ap-southeast-1.amazonaws.com</code> – thấy trang Vue do Jenkins build. Thử sửa nội dung trong <code>src/</code>, push lên GitHub, build lại và refresh trình duyệt.</p>
+        <p class="code-note">💡 Trong thực tế website tĩnh nên đặt sau <strong>CloudFront</strong> với Origin Access Control (Section 4) và job deploy thêm bước <code>aws cloudfront create-invalidation</code> để xoá cache.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Job <code>lab05-vue-webpack</code> chạy <strong>SUCCESS</strong> cả 5 stage.</li>
+      <li>S3 có các file <code>index.html</code>, <code>*.js</code>, <code>*.css</code> trong prefix <code>lab05-vue/</code>.</li>
+      <li>(Tuỳ chọn) Website endpoint của bucket <code>jenkins-web-&lt;your-suffix&gt;</code> hiển thị ứng dụng Vue.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>npm: not found</code> / <code>node: not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cài Node.js trên Jenkins server (hoặc cài nhầm trên máy local).<br/><strong>Giải pháp:</strong> SSH vào Jenkins server làm lại Bước 1, kiểm tra bằng <code>sudo -u jenkins node --version</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>npm install</code> rất lâu rồi build bị <code>Killed</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Server thiếu RAM.<br/><strong>Giải pháp:</strong> Dùng tối thiểu <code>t3.medium</code> (Lab 1 – Troubleshoot).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Website endpoint trả về <code>403 Forbidden</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa tắt Block public access, chưa có bucket policy, hoặc sai tên bucket trong <code>Resource</code>.<br/><strong>Giải pháp:</strong> Kiểm tra lại Bước 4; nhớ có <code>/*</code> ở cuối ARN.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Website endpoint trả về <code>404 Not Found – NoSuchKey: index.html</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File được upload vào prefix con (ví dụ <code>lab05-vue/</code>) thay vì gốc bucket.<br/><strong>Giải pháp:</strong> Kiểm tra lại đường dẫn đích của lệnh <code>aws s3 sync</code> ở Bước 5.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Bucket website public chỉ nên tồn tại trong lúc thực hành. Xoá bucket <code>jenkins-web-&lt;your-suffix&gt;</code> sau khi kiểm tra xong; giữ lại bucket artifact cho các lab sau.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 rb s3://jenkins-web-&lt;your-suffix&gt; --force</code></pre>
+
+</body>
+</html>

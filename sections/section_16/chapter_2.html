@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các giải pháp Open Source cho Monitoring – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các giải pháp Open Source cho Monitoring</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Hệ sinh thái công cụ giám sát mã nguồn mở (Open Source) cho Kubernetes là một trong những hệ sinh thái <strong>lớn và phát triển nhanh nhất</strong> của cộng đồng CNCF (Cloud Native Computing Foundation).
+    Đây là lựa chọn phổ biến nhất để bắt đầu vì <strong>miễn phí, tự chủ và không bị khoá chặt (vendor lock-in)</strong> — bạn chỉ tốn công sức cài đặt và vận hành.
+  </p>
+
+  <h2 class="section-heading">Toàn cảnh hệ sinh thái Open Source</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/k8s-opensource-ecosystem.png" alt="Hệ sinh thái công cụ Open Source cho Kubernetes monitoring (CNCF Landscape)" />
+    <div class="figure-title">Hệ sinh thái công cụ Open Source cho K8s — rất rộng lớn</div>
+  </div>
+  <div class="alert alert-warning">
+    <strong>Đừng hoảng hốt!</strong> Không có dự án/hệ thống nào có thể sử dụng hết tất cả các tool này. Bạn chỉ cần chọn <strong>một vài công cụ phù hợp</strong> với nhu cầu và quy mô của mình.
+  </div>
+
+  <h2 class="section-heading">Phân loại công cụ theo mục đích</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Mục đích</th><th>Một số tool thường dùng</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Giám sát cluster/node status</td><td>Prometheus + Grafana, Lens, Metrics Server, K9S, Node Exporter</td></tr>
+      <tr><td>Thu thập metrics</td><td>Prometheus, cAdvisor, OpenTelemetry, StatsD Exporter</td></tr>
+      <tr><td>Thu thập log</td><td>Fluentd, Fluent Bit, Loki, Logstash, Vector, Filebeat, OpenTelemetry Collector</td></tr>
+      <tr><td>Lưu trữ log</td><td>ElasticSearch, Loki, Graylog, Kafka, TimescaleDB, InfluxDB</td></tr>
+      <tr><td>Visualize metrics</td><td>Grafana, Kibana, Prometheus Web UI, OpenSearch Dashboard, VictoriaMetrics</td></tr>
+      <tr><td>Visualize log</td><td>Grafana + Loki, Kibana, Graylog, NetData, Jaeger UI</td></tr>
+      <tr><td>Health check</td><td>K8s Native Probe, kubelet, Prometheus, K9S, Lens, Blackbox Exporter, HealthCheck Operator</td></tr>
+      <tr><td>Service Mesh</td><td>Linkerd, Istio, Consul (HashiCorp), Kuma (Kong), Open Service Mesh, Traefik Mesh, NGINX Service Mesh</td></tr>
+      <tr><td>Request Tracing</td><td>Istio, Jaeger, Zipkin, OpenTelemetry, Tempo, Kiali</td></tr>
+      <tr><td>Alert</td><td>AlertManager, Grafana Alerting, Kured, BotKube, Karma, Sentry</td></tr>
+      <tr><td>Resource Provisioning</td><td>Karpenter, Cluster Autoscaler, Virtual Kubelet, Volcano, Goldilocks, VPA, Descheduler</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Bộ đôi kinh điển: Prometheus + Grafana</h2>
+  <p class="body-text">
+    <strong>Prometheus</strong> (thu thập &amp; lưu trữ metrics) kết hợp với <strong>Grafana</strong> (visualize) là bộ đôi phổ biến nhất để giám sát metrics trên Kubernetes — gần như là "tiêu chuẩn ngầm" của ngành.
+  </p>
+  <div class="figure-centered">
+    <img src="../../images/section15/prometheus-grafana.png" alt="Prometheus + Grafana - stack thông dụng để thu thập và visualize metrics" />
+    <div class="figure-title">Grafana + Prometheus: stack thông dụng cho Collect &amp; Visualize metrics</div>
+  </div>
+
+  <h3 class="section-subheading">Cách Prometheus thu thập metrics</h3>
+  <div class="figure-centered">
+    <img src="../../images/section15/prometheus-grafana-setup.png" alt="Luồng hoạt động của Prometheus và Grafana với Node Exporter" />
+    <div class="figure-title">Prometheus "kéo" (scrape) metrics từ Node Exporter chạy trên từng node, Grafana visualize</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Node Exporter:</strong> chạy trên mỗi node, thu thập metrics cấp hệ thống (CPU, Memory, Disk IO, Network...) và expose tại cổng <code>:9100/metrics</code>.</li>
+    <li><strong>Prometheus:</strong> định kỳ <em>scrape</em> (kéo) metrics từ Node Exporter và các target khác về lưu trữ.</li>
+    <li><strong>Grafana:</strong> đọc dữ liệu từ Prometheus và vẽ thành dashboard trực quan.</li>
+  </ul>
+  <div class="alert alert-info">
+    <strong>Điểm đặc trưng của Prometheus:</strong> dùng mô hình <em>pull</em> (chủ động kéo) thay vì <em>push</em> (target tự đẩy). Nhờ cơ chế <em>service discovery</em> của Kubernetes, Prometheus tự phát hiện pod/node mới mà không cần cấu hình tay.
+  </div>
+
+  <h2 class="section-heading">Stack thu thập log: ELK (Elasticsearch + Logstash + Kibana)</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/elk-stack.png" alt="ELK stack trên Kubernetes: Filebeat, Logstash, Elasticsearch, Kibana" />
+    <div class="figure-title">ELK Stack trên Kubernetes — Filebeat thu log từ container chuyển tới Logstash rồi Elasticsearch</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Filebeat:</strong> thành phần <em>optional</em>, thu thập log từ container rồi chuyển tiếp (forward) sang Logstash.</li>
+    <li><strong>Logstash:</strong> xử lý, lọc và chuẩn hoá log trước khi lưu.</li>
+    <li><strong>Elasticsearch:</strong> lưu trữ và đánh index log, cho phép tìm kiếm nhanh.</li>
+    <li><strong>Kibana:</strong> giao diện visualize và truy vấn log.</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Miễn phí, mã nguồn mở, không lo chi phí bản quyền.</li>
+        <li>Chuẩn của cộng đồng CNCF, tài liệu và hỗ trợ phong phú.</li>
+        <li>Không bị khoá chặt (vendor lock-in), dễ di chuyển giữa các cloud.</li>
+        <li>Chủ động kiểm soát dữ liệu (data sovereignty).</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Bạn tự cài, tự vận hành, tự nâng cấp, tự scale — tốn công sức và đòi hỏi chuyên môn.</li>
+        <li>Phải tự lo HA (High Availability), backup và bảo mật.</li>
+        <li>Khó mở rộng khi cluster lớn (Prometheus single-node sẽ bị giới hạn).</li>
+      </ul>
+    </div>
+  </div>
+  <p class="body-text">
+    <strong>Khi nào nên dùng:</strong> dự án nhỏ/vừa, muốn tiết kiệm chi phí, đội ngũ có người hiểu vận hành, hoặc cần kiểm soát dữ liệu tuyệt đối.
+    <strong>Khi nào không nên:</strong> đội ngũ nhỏ không có người trực vận hành, hoặc doanh nghiệp cần SLA/ hỗ trợ chính thức — hãy cân nhắc Managed Service hay SaaS ở chương sau.
+  </p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Giám sát cluster tự dựng (kops/on-premise)</h4>
+      <p>Dùng Prometheus + Grafana + Node Exporter để theo dõi node và pod cho cluster tự quản lý, không phụ thuộc cloud nào.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Thu thập log tập trung</h4>
+      <p>Dùng Filebeat (DaemonSet) + Logstash + Elasticsearch + Kibana để gom toàn bộ log ứng dụng về một chỗ, dễ tìm kiếm.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Nền tảng observability nội bộ</h4>
+      <p>Kết hợp Prometheus (metrics) + Loki (log) + Tempo (tracing) thành một "Grafana stack" đồng bộ, cùng một giao diện.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Tham khảo:</strong> <a href="https://landscape.cncf.io/" target="_blank" rel="noopener">CNCF Cloud Native Landscape</a> — bản đồ đầy đủ toàn bộ dự án cloud native.</li>
+    <li><strong>Khi quy mô lớn:</strong> Prometheus đơn node có thể nâng cấp lên <em>Thanos</em> hoặc <em>Cortex</em> để scale ngang, hoặc dùng <em>VictoriaMetrics</em>.</li>
+    <li><strong>Loki thay ELK:</strong> nếu chỉ cần log đơn giản và đã dùng Grafana, Loki nhẹ và tiết kiệm tài nguyên hơn Elasticsearch.</li>
+  </ul>
+
+</body>
+</html>

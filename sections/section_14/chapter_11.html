@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ingress: định tuyến HTTP/HTTPS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Ingress: định tuyến HTTP/HTTPS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Ingress</strong> là một API object cung cấp quy tắc <strong>định tuyến HTTP/HTTPS</strong> từ bên ngoài cluster đến các Service bên trong.
+    Thay vì tạo một LoadBalancer riêng cho từng Service, Ingress cho phép bạn định tuyến nhiều Service chỉ qua <strong>một entrypoint duy nhất</strong> dựa trên <strong>hostname</strong> và <strong>URL path</strong>.
+    Ingress cần một <strong>Ingress Controller</strong> (nginx, traefik, istio...) để hoạt động.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Routing theo hostname:</strong> <code>service-a.localhost</code> và <code>service-b.localhost</code> trỏ tới 2 Service khác nhau.</li>
+    <li><strong>Routing theo path:</strong> <code>/service-a</code>, <code>/service-b</code> trên cùng một host.</li>
+    <li><strong>Một entrypoint:</strong> chỉ cần một IP công khai và một load balancer (đặt trước Ingress Controller) cho toàn bộ Service.</li>
+    <li><strong>Hoạt động ở Layer 7:</strong> Ingress chỉ xử lý traffic HTTP/HTTPS; muốn expose TCP/UDP thuần (database, MQTT...) vẫn dùng Service NodePort/LoadBalancer.</li>
+    <li><strong>Hỗ trợ TLS:</strong> có thể terminate HTTPS tại Ingress bằng certificate lưu trong Secret.</li>
+    <li><strong>Cần Controller:</strong> Ingress chỉ là "khai báo rule"; Ingress Controller mới là thành phần thực thi các rule đó. Không có Controller thì Ingress không có tác dụng.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section13/ingress-host-routing.png" alt="Ingress định tuyến traffic theo host: foo.example.com tới Service A, bar.example.com tới Service B, các host còn lại tới Service C; mỗi Service cân bằng tải tới 2 Pod port 3000" />
+    <div class="figure-title">Ingress định tuyến theo hostname: <code>foo.example.com</code> → Service A, <code>bar.example.com</code> → Service B, mọi host khác (<code>*</code>) → Service C</div>
+  </div>
+  <p class="body-text">
+    Mỗi rule trong Ingress gồm <strong>host</strong> (tuỳ chọn), <strong>path</strong> và <strong>backend</strong> (tên Service + port).
+    Request không khớp rule nào sẽ rơi vào rule không khai báo host (<code>host=*</code> trong hình) hoặc <code>defaultBackend</code>.
+    Service vẫn làm nhiệm vụ gom nhóm các Pod (qua label selector) và trỏ tới <code>targetPort</code> 3000 của container.
+  </p>
+
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section13/ingress-controller.png" alt="Ingress Controller Pod đọc rule từ my-app ingress, traffic được chuyển tới my-app service và my-app pod" />
+    <div class="figure-title">Ingress Controller Pod đọc rule của Ingress object rồi điều hướng traffic tới Service/Pod tương ứng</div>
+  </div>
+
+  <div class="alert alert-info">
+    <strong>Hiểu đúng luồng traffic:</strong> Ingress là <strong>object chứa rule</strong> (lưu trong API Server), không phải một "trạm" mà traffic đi xuyên qua.
+    Mũi tên từ <em>Ingress Controller Pod</em> → <em>my-app ingress</em> nghĩa là Controller <strong>watch &amp; đọc rule</strong>.
+    Traffic thực tế đi như sau: <code>Client → Service LoadBalancer/NodePort của Ingress Controller → Ingress Controller Pod (vd nginx) → Pod backend</code>.
+    Controller dùng Service để tra danh sách endpoint (IP các Pod) và thường gửi request thẳng tới Pod, không đi qua ClusterIP.
+  </div>
+
+  <h2 class="section-heading">So sánh LoadBalancer vs Ingress</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>LoadBalancer Service</th><th>Ingress</th></tr></thead>
+    <tbody>
+      <tr><td>Bản chất</td><td>Mỗi Service có IP công khai + LB riêng</td><td>Một LB/entrypoint dùng chung cho nhiều Service</td></tr>
+      <tr><td>Tầng hoạt động</td><td>Layer 4 (TCP/UDP)</td><td>Layer 7 (HTTP/HTTPS)</td></tr>
+      <tr><td>Định tuyến</td><td>1 LB → 1 Service, không đọc nội dung request</td><td>Theo hostname &amp; path của HTTP request</td></tr>
+      <tr><td>Thành phần cần thêm</td><td>Không (cloud provider tự tạo LB)</td><td>Ingress Controller (bản thân Controller thường được expose bằng 1 Service LoadBalancer)</td></tr>
+      <tr><td>Chi phí</td><td>Tăng theo số Service expose ra ngoài</td><td>Chỉ một LB, tiết kiệm hơn</td></tr>
+      <tr><td>Phù hợp khi</td><td>Ít Service cần expose</td><td>Nhiều Service, cần quản lý route tập trung</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Các loại Ingress Controller phổ biến</h2>
+  <ul class="feature-list">
+    <li><strong>Proxy chạy trong cluster (là Pod):</strong> Kubernetes Nginx Ingress Controller (ingress-nginx), <strong>Traefik</strong>, <strong>HAProxy</strong>, <strong>Kong</strong>, <strong>Istio</strong>.</li>
+    <li><strong>Dùng load balancer của cloud:</strong> <strong>AWS Load Balancer Controller</strong> (tên cũ: AWS ALB Ingress Controller), GCP GLBC/GCE Ingress, AKS Application Gateway Ingress Controller. Với loại này, Controller chỉ cấu hình LB; traffic đi qua LB của cloud chứ không đi qua Pod Controller.</li>
+    <li>Một cluster có thể chạy nhiều Controller; Ingress chọn Controller qua trường <code>spec.ingressClassName</code> (vd <code>nginx</code>, <code>alb</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">AWS Load Balancer Controller trên AWS (tham khảo)</h2>
+  <p class="body-text">Trên EKS, <strong>AWS Load Balancer Controller</strong> (tên cũ <em>alb-ingress-controller</em> như trong hình) biến Ingress thành một <strong>Application Load Balancer</strong>:</p>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section13/ingress-alb-aws.png" alt="Mô hình Ingress sử dụng ALB trên AWS: controller watch API Server, tạo ALB, listener, rule theo path và target group mode instance hoặc IP" />
+    <div class="figure-title">Mô hình Ingress sử dụng ALB trên AWS (các bước 1 → 5)</div>
+  </div>
+  <ol class="step-list">
+    <li><div><strong>(1) Watch changes:</strong> Controller lắng nghe thay đổi Ingress từ API Server và cập nhật trạng thái (địa chỉ DNS của ALB) ngược lại vào Ingress.</div></li>
+    <li><div><strong>(2) ALB:</strong> một ALB được tạo trên AWS, dạng <em>Internet-facing</em> hoặc <em>Internal</em>. Mặc định mỗi Ingress tạo một ALB; có thể dùng <strong>IngressGroup</strong> (annotation <code>alb.ingress.kubernetes.io/group.name</code>) để nhiều Ingress dùng chung một ALB.</div></li>
+    <li><div><strong>(3) Target Group:</strong> mỗi Service backend tương ứng một Target Group, có 2 mode:
+      <ul class="feature-list">
+        <li><strong>Instance mode:</strong> target là các Node (EC2) qua <strong>NodePort</strong> → Service phải là kiểu NodePort (hoặc LoadBalancer).</li>
+        <li><strong>IP mode:</strong> target là <strong>IP của Pod</strong>, ALB gửi thẳng tới Pod, Service có thể là ClusterIP. Yêu cầu Pod có IP thật trong VPC — AWS VPC CNI trên EKS mặc định cấp secondary IP từ ENI cho mỗi Pod.</li>
+      </ul></div></li>
+    <li><div><strong>(4) Listener:</strong> được tạo trên ALB, mỗi listener gắn với một port (vd 80 – HTTP, 443 – HTTPS).</div></li>
+    <li><div><strong>(5) Rule:</strong> mỗi host/path trong Ingress thành một listener rule trên ALB (vd <code>/products</code> → ServiceB, <code>/accounts</code> → ServiceC).</div></li>
+  </ol>
+
+  <h2 class="section-heading">Thực hành: Tạo Ingress cho 2 service</h2>
+  <p class="body-text">Build 2 Docker image Node.js (in ra message Service-A / Service-B), triển khai 2 Service + Ingress định tuyến theo hostname (<code>service-a.localhost</code>, <code>service-b.localhost</code>), bật Ingress Controller trên Minikube và truy cập qua sub-domain.</p>
+  <div class="mermaid">
+  flowchart LR
+      Client["<img src='../../assets/svg-icon/browser.svg' style='width:32px;height:32px;'/><br/>Client"]
+      IC["Ingress Controller<br/>(minikube addons enable ingress)"]
+      subgraph A["Service A"]
+          SA["service-a<br/>(ClusterIP)"]
+          DA["2 Pod service-a"]
+      end
+      subgraph B["Service B"]
+          SB["service-b<br/>(ClusterIP)"]
+          DB["2 Pod service-b"]
+      end
+      Client -->|"service-a.localhost"| IC
+      Client -->|"service-b.localhost"| IC
+      IC --> SA --> DA
+      IC --> SB --> DB
+  </div>
+  <p class="arch-caption">Một Ingress định tuyến theo hostname: <code>service-a.localhost</code> → Service A, <code>service-b.localhost</code> → Service B.</p>
+
+  <h3 class="sub-heading">Yêu cầu trước khi bắt đầu</h3>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong> (Minikube chạy), đã có <strong>Docker</strong> và tài khoản <strong>Docker Hub</strong>.</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/ingress/</code>.</li>
+  </ul>
+
+  <h3 class="sub-heading">Các bước thực hành</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Build 2 Docker image</strong>
+        <p>Checkout repo mẫu (Node.js đơn giản):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git clone https://github.com/hoanglinhdigital/nodejs-random-color
+cd nodejs-random-color</code></pre>
+        <p>Sửa trang index để in message <strong>ServiceA</strong>, build và push image đầu tiên (thay <code>&lt;your-dockerhub-account&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build -t &lt;your-dockerhub-account&gt;/nodejs-random-color:service-a .
+docker push &lt;your-dockerhub-account&gt;/nodejs-random-color:service-a</code></pre>
+        <p>Sửa lại trang index để in message <strong>ServiceB</strong>, build và push image thứ hai:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">docker build -t &lt;your-dockerhub-account&gt;/nodejs-random-color:service-b .
+docker push &lt;your-dockerhub-account&gt;/nodejs-random-color:service-b</code></pre>
+        <p class="code-note">💡 Kiểm tra trên Docker Hub có đủ 2 image đã push. Nếu không tự build, bạn có thể dùng image có sẵn của giảng viên <code>hoanglinhdigital/nodejs-random-color:service-a|service-b</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo file cấu hình (Ingress theo host)</strong>
+        <p>Tạo file <code>ingress-demo.yaml</code> gồm 2 Deployment, 2 Service ClusterIP và 1 Ingress routing theo host:</p>
+        <pre class="code-block"><code class="language-yaml"># service-a (Deployment + Service)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-a
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: service-a
+  template:
+    metadata:
+      labels:
+        app: service-a
+    spec:
+      containers:
+      - name: service-a
+        image: hoanglinhdigital/nodejs-random-color:service-a
+        ports:
+        - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-a
+spec:
+  type: ClusterIP
+  selector:
+    app: service-a
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+---
+# (service-b tương tự, image ...:service-b)
+# ...
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "service-a.localhost"
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: service-a
+            port:
+              number: 3000
+  - host: "service-b.localhost"
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: service-b
+            port:
+              number: 3000</code></pre>
+        <p class="code-note">💡 File đầy đủ (cả service-b) nằm tại <code>ingress/ingress-demo.yaml</code>; biến thể định tuyến theo path nằm tại <code>ingress-demo-path.yaml</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Bật Ingress Controller</strong>
+        <p>Ingress chỉ hoạt động khi có Controller. Trên Minikube, bật addon <code>ingress</code> (cài ingress-nginx) và đợi Pod controller ở trạng thái <code>Running</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube addons enable ingress
+kubectl get pods -n ingress-nginx
+kubectl get ingressclass</code></pre>
+        <p class="code-note">💡 <code>kubectl get ingressclass</code> hiển thị class <code>nginx</code> — chính là giá trị <code>ingressClassName</code> trong file YAML.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Apply cấu hình và mở tunnel</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f ingress-demo.yaml
+kubectl get all
+kubectl get ingress</code></pre>
+        <p>Mở một terminal khác và chạy tunnel (giữ terminal này luôn chạy):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube tunnel</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Truy cập qua sub-domain</strong>
+        <p>Mở trình duyệt tới <code>http://service-a.localhost</code> và <code>http://service-b.localhost</code>, hoặc dùng <code>curl</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">curl http://service-a.localhost
+curl http://service-b.localhost</code></pre>
+        <p>Bạn sẽ thấy lần lượt message <strong>ServiceA</strong> và <strong>ServiceB</strong> – tức Ingress đã định tuyến đúng theo hostname.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Xoá resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f ingress-demo.yaml</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sub-heading">Kiểm tra kết quả</h3>
+  <div class="verify-box">
+    <h4>✅ Thực hành thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get ingress</code> hiển thị Ingress với 2 rule host.</li>
+      <li>Mở <code>service-a.localhost</code> thấy "ServiceA", <code>service-b.localhost</code> thấy "ServiceB".</li>
+    </ul>
+  </div>
+
+  <h3 class="sub-heading">Troubleshoot</h3>
+  <div class="troubleshoot-item">
+    <div class="err">Trình duyệt không mở được <code>service-a.localhost</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> chưa bật ingress addon hoặc chưa chạy <code>minikube tunnel</code>.<br/><strong>Giải pháp:</strong> chạy <code>minikube addons enable ingress</code> rồi <code>minikube tunnel</code> (giữ terminal).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Ingress trả <code>503 Service Temporarily Unavailable</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Ingress không tìm thấy backend (tên Service / port sai) hoặc Pod chưa Ready.<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl get pods</code> và tên Service/port trong rule Ingress khớp với Service.</div>
+  </div>
+
+  <div class="troubleshoot-item">
+    <div class="err">Ingress trả <code>404 Not Found</code> hoặc <code>kubectl get ingress</code> không có ADDRESS</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> host trong request không khớp rule, hoặc <code>ingressClassName</code> không khớp Controller nào nên Ingress không được xử lý.<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl describe ingress example-ingress</code>, so sánh <code>ingressClassName</code> với kết quả <code>kubectl get ingressclass</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>On Minikube:</strong> bật controller bằng <code>minikube addons enable ingress</code>, sau đó dùng <code>minikube tunnel</code> để truy cập.</li>
+    <li><strong>Định tuyến theo path:</strong> có thể dùng annotation <code>nginx.ingress.kubernetes.io/rewrite-target: /</code> để "xoá" prefix path trước khi gửi cho Service.</li>
+    <li><strong>TLS/HTTPS:</strong> Ingress có thể cấu hình TLS bằng certificate (Secret kiểu <code>kubernetes.io/tls</code>, khai báo trong <code>spec.tls</code>) để phục vụ HTTPS. Trên AWS, ALB dùng certificate từ ACM.</li>
+    <li><strong>Gateway API:</strong> Ingress API đã ổn định nhưng không còn được bổ sung tính năng; Kubernetes khuyến nghị <strong>Gateway API</strong> (Gateway, HTTPRoute) cho dự án mới. Dự án ingress-nginx cũng đã được thông báo ngừng phát triển — khi triển khai thực tế hãy cân nhắc Controller khác hoặc Gateway API. Bài lab vẫn dùng addon ingress của Minikube vì đơn giản cho người mới.</li>
+    <li><strong>Liên hệ Section 14:</strong> trên EKS, bạn sẽ dùng AWS Load Balancer Controller để tạo ALB cho Ingress.</li>
+  </ul>
+
+</body>
+</html>

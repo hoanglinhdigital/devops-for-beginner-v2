@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu Linux &amp; các bản phân phối (Distro) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu Linux &amp; các bản phân phối (Distro)</span>
+  </div>
+
+  <div class="alert alert-tip"><strong>“Không có việc gì khó, chỉ sợ không biết làm!”</strong> — Phần lớn server trên Cloud chạy Linux. Đây là kỹ năng nền tảng mà DevOps Engineer dùng hàng ngày: SSH vào server, cài đặt phần mềm, xem log, phân quyền, quản lý service...</div>
+
+  <h2 class="section-heading">Mục tiêu của section</h2>
+  <ul class="feature-list">
+    <li>Hiểu Linux là gì, lịch sử phát triển và các phiên bản phân phối (distro) phổ biến.</li>
+    <li>Làm quen với <strong>Amazon Linux 2023</strong>, biết cách tạo và SSH vào EC2 instance chạy Linux.</li>
+    <li>Thao tác cơ bản với <strong>user, group</strong> và quyền <code>sudo</code>.</li>
+    <li>Làm việc với <strong>file, folder, permission</strong> và owner.</li>
+    <li>Quản lý <strong>process</strong> và <strong>service</strong> (systemd/systemctl).</li>
+    <li>Làm việc với <strong>EBS volume</strong>: partition, mount, mở rộng dung lượng.</li>
+    <li>Lập lịch tác vụ tự động với <strong>cron job</strong> và quản lý SSH key cho thành viên dự án.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Linux</strong> là một hệ điều hành mã nguồn mở, được <strong>Linus Torvalds</strong> phát hành phần nhân (kernel) đầu tiên vào năm <strong>1991</strong> và chuyển sang giấy phép mã nguồn mở GPL vào năm 1992.
+    Nhờ tính ổn định, bảo mật, miễn phí và khả năng tuỳ biến cao, Linux trở thành hệ điều hành thống trị trên server, Cloud, container, siêu máy tính và thiết bị nhúng.
+    Trên AWS, phần lớn EC2 instance, container trên ECS/EKS và môi trường chạy Lambda đều dựa trên Linux.
+  </p>
+
+  <h3 class="section-subheading">Lịch sử phát triển</h3>
+  <table class="compare-table">
+    <thead><tr><th>Giai đoạn</th><th>Sự kiện chính</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1991 – 1992</strong></td><td>Linus Torvalds (sinh viên Đại học Helsinki) phát hành Linux kernel 0.01, sau đó chuyển sang giấy phép GPL. Kết hợp với bộ công cụ GNU tạo thành hệ điều hành hoàn chỉnh (GNU/Linux).</td></tr>
+      <tr><td><strong>1990s – 2000s</strong></td><td>Cộng đồng và doanh nghiệp trên toàn thế giới cùng phát triển. Các distro như <strong>Slackware, Debian, Red Hat, SUSE</strong> ra đời. Linux được dùng rộng rãi trên máy chủ doanh nghiệp nhờ ổn định, an toàn, chi phí thấp.</td></tr>
+      <tr><td><strong>2000s – 2010s</strong></td><td>Bộ đôi <strong>LAMP</strong> (Linux, Apache, MySQL, PHP) phổ biến cho web. <strong>Ubuntu</strong> (2004) giúp Linux thân thiện hơn. <strong>Android</strong> (2008) dựa trên Linux kernel đưa Linux lên hàng tỷ thiết bị.</td></tr>
+      <tr><td><strong>2010s – nay</strong></td><td>Cloud Computing, Docker (2013), Kubernetes (2014) đều được xây dựng trên các tính năng của Linux kernel (namespaces, cgroups). 100% top 500 siêu máy tính chạy Linux.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Mã nguồn mở &amp; miễn phí:</strong> không mất phí license như Windows Server, ai cũng có thể xem, sửa và phân phối lại mã nguồn.</li>
+    <li><strong>Ổn định &amp; hiệu năng cao:</strong> server Linux có thể chạy liên tục nhiều tháng không cần khởi động lại, tiêu tốn ít tài nguyên (không cần giao diện đồ hoạ).</li>
+    <li><strong>Bảo mật:</strong> mô hình phân quyền user/group/permission chặt chẽ, cộng đồng lớn phát hiện và vá lỗi nhanh.</li>
+    <li><strong>Đa người dùng, đa nhiệm:</strong> nhiều user cùng đăng nhập và chạy nhiều process cùng lúc trên một server.</li>
+    <li><strong>Mạnh mẽ qua dòng lệnh (CLI):</strong> mọi thao tác đều thực hiện được bằng lệnh nên dễ tự động hoá bằng script — nền tảng của DevOps.</li>
+    <li><strong>Đa dạng distro:</strong> hàng trăm bản phân phối, mỗi bản tối ưu cho một mục đích (server, desktop, nhúng, bảo mật...).</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc của hệ điều hành Linux</h2>
+  <div class="mermaid">
+  flowchart TB
+      User["<img src='../../assets/svg-icon/user.svg' style='width:40px;height:40px;'/><br/><b>User</b><br/>DevOps / Developer"]
+      subgraph US["User space"]
+          direction LR
+          Shell["⌨️ <b>Shell</b><br/>bash, zsh"]
+          Apps["📦 <b>Applications</b><br/>httpd, nginx, mysql, docker"]
+          Tools["🧰 <b>System tools</b><br/>ls, cp, ps, systemctl"]
+      end
+      subgraph KS["Kernel space"]
+          Kernel["🐧 <b>Linux Kernel</b><br/>Process · Memory · File system · Network · Driver"]
+      end
+      HW["🖥️ <b>Hardware</b><br/>CPU · RAM · Disk (EBS) · Network card (ENI)"]
+      User -->|"gõ lệnh qua SSH"| Shell
+      Shell --> Tools
+      Shell --> Apps
+      Tools -->|"system call"| Kernel
+      Apps -->|"system call"| Kernel
+      Kernel --> HW
+  </div>
+  <p class="arch-caption">User tương tác với Shell; Shell gọi các chương trình; chương trình yêu cầu Kernel thông qua system call; Kernel trực tiếp quản lý phần cứng. Trên EC2, “phần cứng” là tài nguyên ảo do AWS Nitro cấp phát.</p>
+
+  <h2 class="section-heading">Các bản phân phối (Distro) Linux</h2>
+  <p class="body-text">
+    Một <strong>distro</strong> = Linux kernel + bộ công cụ hệ thống + trình quản lý gói (package manager) + cấu hình mặc định. Có hàng trăm distro khác nhau, nhưng phần lớn thuộc vài “họ” chính.
+    Khi đã quen một distro, bạn dễ dàng chuyển sang distro cùng họ vì lệnh và cấu trúc thư mục gần như giống nhau.
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      K["🐧 <b>Linux Kernel</b>"]
+      K --> Deb["<b>Họ Debian</b><br/>📦 apt / .deb"]
+      K --> RH["<b>Họ Red Hat</b><br/>📦 dnf (yum) / .rpm"]
+      K --> Other["<b>Họ khác</b>"]
+      Deb --> Debian["Debian"]
+      Debian --> Ubuntu["Ubuntu"]
+      Ubuntu --> Mint["Linux Mint · Pop!_OS"]
+      RH --> Fedora["Fedora"]
+      Fedora --> RHEL["RHEL"]
+      Fedora --> AL["<img src='../../assets/aws-svg/EC2.svg' style='width:28px;height:28px;'/><br/><b>Amazon Linux 2023</b>"]
+      RHEL --> Clone["CentOS Stream · Rocky · AlmaLinux"]
+      Other --> SUSE["SUSE / openSUSE<br/>📦 zypper"]
+      Other --> Arch["Arch · Manjaro<br/>📦 pacman"]
+      Other --> Alpine["Alpine<br/>📦 apk · Docker image"]
+  </div>
+  <p class="arch-caption">Các họ distro chính và trình quản lý gói tương ứng. Amazon Linux 2023 thuộc họ Red Hat (dựa trên Fedora) nên dùng <code>dnf</code>.</p>
+
+  <table class="compare-table">
+    <thead><tr><th>Nhóm người dùng</th><th>Distro tiêu biểu</th></tr></thead>
+    <tbody>
+      <tr><td>Người mới dùng</td><td>Ubuntu, Fedora, Linux Mint</td></tr>
+      <tr><td>Người dùng có kinh nghiệm</td><td>Debian, openSUSE, Arch Linux</td></tr>
+      <tr><td>Máy chủ &amp; doanh nghiệp</td><td>Red Hat Enterprise Linux (RHEL), Rocky Linux, AlmaLinux, SUSE Linux Enterprise Server (SLES), Ubuntu Server, Amazon Linux</td></tr>
+      <tr><td>Máy tính cá nhân cao cấp, chơi game</td><td>Pop!_OS, Manjaro</td></tr>
+      <tr><td>Mục đích đặc biệt</td><td>Raspberry Pi OS (thiết bị nhúng), Alpine (container siêu nhẹ), Kali Linux (kiểm thử bảo mật)</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Amazon Linux 2023 (AL2023)</h3>
+  <p class="body-text">
+    <strong>Amazon Linux</strong> là distro do AWS phát triển và tối ưu riêng cho EC2: khởi động nhanh, tích hợp sẵn AWS CLI, SSM Agent, cloud-init và được AWS hỗ trợ bảo mật.
+    Đây là AMI mặc định khi tạo EC2 và cũng là OS được dùng xuyên suốt section này.
+  </p>
+  <table class="compare-table">
+    <thead><tr><th>Đặc điểm</th><th>Amazon Linux 2023</th><th>Ubuntu Server</th></tr></thead>
+    <tbody>
+      <tr><td>Họ distro</td><td>Red Hat (dựa trên Fedora)</td><td>Debian</td></tr>
+      <tr><td>Package manager</td><td><code>dnf</code> (<code>yum</code> là alias)</td><td><code>apt</code></td></tr>
+      <tr><td>User mặc định trên EC2</td><td><code>ec2-user</code></td><td><code>ubuntu</code></td></tr>
+      <tr><td>Group có quyền sudo mặc định</td><td><code>wheel</code></td><td><code>sudo</code></td></tr>
+      <tr><td>Chi phí license</td><td>Miễn phí</td><td>Miễn phí</td></tr>
+      <tr><td>Thông tin phiên bản</td><td><code>cat /etc/os-release</code></td><td><code>cat /etc/os-release</code> hoặc <code>lsb_release -a</code></td></tr>
+    </tbody>
+  </table>
+  <div class="alert alert-warning"><strong>Amazon Linux 2 (AL2)</strong> đã hết hạn hỗ trợ (end of support) vào ngày <strong>30/06/2026</strong>. Các slide/tài liệu cũ dùng AL2 với lệnh <code>yum</code>, <code>service</code>; khoá học này dùng <strong>AL2023</strong> với <code>dnf</code>, <code>systemctl</code>. Hãy luôn chọn AL2023 khi tạo EC2 mới.</div>
+
+  <h2 class="section-heading">Trade-off: Linux hay Windows Server trên Cloud?</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Linux – Ưu điểm</th><th>Linux – Nhược điểm / Lưu ý</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Miễn phí license → EC2 Linux rẻ hơn đáng kể so với EC2 Windows cùng cấu hình</td><td>Chủ yếu thao tác bằng dòng lệnh, người mới cần thời gian làm quen</td></tr>
+      <tr><td>Nhẹ, ít tốn tài nguyên, khởi động nhanh, phù hợp Auto Scaling</td><td>Ứng dụng .NET Framework cũ, Active Directory, SQL Server bản cũ... cần Windows</td></tr>
+      <tr><td>Hệ sinh thái DevOps (Docker, Kubernetes, Terraform, Ansible, CI/CD agent) ưu tiên Linux</td><td>Nhiều distro → lệnh cài gói, đường dẫn cấu hình có khác biệt nhỏ giữa các họ</td></tr>
+      <tr><td>Dễ tự động hoá hoàn toàn bằng script, user data, IaC</td><td>Phân quyền sai (ví dụ <code>chmod 777</code>) dễ tạo lỗ hổng bảo mật</td></tr>
+    </tbody>
+  </table>
+  <p class="body-text"><strong>Nên dùng Linux</strong> cho web server, API backend (Node.js, Java, Python, Go), container, database mã nguồn mở, CI/CD runner. <strong>Chỉ dùng Windows Server</strong> khi ứng dụng bắt buộc phụ thuộc vào hệ sinh thái Microsoft.</p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Web server &amp; API backend</h4>
+      <p>Chạy Nginx/Apache, ứng dụng Node.js, Spring Boot, Django trên EC2 Linux phía sau Load Balancer. Đây là mô hình phổ biến nhất trên AWS.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Container &amp; Kubernetes</h4>
+      <p>Docker image thường dựa trên Alpine, Debian, Amazon Linux. Worker node của ECS/EKS là các EC2 Linux (Amazon Linux, Bottlerocket).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>CI/CD &amp; vận hành hệ thống</h4>
+      <p>Jenkins, GitHub Actions self-hosted runner, GitLab runner chạy trên Linux. DevOps Engineer SSH vào server để kiểm tra log, xử lý sự cố, chạy script tự động.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Các lab trong section này dùng chung <strong>1 EC2 instance</strong> <code>t3.micro</code> Amazon Linux 2023 (thuộc Free Tier). Có thể <strong>Stop</strong> instance giữa các buổi học để tiết kiệm chi phí và <strong>Terminate</strong> khi học xong section.</li>
+    <li>Lệnh trong section áp dụng được cho RHEL, Rocky, Fedora. Với Ubuntu chỉ cần thay <code>dnf</code> bằng <code>apt</code>, <code>ec2-user</code> bằng <code>ubuntu</code>, group <code>wheel</code> bằng <code>sudo</code>.</li>
+    <li>Nếu muốn thực hành Linux trên máy cá nhân: Windows có thể cài <strong>WSL2</strong> (Ubuntu), Mac có Terminal với các lệnh tương tự (macOS thuộc họ Unix).</li>
+    <li>Tham khảo: <a href="https://docs.aws.amazon.com/linux/al2023/ug/what-is-amazon-linux.html" target="_blank" rel="noopener">Amazon Linux 2023 User Guide</a>.</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,80 @@
+// Lab 9 – CI/CD tự động: GitHub push (nhánh develop) -> webhook -> Jenkins build + push ECR + deploy ECS
+// Job: lab09-cicd-nodejs-auto | Pipeline script from SCM, Branch: */develop, Script Path: Jenkinsfile-auto
+// Build Triggers: GitHub hook trigger for GITScm polling
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        // Không chạy 2 build cùng lúc trên cùng một service ECS
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_REPO       = 'nodejs-random-color'
+        IMAGE_TAG      = "ver-${BUILD_NUMBER}"
+        ECS_CLUSTER    = 'jenkins-lab-cluster'
+        ECS_SERVICE    = 'nodejs-service'
+        TASK_FAMILY    = 'jenkins-lab-nodejs-task'
+        CONTAINER_NAME = 'nodejs-container'
+    }
+
+    stages {
+        stage('Show commit') {
+            steps {
+                sh 'git log -1 --oneline'
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                // Push 2 tag: ver-<BUILD_NUMBER> (truy vết, rollback) và latest (bản mới nhất của develop)
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:latest
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:latest
+                '''
+            }
+        }
+
+        stage('Deploy to ECS') {
+            steps {
+                // Deploy theo tag ver-<BUILD_NUMBER> thay vì latest: mỗi revision task definition trỏ tới đúng 1 image
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    FULL_IMAGE=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}
+                    echo "Deploying image: ${FULL_IMAGE}"
+
+                    aws ecs describe-task-definition --region ${AWS_REGION} --task-definition ${TASK_FAMILY} |
+                    jq --arg IMAGE "${FULL_IMAGE}" --arg NAME "${CONTAINER_NAME}" '.taskDefinition | (.containerDefinitions[] | select(.name == $NAME) | .image) = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' > new-task-definition.json
+
+                    NEW_REVISION=$(aws ecs register-task-definition --region ${AWS_REGION} --cli-input-json file://new-task-definition.json --query 'taskDefinition.revision' --output text)
+                    echo "New revision: ${TASK_FAMILY}:${NEW_REVISION}"
+
+                    aws ecs update-service --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --task-definition ${TASK_FAMILY}:${NEW_REVISION} --force-new-deployment > /dev/null
+                    aws ecs wait services-stable --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+        }
+        success {
+            echo "Deploy ${IMAGE_TAG} lên ${ECS_SERVICE} thành công!"
+        }
+    }
+}

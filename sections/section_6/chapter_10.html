@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 7: EBS Volume – Partition, Mount &amp; mở rộng dung lượng – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 7: EBS Volume – Partition, Mount &amp; mở rộng dung lượng</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Kiểm tra disk, partition, mount point bằng <code>lsblk</code>, <code>df -h</code>.</li>
+    <li>Mở rộng dung lượng ổ root (8 GiB → 10 GiB) trên Console và trên OS.</li>
+    <li>Gắn thêm một EBS volume 10 GiB: tạo partition, format file system, mount vào <code>/data</code> và ghi thử file.</li>
+    <li>Cấu hình <code>/etc/fstab</code> để volume tự mount lại khi OS khởi động lại.</li>
+    <li>Tăng dung lượng EBS volume (10 GiB → 15 GiB) trên Console và mở rộng partition, file system trên OS.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b>"]
+      subgraph AZ["Availability Zone (ví dụ ap-southeast-1a)"]
+          EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:44px;height:44px;'/><br/><b>linux-lab-server</b>"]
+          Root["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:36px;height:36px;'/><br/><b>Root volume</b><br/>8 → 10 GiB<br/>/dev/nvme0n1 → /"]
+          Data["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:36px;height:36px;'/><br/><b>linux-lab-data</b><br/>10 → 15 GiB<br/>/dev/nvme1n1p1 → /data"]
+          EC2 --- Root
+          EC2 --- Data
+      end
+      PC -->|"SSH :22"| EC2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Instance <code>linux-lab-server</code> đang Running. Ghi nhớ <strong>Availability Zone</strong> của instance (tab <em>Networking</em> hoặc <em>Details</em>) — EBS volume phải cùng AZ mới attach được.</li>
+    <li>Biết dùng Vim (Lab 2) và quyền <code>sudo</code>.</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab7_ebs_volume/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu khái niệm và kiểm tra disk hiện tại</strong>
+        <table class="compare-table">
+          <thead><tr><th>Khái niệm</th><th>Ý nghĩa</th><th>Ví dụ</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Block device (disk)</strong></td><td>Ổ đĩa vật lý/ảo mà OS nhìn thấy. EBS volume là một block device.</td><td><code>/dev/nvme0n1</code>, <code>/dev/nvme1n1</code></td></tr>
+            <tr><td><strong>Partition</strong></td><td>Phân vùng chia nhỏ một disk.</td><td><code>/dev/nvme0n1p1</code></td></tr>
+            <tr><td><strong>File system</strong></td><td>Cách tổ chức lưu file trên partition. Phải format trước khi dùng.</td><td><code>xfs</code> (mặc định AL2023), <code>ext4</code></td></tr>
+            <tr><td><strong>Mount point</strong></td><td>Thư mục để truy cập nội dung của partition (Linux không có ổ C:, D:).</td><td><code>/</code>, <code>/data</code></td></tr>
+          </tbody>
+        </table>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2-7"><code class="language-bash">lsblk
+NAME          MAJ:MIN RM SIZE RO TYPE MOUNTPOINTS
+nvme0n1       259:0    0   8G  0 disk
+├─nvme0n1p1   259:1    0   8G  0 part /
+├─nvme0n1p127 259:2    0   1M  0 part
+└─nvme0n1p128 259:3    0  10M  0 part /boot/efi
+df -h
+lsblk -f</code></pre>
+        <p class="code-note">💡 Instance thế hệ Nitro (t3, t4g, m5, m7i...) hiển thị EBS dưới dạng NVMe (<code>/dev/nvme*</code>) dù trên Console bạn chọn device name là <code>/dev/sdf</code> hay <code>/dev/xvda</code>. Tài liệu cũ dùng <code>/dev/xvdf</code> là cho instance thế hệ cũ (t2).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Mở rộng ổ root trên Console</strong>
+        <p>Vào <strong>EC2 → Instances → linux-lab-server → tab Storage</strong>, click vào Volume ID của root volume, sau đó <strong>Modify volume</strong> với thông số:</p>
+        <ul class="feature-list">
+          <li>Volume type: <strong>gp3</strong> (giữ nguyên)</li>
+          <li>Size: <code>10</code> GiB</li>
+        </ul>
+        <p>Đợi trạng thái volume chuyển sang <strong>optimizing</strong> hoặc <strong>completed</strong> (vài chục giây) là có thể làm tiếp. Không cần stop instance.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Mở rộng partition và file system của ổ root trên OS</strong>
+        <p>Disk đã là 10G nhưng partition và file system vẫn là 8G. Cần mở rộng partition số 1 trước, sau đó mở rộng file system XFS:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2"><code class="language-bash">sudo growpart /dev/nvme0n1 1
+CHANGED: partition=1 start=24576 old: size=16752607 end=16777183 new: size=20946911 end=20971487
+lsblk
+sudo xfs_growfs -d /
+df -h /</code></pre>
+        <p>Lưu ý cú pháp <code>growpart &lt;disk&gt; &lt;số partition&gt;</code> có <strong>dấu cách</strong> giữa disk và số 1. Kết quả <code>df -h /</code> hiển thị khoảng 10G.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo và attach EBS volume mới</strong>
+        <p>Vào <strong>EC2 → Volumes</strong>, tạo volume với thông số:</p>
+        <ul class="feature-list">
+          <li>Volume type: <strong>gp3</strong>, Size: <code>10</code> GiB</li>
+          <li>Availability Zone: <strong>cùng AZ với instance</strong></li>
+          <li>Tag: <code>Name = linux-lab-data</code></li>
+        </ul>
+        <p>Khi volume ở trạng thái <strong>Available</strong>, chọn <strong>Actions → Attach volume</strong>: Instance = <code>linux-lab-server</code>, Device name = <code>/dev/sdf</code>. Kiểm tra trên OS:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="3"><code class="language-bash">lsblk
+sudo file -s /dev/nvme1n1
+/dev/nvme1n1: data</code></pre>
+        <p>Disk mới <code>nvme1n1</code> 10G xuất hiện. Kết quả <code>data</code> nghĩa là disk trống, chưa có file system.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo partition bằng fdisk</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo fdisk /dev/nvme1n1</code></pre>
+        <p><code>fdisk</code> là công cụ tương tác. Gõ lần lượt các phím sau, mỗi phím nhấn <strong>Enter</strong>:</p>
+        <table class="compare-table">
+          <thead><tr><th>Gõ</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>n</code></td><td>Tạo partition mới</td></tr>
+            <tr><td><code>p</code></td><td>Loại primary</td></tr>
+            <tr><td><code>1</code></td><td>Partition số 1</td></tr>
+            <tr><td><em>(Enter)</em></td><td>First sector mặc định</td></tr>
+            <tr><td><em>(Enter)</em></td><td>Last sector mặc định → dùng toàn bộ dung lượng</td></tr>
+            <tr><td><code>w</code></td><td>Ghi thay đổi xuống disk và thoát</td></tr>
+          </tbody>
+        </table>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">lsblk /dev/nvme1n1</code></pre>
+        <p>Xuất hiện partition <code>nvme1n1p1</code> dung lượng 10G.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Format file system và mount</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo mkfs -t xfs /dev/nvme1n1p1
+sudo mkdir /data
+sudo mount /dev/nvme1n1p1 /data
+df -h /data</code></pre>
+        <p>Sau khi mount, thư mục <code>/data</code> thuộc root. Đổi owner cho ec2-user rồi ghi thử file:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo chown ec2-user:ec2-user /data
+echo "Hello EBS volume" &gt; /data/test.txt
+cat /data/test.txt
+ls -l /data</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Cấu hình tự động mount với /etc/fstab</strong>
+        <p>Lệnh <code>mount</code> chỉ có tác dụng tới lần reboot tiếp theo. Để mount vĩnh viễn, thêm cấu hình vào <code>/etc/fstab</code>. Dùng <strong>UUID</strong> thay vì tên device vì tên NVMe có thể thay đổi giữa các lần boot:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2"><code class="language-bash">sudo blkid /dev/nvme1n1p1
+/dev/nvme1n1p1: UUID="2f8fae87-be68-46d4-a4bf-a9948f9d0a91" BLOCK_SIZE="4096" TYPE="xfs" PARTUUID="b4994ce5-01"
+sudo cp /etc/fstab /etc/fstab.bak
+sudo vim /etc/fstab</code></pre>
+        <p>Thêm một dòng vào cuối file (thay <code>&lt;UUID&gt;</code> bằng UUID của bạn, không có dấu ngoặc kép):</p>
+        <pre class="code-block"><code class="language-bash">UUID=&lt;UUID&gt;  /data  xfs  defaults,nofail  0  2</code></pre>
+        <p>6 cột lần lượt là: device, mount point, loại file system, tuỳ chọn (<code>nofail</code> = nếu không tìm thấy volume thì vẫn boot bình thường), dump, thứ tự kiểm tra lỗi. Kiểm tra cấu hình bằng cách unmount rồi mount lại toàn bộ theo fstab:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo umount /data
+df -h | grep /data
+sudo systemctl daemon-reload
+sudo mount -a
+df -h /data
+cat /data/test.txt</code></pre>
+        <p>Nếu <code>mount -a</code> không báo lỗi và file <code>test.txt</code> vẫn còn, reboot server để kiểm chứng (SSH lại sau 1–2 phút):</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo reboot</code></pre>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">df -h /data
+cat /data/test.txt</code></pre>
+        <div class="alert alert-warning">Sai cú pháp trong <code>/etc/fstab</code> (không có <code>nofail</code>) có thể khiến server <strong>không boot được</strong> và không SSH vào được. Luôn chạy <code>sudo mount -a</code> để kiểm tra trước khi reboot.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Tăng dung lượng EBS volume trên Console</strong>
+        <p>Vào <strong>EC2 → Volumes</strong>, chọn <code>linux-lab-data</code> → <strong>Modify volume</strong>, đổi Size thành <code>15</code> GiB. Đợi trạng thái <strong>optimizing</strong>/<strong>completed</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Mở rộng partition và file system của /data trên OS</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">lsblk /dev/nvme1n1
+sudo growpart /dev/nvme1n1 1
+sudo xfs_growfs -d /data
+df -h /data
+cat /data/test.txt</code></pre>
+        <p><code>df -h /data</code> hiển thị khoảng 15G và dữ liệu cũ vẫn còn nguyên. Với file system <code>ext4</code>, dùng <code>sudo resize2fs /dev/nvme1n1p1</code> thay cho <code>xfs_growfs</code>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>df -h /</code> hiển thị ổ root khoảng 10G.</li>
+      <li>Sau khi reboot, <code>df -h /data</code> vẫn hiển thị volume đã mount (tự động qua fstab).</li>
+      <li><code>df -h /data</code> hiển thị khoảng 15G sau bước 9 và <code>/data/test.txt</code> vẫn còn nội dung <code>Hello EBS volume</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Không chọn được instance khi Attach volume</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Volume được tạo ở AZ khác với instance.<br/><strong>Giải pháp:</strong> Xoá volume và tạo lại ở đúng AZ của instance (EBS là tài nguyên cấp AZ).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>NOCHANGE: partition 1 is size ... it cannot be grown</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Volume chưa được modify xong trên Console, hoặc partition đã được mở rộng rồi.<br/><strong>Giải pháp:</strong> Kiểm tra <code>lsblk</code> xem disk đã có dung lượng mới chưa; đợi volume chuyển sang <em>optimizing</em> rồi chạy lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>You've reached the maximum modification rate per volume limit. Wait at least 6 hours...</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Mỗi EBS volume chỉ được modify một lần trong 6 giờ.<br/><strong>Giải pháp:</strong> Đợi sau 6 giờ, hoặc tạo volume mới với dung lượng mong muốn. Vì vậy cần ước lượng dung lượng hợp lý ngay từ đầu.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>mount: /data: wrong fs type, bad option, bad superblock on /dev/nvme1n1</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Mount nhầm disk (<code>nvme1n1</code>) thay vì partition (<code>nvme1n1p1</code>), hoặc partition chưa được format.<br/><strong>Giải pháp:</strong> Kiểm tra <code>lsblk -f</code>; mount đúng <code>/dev/nvme1n1p1</code> sau khi đã chạy <code>mkfs</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Server không boot / không SSH được sau khi sửa fstab</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Dòng cấu hình fstab sai và không có <code>nofail</code>.<br/><strong>Giải pháp:</strong> Dùng <strong>EC2 Serial Console</strong> để sửa, hoặc stop instance, detach root volume, attach vào một instance khác để sửa file <code>/etc/fstab</code> rồi gắn lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>EBS volume tính phí theo dung lượng đã cấp phát</strong> (gp3 ở Singapore khoảng 0.096 USD/GB-tháng), kể cả khi không gắn vào instance nào. Hãy xoá volume <code>linux-lab-data</code> sau khi thực hành.</div>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Unmount và khôi phục fstab</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo umount /data
+sudo cp /etc/fstab.bak /etc/fstab
+sudo systemctl daemon-reload
+lsblk</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Detach và xoá volume trên Console</strong>
+        <p>Vào <strong>EC2 → Volumes</strong>, chọn <code>linux-lab-data</code> → <strong>Detach volume</strong>. Khi trạng thái là <strong>Available</strong> → <strong>Delete volume</strong>. Root volume (10 GiB) được giữ lại cùng instance và sẽ tự xoá khi terminate instance.</p>
+      </div>
+    </li>
+  </ol>
+
+</body>
+</html>

@@ -1,0 +1,11 @@
+version: 0.0
+# <TASK_DEFINITION> là placeholder: action "Amazon ECS (Blue/Green)" của CodePipeline
+# sẽ đăng ký task definition revision mới từ taskdef.json và tự điền ARN vào đây.
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: <TASK_DEFINITION>
+        LoadBalancerInfo:
+          ContainerName: "nodejs-container"
+          ContainerPort: 3000

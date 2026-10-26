@@ -1,0 +1,11 @@
+DevOps on AWS for Beginner - Lab 2: Vim & Nano
+==============================================
+Linux là hệ điều hành phổ biến nhất trên server và Cloud.
+Amazon Linux 2023 là bản phân phối Linux do AWS phát triển.
+DevOps Engineer làm việc với Linux hàng ngày qua SSH.
+Vim có 2 mode chính: Normal mode và Insert mode.
+Nano đơn giản hơn, phím tắt hiển thị ở cuối màn hình.
+Dòng này sẽ được copy bằng yy và paste bằng p.
+Dòng này sẽ bị xoá bằng dd, sau đó undo bằng u.
+Tìm từ DevOps bằng cách gõ /DevOps rồi nhấn n để tới kết quả tiếp theo.
+Hết file - nhấn G để nhảy tới dòng cuối, gg để về dòng đầu.

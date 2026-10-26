@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các công cụ Infra as Code thường dùng – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các công cụ Infra as Code thường dùng</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Có rất nhiều công cụ IaC, mỗi công cụ được thiết kế cho một mục đích riêng. Có thể chia thành 2 nhóm chính:
+    <strong>Provisioning</strong> (tạo hạ tầng: VPC, EC2, RDS... — ví dụ CloudFormation, CDK, Terraform) và
+    <strong>Configuration Management</strong> (cấu hình phần mềm bên trong server đã có — ví dụ Ansible, Puppet, Chef).
+    Chương này giới thiệu các công cụ phổ biến để bạn hiểu vì sao khoá học chọn Terraform.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính của các công cụ Provisioning</h2>
+  <ul class="feature-list">
+    <li><strong>AWS CloudFormation</strong> (AWS): định nghĩa resource dưới dạng template YAML hoặc JSON, deploy thành các <em>CloudFormation stack</em>. Là service native của AWS nên <strong>chỉ hỗ trợ AWS</strong>.</li>
+    <li><strong>AWS Cloud Development Kit – CDK</strong> (AWS): định nghĩa hạ tầng bằng ngôn ngữ lập trình quen thuộc (TypeScript, JavaScript, Python, C#, Java). Code CDK được compile (synth) thành CloudFormation template, nên phía sau vẫn là CloudFormation stack. Chỉ hỗ trợ AWS.</li>
+    <li><strong>Terraform</strong> (HashiCorp): mã nguồn mở, dùng ngôn ngữ HCL, hỗ trợ rất nhiều nhà cung cấp (AWS, Azure, GCP, Kubernetes, Github, Cloudflare...). Terraform gọi thẳng API của Cloud, <strong>không tạo CloudFormation stack</strong>.</li>
+    <li><strong>Azure Resource Manager (ARM) Templates / Bicep</strong> (Microsoft): định nghĩa hạ tầng Azure qua template JSON (hoặc Bicep).</li>
+    <li><strong>Google Cloud Deployment Manager / Infrastructure Manager</strong> (Google): tự động hoá tạo resource trên GCP qua file cấu hình YAML.</li>
+    <li><strong>OpenTofu, Pulumi</strong>: OpenTofu là bản fork mã nguồn mở của Terraform (cú pháp gần như giống hệt); Pulumi cho phép viết IaC đa cloud bằng ngôn ngữ lập trình.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình: công cụ IaC tương tác với Cloud như thế nào?</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Tools["🧰 IaC Tools"]
+          direction TB
+          CFN["<img src='../../assets/aws-svg/CloudFormation.svg' style='width:40px;height:40px;'/><br/><b>CloudFormation</b><br/>YAML / JSON"]
+          CDK["💻 <b>AWS CDK</b><br/>TypeScript, Python..."]
+          TF["<img src='../../assets/svg-icon/terraform.svg' style='width:40px;height:40px;'/><br/><b>Terraform</b><br/>HCL"]
+      end
+      Stack["📚 <b>CloudFormation Stack</b>"]
+      AWS["<img src='../../assets/svg-icon/aws-logo.png' style='width:56px;height:34px;'/><br/><b>AWS API</b>"]
+      Azure["🔷 <b>Azure API</b>"]
+      GCP["<img src='../../assets/svg-icon/google-logo.svg' style='width:32px;height:32px;'/><br/><b>GCP API</b>"]
+      CDK -->|"cdk synth"| CFN
+      CFN --> Stack --> AWS
+      TF -->|"provider aws"| AWS
+      TF -->|"provider azurerm"| Azure
+      TF -->|"provider google"| GCP
+  </div>
+  <p class="arch-caption">CDK được biên dịch thành CloudFormation; Terraform thông qua các <em>provider</em> gọi trực tiếp API của nhiều nhà cung cấp Cloud khác nhau.</p>
+
+  <h2 class="section-heading">Nhóm Configuration Management</h2>
+  <table class="compare-table">
+    <thead>
+      <tr><th>Công cụ</th><th>Mô hình</th><th>Kết nối</th><th>Ngôn ngữ</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Ansible</strong></td><td>Agentless — chỉ cần cài Ansible trên máy quản lý</td><td>SSH</td><td>YAML (playbook, roles)</td></tr>
+      <tr><td><strong>Puppet</strong></td><td>Agent–master — cần cài agent trên các máy được quản lý</td><td>SSL</td><td>Puppet DSL, hỗ trợ Ruby</td></tr>
+      <tr><td><strong>Chef</strong></td><td>Client–server — cần cài client trên các máy được quản lý</td><td>SSL</td><td>Ruby DSL (recipes, cookbooks)</td></tr>
+    </tbody>
+  </table>
+  <p class="body-text">Trong thực tế hai nhóm thường được dùng kết hợp: Terraform tạo EC2, sau đó Ansible cài đặt và cấu hình phần mềm bên trong. Với kiến trúc container/serverless hiện đại, phần cấu hình server ít dần đi và vai trò của nhóm Provisioning ngày càng lớn.</p>
+
+  <h2 class="section-heading">Trade-off: CloudFormation vs CDK vs Terraform</h2>
+  <table class="compare-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>CloudFormation</th><th>AWS CDK</th><th>Terraform</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Đa cloud</strong></td><td>❌ Chỉ AWS</td><td>❌ Chỉ AWS</td><td>✅ AWS, Azure, GCP và hàng nghìn provider</td></tr>
+      <tr><td><strong>Ngôn ngữ</strong></td><td>YAML/JSON, dài dòng</td><td>Ngôn ngữ lập trình (loop, class, test)</td><td>HCL – dễ đọc, khai báo (declarative)</td></tr>
+      <tr><td><strong>Quản lý state</strong></td><td>AWS tự quản lý (stack)</td><td>AWS tự quản lý (stack)</td><td>Bạn tự quản lý file state (local, S3...)</td></tr>
+      <tr><td><strong>Hỗ trợ dịch vụ mới của AWS</strong></td><td>Thường sớm nhất</td><td>Theo CloudFormation</td><td>Phụ thuộc provider, thường nhanh</td></tr>
+      <tr><td><strong>Phù hợp với</strong></td><td>Team chỉ dùng AWS, cần service native</td><td>Người đi lên từ Developer</td><td>Người đi lên từ System Admin, dự án đa cloud</td></tr>
+    </tbody>
+  </table>
+
+  <div class="decision-box">
+    <div class="decision-q">❓ Trong các công cụ IaC, công cụ nào là tốt nhất?</div>
+    <div class="decision-a">
+      Không có công cụ "tốt nhất". Các công cụ được thiết kế đa dạng mục đích và có ưu nhược điểm riêng. Tuỳ vào nhu cầu dự án và khả năng của thành viên mà chọn công nghệ phù hợp để mang lại hiệu quả cao nhất.
+      Ví dụ: những người đi lên từ developer thường thích dùng CDK, những người đi lên từ system admin thường thích dùng Terraform.
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>🏢 Doanh nghiệp đa cloud</h4>
+      <p>Công ty chạy hệ thống chính trên AWS, dùng Cloudflare cho DNS/CDN và Github cho source code → Terraform quản lý tất cả bằng một ngôn ngữ duy nhất.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>👨‍💻 Team Developer thuần AWS</h4>
+      <p>Team backend TypeScript muốn định nghĩa Lambda, API Gateway, DynamoDB ngay trong repo ứng dụng → AWS CDK (hoặc AWS SAM sẽ học ở section sau).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>⚙️ Cấu hình hàng trăm server</h4>
+      <p>Cần cài đặt agent monitoring, cập nhật cấu hình nginx trên nhiều EC2 cùng lúc → Ansible playbook chạy qua SSH.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li>Khoá học sử dụng <strong>Terraform</strong> vì phổ biến nhất trên thị trường tuyển dụng DevOps, hỗ trợ đa cloud và kiến thức có thể dùng lại với OpenTofu.</li>
+    <li>Từ năm 2023 Terraform chuyển sang license <strong>BSL</strong> (vẫn miễn phí cho người dùng cuối); cộng đồng tạo ra <strong>OpenTofu</strong> (license MPL, thuộc Linux Foundation) tương thích với Terraform.</li>
+    <li>Kỳ thi AWS (SAA, DVA, DOP) chủ yếu hỏi về CloudFormation, CDK, SAM — nên nắm khái niệm stack, change set, drift detection của CloudFormation.</li>
+  </ul>
+
+</body>
+</html>

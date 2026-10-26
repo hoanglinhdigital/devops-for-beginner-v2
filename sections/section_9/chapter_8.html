@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: CodePipeline – GitHub → CodeBuild → Elastic Beanstalk – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: CodePipeline – GitHub → CodeBuild → Elastic Beanstalk</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo Elastic Beanstalk application + environment chạy Java (Corretto 17) bằng file <code>.jar</code> của Lab 2, kiểm tra ứng dụng chạy thành công.</li>
+    <li>Tạo pipeline đầu tiên trong CodePipeline: <strong>Source (GitHub) → Build (CodeBuild Lab 2) → Deploy (Elastic Beanstalk)</strong>.</li>
+    <li>Sửa code, push lên GitHub và quan sát pipeline được trigger tự động, Elastic Beanstalk được cập nhật version mới.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/>Developer<br/>git push"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>java-elasticbeanstalk-sample"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:26px;height:26px;'/> java-beanstalk-pipeline"]
+              direction LR
+              SRC["① Source"] --> BLD["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:34px;height:34px;'/><br/>② Build<br/>java-project-build"]
+              BLD --> DPL["③ Deploy"]
+          end
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>Artifact bucket"]
+          subgraph EB["<img src='../../assets/aws-svg/Elastic-Beanstalk.svg' style='width:26px;height:26px;'/> Elastic Beanstalk: java-beanstalk-dev"]
+              EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:36px;height:36px;'/><br/>EC2 t3.micro<br/>nginx → java :5000"]
+          end
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:36px;height:36px;'/><br/>Browser"]
+      Dev --> GH
+      GH -->|"trigger"| SRC
+      CP <-.-> S3
+      DPL --> EB
+      User -->|"http://&lt;env&gt;.elasticbeanstalk.com"| EC2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 2: CodeBuild project <code>java-project-build</code> build thành công, file <code>demo-v0.0.2.jar</code> trên S3 (đã tải về máy ở Lab 2 – Bước 5). Webhook của project ở Lab 2 đã <strong>tắt</strong>.</li>
+    <li>Không bắt buộc kinh nghiệm với Elastic Beanstalk – lab hướng dẫn đầy đủ các thông số cần thiết.</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/lab5_pipeline_beanstalk/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị IAM role cho Elastic Beanstalk</strong>
+        <p>Elastic Beanstalk cần 2 role. Nếu tài khoản chưa có, tạo trong IAM:</p>
+        <ul class="feature-list">
+          <li><strong>EC2 instance profile</strong> <code>aws-elasticbeanstalk-ec2-role</code>: trusted entity <strong>EC2</strong>, gắn policy <code>AWSElasticBeanstalkWebTier</code>, <code>AWSElasticBeanstalkWorkerTier</code>, <code>AWSElasticBeanstalkMulticontainerDocker</code>.</li>
+          <li><strong>Service role</strong> <code>aws-elasticbeanstalk-service-role</code>: có thể để Console tạo tự động ở Bước 2.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo Elastic Beanstalk application &amp; environment</strong>
+        <p>Vào <strong>Elastic Beanstalk → Create application</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Environment tier: <strong>Web server environment</strong></li>
+          <li>Application name: <code>java-beanstalk-app</code>; Environment name: <code>java-beanstalk-dev</code></li>
+          <li>Platform: <strong>Java</strong>, Platform branch: <strong>Corretto 17 running on 64bit Amazon Linux 2023</strong>, Platform version: bản <em>Recommended</em></li>
+          <li>Application code: <strong>Upload your code</strong>, Version label <code>v1</code>, chọn file <code>demo-v0.0.2.jar</code></li>
+          <li>Presets: <strong>Single instance (free tier eligible)</strong></li>
+          <li>Service role: <code>aws-elasticbeanstalk-service-role</code> (tạo mới nếu chưa có); EC2 instance profile: <code>aws-elasticbeanstalk-ec2-role</code></li>
+          <li>Networking: Default VPC, Public IP address: <strong>Activated</strong>; Instance type: <code>t3.micro</code></li>
+          <li>Các thiết lập khác: để mặc định</li>
+        </ul>
+        <p>Quá trình tạo environment mất khoảng 3–5 phút. Ứng dụng Spring Boot lắng nghe port <code>5000</code> – trùng với port mặc định mà nginx của Elastic Beanstalk proxy tới.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kiểm tra ứng dụng version 1</strong>
+        <p>Khi Health chuyển <span class="badge badge-green">Ok</span>, mở <strong>Domain</strong> của environment (dạng <code>java-beanstalk-dev.eba-xxxx.ap-southeast-1.elasticbeanstalk.com</code>). Trang hiển thị dòng chữ xanh lá <strong>Congratulations, your app has been deployed!</strong></p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo pipeline – thông tin chung &amp; Source stage</strong>
+        <p>Vào <strong>CodePipeline → Create pipeline</strong>, chọn <strong>Build custom pipeline</strong>, nhập các thông số:</p>
+        <ul class="feature-list">
+          <li>Pipeline name: <code>java-beanstalk-pipeline</code>; Execution mode: <strong>Superseded</strong></li>
+          <li>Service role: <strong>New service role</strong> (tên mặc định <code>AWSCodePipelineServiceRole-ap-southeast-1-java-beanstalk-pipeline</code>)</li>
+          <li>Artifact store: <strong>Default location</strong></li>
+          <li>Source provider: <strong>GitHub (via GitHub App)</strong>; Connection: <code>github-connection</code>; Repository: <code>&lt;your-github-username&gt;/java-elasticbeanstalk-sample</code>; Default branch: <code>main</code></li>
+          <li>Output artifact format: <strong>CodePipeline default</strong></li>
+          <li>Trigger: <strong>Start the pipeline on push</strong> vào branch <code>main</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Build stage &amp; Deploy stage</strong>
+        <ul class="feature-list">
+          <li>Build provider: <strong>AWS CodeBuild</strong>; Region: Asia Pacific (Singapore); Project name: <code>java-project-build</code>; Build type: <strong>Single build</strong></li>
+          <li>Test stage: <strong>Skip</strong></li>
+          <li>Deploy provider: <strong>AWS Elastic Beanstalk</strong>; Application name: <code>java-beanstalk-app</code>; Environment name: <code>java-beanstalk-dev</code></li>
+        </ul>
+        <p>Review và tạo pipeline. Pipeline chạy ngay lần đầu với commit mới nhất trên <code>main</code>.</p>
+        <p class="code-note">💡 Khi chạy trong pipeline, CodeBuild bỏ qua cấu hình Artifacts (S3) của project và trả output về artifact bucket của CodePipeline (<code>BuildArtifact</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Quan sát pipeline chạy</strong>
+        <p>Theo dõi 3 stage chuyển lần lượt sang <span class="badge badge-green">Succeeded</span>. Có thể bấm <strong>View details</strong> ở stage Build để mở log CodeBuild, và xem tab <strong>Events</strong> của Elastic Beanstalk environment để thấy quá trình deploy version mới.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Sửa code &amp; push để trigger pipeline</strong>
+        <p>Mở file <code>src/main/java/com/deploy/aws/demo/controller/HelloController.java</code>, đổi nội dung trả về, ví dụ:</p>
+        <pre class="code-block"><code class="language-java">return new ResponseEntity&lt;Object&gt;("&lt;h1 style='color:blue;'&gt;Version 2 – deployed by CodePipeline!&lt;h1&gt;", HttpStatus.OK);</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/java-elasticbeanstalk-sample
+git add .
+git commit -m "feat: update greeting message v2"
+git push origin main</code></pre>
+        <p>Pipeline tự động chạy (xem cột <em>Source</em> hiển thị commit message mới). Khi stage Deploy thành công, tải lại trang web – nội dung mới màu xanh dương xuất hiện.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8 (tuỳ chọn): Release change thủ công</strong>
+        <p>Trong pipeline, bấm <strong>Release change</strong> để chạy lại pipeline với commit mới nhất – hữu ích khi deploy lỗi do môi trường mà không có thay đổi code.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Pipeline <code>java-beanstalk-pipeline</code> có ít nhất 2 execution <strong>Succeeded</strong>, execution sau được trigger bởi lệnh <code>git push</code>.</li>
+      <li>Tab <strong>Application versions</strong> của Elastic Beanstalk có version mới do CodePipeline tạo.</li>
+      <li>Domain của environment hiển thị nội dung version 2.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Stage Build lỗi <code>AccessDenied</code> khi tải source / ghi artifact</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service role của CodeBuild không có quyền với artifact bucket của CodePipeline (thường gặp khi chọn <em>Custom location</em>).<br/><strong>Giải pháp:</strong> Thêm quyền <code>s3:GetObject</code>, <code>s3:PutObject</code> trên bucket artifact của pipeline vào role <code>codebuild-java-project-build-service-role</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Environment Health <span class="badge badge-red">Severe</span>, trang web trả về <code>502 Bad Gateway</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Ứng dụng không lắng nghe port 5000, hoặc artifact không chứa file <code>.jar</code> ở thư mục gốc.<br/><strong>Giải pháp:</strong> Kiểm tra <code>server.port=5000</code> trong <code>application.properties</code>, <code>discard-paths: yes</code> trong buildspec; xem log bằng <strong>Logs → Request logs</strong> của environment.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Push code nhưng pipeline không tự chạy</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Push sai branch, hoặc trigger của pipeline không bật cho branch <code>main</code>.<br/><strong>Giải pháp:</strong> Edit pipeline → Source stage → kiểm tra Trigger (Push, branch <code>main</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Deploy lỗi <code>Insufficient permissions</code> / không tạo được application version</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service role của pipeline thiếu quyền Elastic Beanstalk, S3, Auto Scaling, CloudFormation.<br/><strong>Giải pháp:</strong> Dùng role do Console tạo mới; với role tự tạo, môi trường học có thể gắn tạm <code>AdministratorAccess-AWSElasticBeanstalk</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>EC2 instance của Elastic Beanstalk tính phí theo giờ</strong> (cùng Public IPv4). Xoá environment ngay sau khi hoàn thành lab.</div>
+  <ol class="step-list">
+    <li><div><p>Elastic Beanstalk → environment <code>java-beanstalk-dev</code> → <strong>Terminate environment</strong>, sau đó xoá application <code>java-beanstalk-app</code>.</p></div></li>
+    <li><div><p>Xoá pipeline <code>java-beanstalk-pipeline</code> (hoặc giữ lại để tham khảo nhưng <strong>disable transition</strong> sang stage Deploy để push code không gây lỗi).</p></div></li>
+    <li><div><p>Xoá bớt file lớn trong artifact bucket của CodePipeline và bucket <code>codebuild-artifact-&lt;your-suffix&gt;</code>.</p></div></li>
+    <li><div><p>Giữ lại CodeBuild project <code>java-project-build</code> để tham khảo.</p></div></li>
+  </ol>
+
+</body>
+</html>

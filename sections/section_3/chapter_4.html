@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ma trận DevOps tools &amp; CICD – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">3. Giới thiệu về DevOps &amp; CICD</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Ma trận DevOps tools &amp; CICD</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Khi tìm hiểu về DevOps, bạn sẽ nhanh chóng bắt gặp những bức tranh “DevOps roadmap” hay “DevOps tools” với hàng trăm logo công cụ.
+    Câu hỏi đặt ra: <strong>bạn có cần biết thật nhiều tool để trở thành một DevOps Engineer?</strong> Và <strong>có một giải pháp CICD tối ưu cho mọi dự án không?</strong>
+  </p>
+
+  <h2 class="section-heading">Ma trận DevOps tools</h2>
+  <div class="figure-centered">
+    <img src="../../assets/images/devops-lifecycle-tools.png" alt="Các công cụ ứng với từng giai đoạn của vòng đời DevOps" />
+    <div class="figure-title">Mỗi giai đoạn của vòng đời DevOps đều có rất nhiều công cụ để lựa chọn.</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../assets/images/devops-tools-matrix.jpg" alt="Ma trận các công cụ DevOps theo nhóm Collaborate, Build, Test, Deploy, Run" />
+    <div class="figure-title">“DevOps tools” — một phần nhỏ trong hệ sinh thái công cụ DevOps.</div>
+  </div>
+
+  <h2 class="section-heading">Các nhóm công cụ chính</h2>
+  <ul class="feature-list">
+    <li><strong>Collaborate / Plan:</strong> quản lý task và tài liệu — Jira, Confluence, Trello, Slack.</li>
+    <li><strong>Source code (SCM/VCS):</strong> Git, Github, Gitlab, Bitbucket.</li>
+    <li><strong>CI / Build:</strong> Jenkins, Github Actions, Gitlab CI, AWS CodeBuild; build tool như Maven, Gradle, npm, Docker.</li>
+    <li><strong>Test:</strong> JUnit, Selenium, JMeter, pytest, SonarQube (code quality).</li>
+    <li><strong>Deploy &amp; Config Management:</strong> AWS CodeDeploy, Ansible, Chef, Terraform (IaC), Helm, ArgoCD.</li>
+    <li><strong>Run &amp; Monitor:</strong> AWS, Kubernetes / EKS; CloudWatch, Prometheus, Grafana, ELK, Datadog.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc: CICD concept độc lập với công cụ</h2>
+  <p class="body-text">
+    Mỗi bước trong CICD là một <strong>“ô trống”</strong> có thể lắp bằng nhiều công cụ khác nhau. Không có quy định kiểu “tool A bắt buộc phải đi với tool B”.
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      subgraph S1["📂 Source"]
+          direction TB
+          G1["<img src='../../assets/svg-icon/github.svg' style='width:22px;height:22px;'/> Github"]
+          G2["🦊 Gitlab"]
+          G3["🪣 Bitbucket"]
+      end
+      subgraph S2["🔨 Build &amp; CI"]
+          direction TB
+          B1["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:22px;height:22px;'/> Jenkins"]
+          B2["<img src='../../assets/svg-icon/gitlab-logo.png' style='width:22px;height:22px;'/> GitlabCI"]
+          B3["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:22px;height:22px;'/> CodeBuild"]
+          B4["<img src='../../assets/svg-icon/github.svg' style='width:22px;height:22px;'/> Github Actions"]
+      end
+      subgraph S3["📦 Artifact"]
+          direction TB
+          A1["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:22px;height:22px;'/> ECR"]
+          A2["<img src='../../assets/aws-svg/S3.svg' style='width:22px;height:22px;'/> S3"]
+          A3["<img src='../../assets/svg-icon/docker.svg' style='width:22px;height:22px;'/> Docker Hub"]
+      end
+      subgraph S4["🚀 Deploy"]
+          direction TB
+          D1["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:22px;height:22px;'/> CodeDeploy"]
+          D2["<img src='../../assets/svg-icon/terraform.svg' style='width:22px;height:22px;'/> Terraform"]
+          D3["🐙 ArgoCD / Helm"]
+      end
+      subgraph S5["☁️ Run &amp; Monitor"]
+          direction TB
+          R1["<img src='../../assets/aws-svg/EC2.svg' style='width:22px;height:22px;'/> EC2 / ECS"]
+          R2["<img src='../../assets/svg-icon/EKS.svg' style='width:22px;height:22px;'/> EKS"]
+          R3["<img src='../../assets/svg-icon/grafana.svg' style='width:22px;height:22px;'/> CloudWatch · Grafana"]
+      end
+      S1 --> S2 --> S3 --> S4 --> S5
+  </div>
+  <p class="arch-caption">Cùng một khái niệm CICD, mỗi dự án có thể chọn một tổ hợp công cụ khác nhau ở từng bước.</p>
+
+  <h2 class="section-heading">Bạn có cần biết tất cả các tool?</h2>
+  <div class="alert alert-success">
+    <strong>Không!</strong> Bạn không cần phải biết sử dụng tất cả mọi tool để trở thành một DevOps Engineer.<br/>
+    <strong>Nhắc lại:</strong> DevOps là một nét văn hoá, là triết lý — không phải tools hay công nghệ!
+  </div>
+  <ul class="feature-list">
+    <li>Việc lựa chọn tool nào cho từng bước của CICD hoàn toàn dựa vào <strong>kinh nghiệm của đội dự án</strong> và các yếu tố khác như <strong>phí license</strong>, hạ tầng sẵn có, yêu cầu của khách hàng.</li>
+    <li>Các tool cùng nhóm có cách hoạt động tương tự nhau. Nắm vững <strong>khái niệm</strong> và thành thạo <strong>một tool đại diện</strong> thì việc chuyển sang tool khác chỉ mất vài ngày.</li>
+    <li>“<strong>Vô chiêu thắng hữu chiêu</strong>” — DevOps Engineer giỏi không nhất thiết là người biết nhiều tools, mà là người hiểu vấn đề và chọn đúng giải pháp.</li>
+  </ul>
+
+  <h2 class="section-heading">Có giải pháp CICD tối ưu cho mọi dự án?</h2>
+  <div class="alert alert-warning">
+    <strong>CICD là “may đo” (tailor-made).</strong> Sẽ không có <em>one solution for all problems</em>.
+  </div>
+  <p class="body-text">
+    Việc áp dụng bao nhiêu quy trình, công cụ, phương pháp đơn giản hay phức tạp phụ thuộc hoàn toàn vào <strong>yêu cầu của project</strong>,
+    <strong>thời gian</strong>, <strong>ngân sách</strong>, <strong>kinh nghiệm</strong> của team... Một side project nhỏ không cần microservices, message queue,
+    multi-stage Docker build và pipeline 10 bước — đừng “rắc muối” mọi công nghệ hot vào dự án chỉ vì chúng nghe hay 😄.
+  </p>
+
+  <h2 class="section-heading">Trade-off: pipeline đơn giản vs phức tạp</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>Pipeline đơn giản</th><th>Pipeline đầy đủ, phức tạp</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Ví dụ</td><td>Push code → build → deploy lên 1 server</td><td>Build → unit test → code scan → security scan → deploy Dev → integration test → Staging → approval → Prod (blue/green)</td></tr>
+      <tr><td>Thời gian xây dựng</td><td>Vài giờ</td><td>Vài tuần</td></tr>
+      <tr><td>Chi phí vận hành</td><td>Thấp</td><td>Cao (nhiều tool, nhiều môi trường, license)</td></tr>
+      <tr><td>Độ an toàn khi release</td><td>Thấp hơn</td><td>Cao</td></tr>
+      <tr><td>Phù hợp</td><td>PoC, side project, team nhỏ</td><td>Hệ thống lớn, nhiều team, yêu cầu tuân thủ (compliance)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Dự án dùng toàn bộ dịch vụ AWS</h4>
+      <p>Chọn CodePipeline + CodeBuild + CodeDeploy để tích hợp sẵn với IAM, không cần quản lý server CI riêng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Doanh nghiệp đã có Jenkins</h4>
+      <p>Tận dụng Jenkins và kinh nghiệm sẵn có của team thay vì chuyển đổi, chỉ bổ sung plugin để deploy lên AWS.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Open-source project trên Github</h4>
+      <p>Dùng Github Actions: miễn phí cho public repo, cấu hình bằng file YAML ngay trong repository.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    Trong khoá học này, bạn sẽ thực hành CICD với <strong>ba bộ công cụ khác nhau</strong> — AWS CodePipeline, Jenkins và Github Actions — để thấy rõ cùng một khái niệm CICD có thể hiện thực hoá bằng nhiều cách.
+  </div>
+
+</body>
+</html>

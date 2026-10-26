@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StatefulSet – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">StatefulSet</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Deployment phù hợp với ứng dụng <strong>stateless</strong> (không lưu state, Pod nào cũng giống nhau).
+    Với các ứng dụng <strong>có data</strong> và cần quản lý chặt chẽ <strong>quan hệ giữa các Pod</strong> (ví dụ database có Pod Master và Pod Worker/read-replica), ta cần một cơ chế khác: <strong>StatefulSet</strong>.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Tên ổn định:</strong> mỗi Pod có tên cố định có thứ tự (vd <code>mysql-0</code>, <code>mysql-1</code>...) thay vì đuôi ngẫu nhiên.</li>
+    <li><strong>Storage riêng:</strong> mỗi Pod có PersistentVolume riêng, giữ dữ liệu ngay cả khi Pod được tạo lại.</li>
+    <li><strong>Thứ tự:</strong> tạo/xoá theo thứ tự, giúp quản lý quan hệ master-slave ổn định.</li>
+    <li><strong>Dành cho stateful app:</strong> database, cache, message queue, elasticsearch...</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart TB
+      SS["StatefulSet"]
+      subgraph Pods["Các Pod có thứ tự &amp; storage riêng"]
+          M["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>mysql-0<br/>(Master - ghi)"]
+          W1["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>mysql-1<br/>(Worker - đọc)"]
+          W2["<img src='../../assets/svg-icon/eks-pod.svg' style='width:28px;height:28px;'/><br/>mysql-2<br/>(Worker - đọc)"]
+      end
+      PV1["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:26px;height:26px;'/><br/>PV 1"]
+      PV2["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:26px;height:26px;'/><br/>PV 2"]
+      PV3["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:26px;height:26px;'/><br/>PV 3"]
+      SS --> Pods
+      M --- PV1
+      W1 --- PV2
+      W2 --- PV3
+      M -.->|"replicate (chỉ master ghi)"| W1
+      M -.->|"replicate"| W2
+  </div>
+  <p class="arch-caption">StatefulSet quản lý các Pod có tên ổn định, mỗi Pod có PV riêng. Ví dụ MySQL: chỉ Pod Master được ghi, dữ liệu được replicate sang các Pod Worker (read-replica).</p>
+
+  <h2 class="section-heading">Vấn đề &amp; lưu ý</h2>
+  <ul class="feature-list">
+    <li><strong>Rủi ro mất data:</strong> việc replicate giữa các Pod vẫn có rủi ro khi toàn bộ node chết cùng lúc → mất dữ liệu.</li>
+    <li><strong>Giải pháp:</strong> dùng <strong>PersistentVolume nằm ngoài cluster</strong> (EBS/EFS) để đảm bảo data không mất khi node có sự cố; lifecycle của volume nằm ngoài cluster, không bị ảnh hưởng.</li>
+    <li><strong>Setup phức tạp:</strong> dù Kubernetes cung cấp StatefulSet nhưng việc setup vẫn tốn nhiều công sức và khó có giải pháp triệt để.</li>
+    <li><strong>Khuyến nghị:</strong> nên dùng <strong>dịch vụ cloud</strong> cho DB, Cache, ElasticSearch... (ví dụ Amazon RDS, ElastiCache, OpenSearch) thay vì tự chạy StatefulSet.</li>
+  </ul>
+
+  <h2 class="section-heading">Thực hành: Tạo StatefulSet</h2>
+  <p class="body-text">Tạo một StatefulSet nginx gồm 3 Pod trên Minikube, mỗi Pod có volume riêng. Sau đó kiểm chứng 3 đặc điểm của StatefulSet: <strong>tên &amp; DNS ổn định</strong>, <strong>storage riêng cho từng Pod</strong> (data còn sau khi Pod bị tạo lại) và <strong>tạo/xoá theo thứ tự</strong>.</p>
+  <div class="mermaid">
+  flowchart LR
+      Test["<img src='../../assets/svg-icon/eks-pod.svg' style='width:26px;height:26px;'/><br/>Pod dns-test<br/>(busybox)"]
+      SVC["Headless Service<br/>nginx-headless<br/>clusterIP: None"]
+      subgraph SS["StatefulSet web (replicas: 3)"]
+          P0["<img src='../../assets/svg-icon/eks-pod.svg' style='width:26px;height:26px;'/><br/>web-0"]
+          P1["<img src='../../assets/svg-icon/eks-pod.svg' style='width:26px;height:26px;'/><br/>web-1"]
+          P2["<img src='../../assets/svg-icon/eks-pod.svg' style='width:26px;height:26px;'/><br/>web-2"]
+      end
+      V0["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:24px;height:24px;'/><br/>PVC www-web-0"]
+      V1["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:24px;height:24px;'/><br/>PVC www-web-1"]
+      V2["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:24px;height:24px;'/><br/>PVC www-web-2"]
+      Test -->|"web-0.nginx-headless"| SVC
+      SVC --> P0
+      SVC --> P1
+      SVC --> P2
+      P0 --- V0
+      P1 --- V1
+      P2 --- V2
+  </div>
+  <p class="arch-caption">Headless Service cấp DNS riêng cho từng Pod (<code>web-0.nginx-headless</code>, <code>web-1.nginx-headless</code>...). <code>volumeClaimTemplates</code> tự tạo một PVC riêng cho mỗi Pod, Minikube tự cấp PV qua StorageClass mặc định <code>standard</code>.</p>
+
+  <h3 class="sub-heading">Yêu cầu trước khi bắt đầu</h3>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong> (Minikube chạy).</li>
+    <li>Đã học chương <strong>Persistent Volume &amp; Storage Class</strong> (PV, PVC, StorageClass).</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/stateful_set/</code>.</li>
+  </ul>
+
+  <h3 class="sub-heading">Các bước thực hành</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo file cấu hình StatefulSet</strong>
+        <p>Tạo file <code>nginx-statefulset.yaml</code> gồm 1 headless Service và 1 StatefulSet 3 Pod:</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-headless
+spec:
+  clusterIP: None
+  selector:
+    app: nginx-sts
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: nginx-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx-sts
+  template:
+    metadata:
+      labels:
+        app: nginx-sts
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: www
+          mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+  - metadata:
+      name: www
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi</code></pre>
+        <p class="code-note">💡 <code>clusterIP: None</code> tạo <strong>headless Service</strong>: không có IP chung, mỗi Pod được cấp một DNS riêng. <code>serviceName</code> của StatefulSet phải trùng tên Service này. <code>volumeClaimTemplates</code> là "khuôn" để tạo PVC riêng cho từng Pod.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Apply và quan sát Pod được tạo theo thứ tự</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f nginx-statefulset.yaml
+kubectl get pods -l app=nginx-sts -w</code></pre>
+        <p>Nhận xét: Pod được tạo <strong>lần lượt</strong> <code>web-0</code> → <code>web-1</code> → <code>web-2</code>; Pod sau chỉ được tạo khi Pod trước đã Running. Tên Pod có số thứ tự, không phải đuôi ngẫu nhiên như Deployment. Nhấn <code>Ctrl + C</code> để thoát chế độ theo dõi.</p>
+        <p>Kiểm tra StatefulSet và các PVC được tạo tự động:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get statefulset
+kubectl get pvc
+kubectl get pv</code></pre>
+        <p>Bạn sẽ thấy 3 PVC <code>www-web-0</code>, <code>www-web-1</code>, <code>www-web-2</code> ở trạng thái <code>Bound</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Ghi data riêng vào từng Pod</strong>
+        <p>Ghi nội dung trang <code>index.html</code> khác nhau vào volume của mỗi Pod:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl exec web-0 -- sh -c 'echo "Hello from web-0" > /usr/share/nginx/html/index.html'
+kubectl exec web-1 -- sh -c 'echo "Hello from web-1" > /usr/share/nginx/html/index.html'
+kubectl exec web-2 -- sh -c 'echo "Hello from web-2" > /usr/share/nginx/html/index.html'</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Truy cập từng Pod qua DNS ổn định</strong>
+        <p>Tạo một Pod tạm (busybox) để gọi tới từng Pod qua tên DNS <code>&lt;tên-pod&gt;.&lt;tên-service&gt;</code>. Pod tạm sẽ tự xoá sau khi chạy xong:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl run dns-test --image=busybox:1.36 --rm -i --restart=Never -- nslookup web-0.nginx-headless
+kubectl run dns-test --image=busybox:1.36 --rm -i --restart=Never -- wget -qO- http://web-0.nginx-headless
+kubectl run dns-test --image=busybox:1.36 --rm -i --restart=Never -- wget -qO- http://web-1.nginx-headless</code></pre>
+        <p>Kết quả lần lượt là <code>Hello from web-0</code> và <code>Hello from web-1</code>: mỗi Pod có địa chỉ riêng và data riêng.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Xoá 1 Pod, kiểm tra tên &amp; data được giữ nguyên</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete pod web-1
+kubectl get pods -l app=nginx-sts -w</code></pre>
+        <p>Pod mới được tạo lại với <strong>đúng tên</strong> <code>web-1</code> (AGE vài giây). Nhấn <code>Ctrl + C</code>, sau đó kiểm tra data:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl exec web-1 -- cat /usr/share/nginx/html/index.html</code></pre>
+        <p>Kết quả vẫn là <code>Hello from web-1</code>: Pod mới được gắn lại đúng PVC <code>www-web-1</code> cũ.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Scale down / scale up theo thứ tự</strong>
+        <p>Giảm còn 1 Pod và quan sát thứ tự xoá:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl scale statefulset web --replicas=1
+kubectl get pods -l app=nginx-sts -w</code></pre>
+        <p>Nhận xét: Pod bị xoá theo thứ tự <strong>ngược</strong> <code>web-2</code> → <code>web-1</code>, chỉ còn <code>web-0</code>. Nhấn <code>Ctrl + C</code> rồi kiểm tra PVC:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pvc</code></pre>
+        <p>Cả 3 PVC vẫn còn: Kubernetes <strong>không tự xoá</strong> volume khi scale down để bảo vệ dữ liệu. Scale lên lại 3 Pod và kiểm tra data của <code>web-2</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl scale statefulset web --replicas=3
+kubectl rollout status statefulset/web
+kubectl exec web-2 -- cat /usr/share/nginx/html/index.html</code></pre>
+        <p>Kết quả vẫn là <code>Hello from web-2</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Xoá resource</strong>
+        <p>Xoá StatefulSet và Service:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f nginx-statefulset.yaml</code></pre>
+        <p>PVC không bị xoá theo StatefulSet, cần xoá thủ công:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete pvc www-web-0 www-web-1 www-web-2
+kubectl get pods,pvc,pv</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sub-heading">Kiểm tra kết quả</h3>
+  <div class="verify-box">
+    <h4>✅ Thực hành thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get statefulset</code> hiển thị <code>web</code> với <code>READY 3/3</code>; Pod có tên <code>web-0</code>, <code>web-1</code>, <code>web-2</code>.</li>
+      <li>Có 3 PVC <code>www-web-0/1/2</code> ở trạng thái <code>Bound</code>.</li>
+      <li><code>wget</code> tới <code>web-0.nginx-headless</code> và <code>web-1.nginx-headless</code> trả về nội dung khác nhau.</li>
+      <li>Sau khi xoá <code>web-1</code>, Pod mới vẫn tên <code>web-1</code> và vẫn đọc được <code>Hello from web-1</code>.</li>
+      <li>Sau khi scale down rồi scale up, data của <code>web-2</code> vẫn còn.</li>
+    </ul>
+  </div>
+
+  <h3 class="sub-heading">Troubleshoot</h3>
+  <div class="troubleshoot-item">
+    <div class="err">Pod <code>web-0</code> ở trạng thái <code>Pending</code>, PVC <code>www-web-0</code> không <code>Bound</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> cluster chưa có StorageClass mặc định để tự cấp PV.<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl get storageclass</code> phải có <code>standard (default)</code>; nếu không có, bật addon bằng <code>minikube addons enable default-storageclass</code> và <code>minikube addons enable storage-provisioner</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>nslookup</code> / <code>wget</code> báo <code>can't resolve 'web-0.nginx-headless'</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> tên Service trong <code>serviceName</code> của StatefulSet không khớp với tên headless Service, hoặc Pod chưa Ready.<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl get svc nginx-headless</code> có <code>CLUSTER-IP</code> là <code>None</code>, và <code>kubectl get pods</code> các Pod đều Running.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error from server (AlreadyExists): pods "dns-test" already exists</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Pod tạm lần trước chưa bị xoá (ví dụ bị ngắt giữa chừng).<br/><strong>Giải pháp:</strong> chạy <code>kubectl delete pod dns-test</code> rồi chạy lại lệnh.</div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>So với Deployment:</strong> Deployment coi mọi Pod là giống nhau (stateless); StatefulSet coi mỗi Pod là duy nhất (có identity + storage riêng).</li>
+    <li><strong>DaemonSet (khái niệm liên quan):</strong> đảm bảo mỗi node chạy đúng một Pod (vd node exporter, log collector) – khác StatefulSet ở chỗ không cần thứ tự hay storage riêng.</li>
+    <li><strong>Liên hệ Section 4:</strong> bạn đã học RDS (managed database) – đó chính là lựa chọn thay thế khuyến nghị cho việc tự chạy database trong Kubernetes.</li>
+  </ul>
+
+</body>
+</html>

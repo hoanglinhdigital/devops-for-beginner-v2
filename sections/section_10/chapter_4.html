@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Biến (Variable), Parameter &amp; Credential trong Jenkins – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Biến (Variable), Parameter &amp; Credential trong Jenkins</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Phân biệt 4 nguồn biến trong Jenkins: <strong>built-in variable</strong>, <strong>global environment variable</strong>, <strong>job parameter</strong>, <strong>credential variable</strong>.</li>
+    <li>Tạo job có tham số (<em>This project is parameterized</em>): String, Choice, Boolean.</li>
+    <li>Lưu username/password vào <strong>Jenkins Credentials</strong> và dùng trong job qua <strong>credential binding</strong> – quan sát Jenkins che (mask) secret trong log.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      B["⚙️ <b>Built-in</b><br/>JOB_NAME · BUILD_NUMBER<br/>WORKSPACE · BUILD_URL"]
+      G["🌐 <b>Global env</b><br/>Manage Jenkins → System<br/>COMPANY_NAME"]
+      P["🎛️ <b>Parameter</b><br/>APP_ENV · REGION · DRY_RUN<br/>(nhập khi build)"]
+      C["🔐 <b>Credential</b><br/>ID: dblogin<br/>→ USERNAME · PASSWORD"]
+      J["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:40px;height:40px;'/><br/><b>lab03-variables</b><br/>Execute shell"]
+      B --> J
+      G --> J
+      P --> J
+      C -->|"binding (mask ****)"| J
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 2.</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab3_variables_credentials/</code> (<code>variables.sh</code>, <code>Jenkinsfile</code> tham khảo).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Xem danh sách built-in variable</strong>
+        <p>Jenkins cung cấp sẵn nhiều biến môi trường cho mọi build. Xem danh sách đầy đủ tại <code>http://&lt;jenkins-public-ip&gt;:8080/env-vars.html</code>. Các biến hay dùng:</p>
+        <table class="compare-table">
+          <thead><tr><th>Biến</th><th>Ý nghĩa</th><th>Ví dụ</th></tr></thead>
+          <tbody>
+            <tr><td><code>JOB_NAME</code></td><td>Tên job</td><td><code>lab03-variables</code></td></tr>
+            <tr><td><code>BUILD_NUMBER</code> / <code>BUILD_ID</code></td><td>Số thứ tự build – thường dùng làm version/tag</td><td><code>5</code></td></tr>
+            <tr><td><code>BUILD_URL</code></td><td>Link tới trang build – dùng trong notification</td><td><code>http://.../job/lab03-variables/5/</code></td></tr>
+            <tr><td><code>WORKSPACE</code></td><td>Đường dẫn workspace</td><td><code>/var/lib/jenkins/workspace/lab03-variables</code></td></tr>
+            <tr><td><code>JENKINS_HOME</code></td><td>Thư mục dữ liệu Jenkins</td><td><code>/var/lib/jenkins</code></td></tr>
+            <tr><td><code>GIT_COMMIT</code>, <code>GIT_BRANCH</code></td><td>Commit / branch vừa checkout (khi job có Git)</td><td><code>origin/master</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo global environment variable</strong>
+        <p>Vào <strong>Manage Jenkins → System → Global properties</strong>, tick <strong>Environment variables</strong>, thêm:</p>
+        <ul class="feature-list">
+          <li>Name: <code>COMPANY_NAME</code> – Value: <code>DevOps for Beginner</code></li>
+        </ul>
+        <p>Save. Biến này dùng được trong <strong>mọi job</strong> – phù hợp cho giá trị dùng chung như region mặc định, tên công ty, URL registry.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo credential dạng Username with password</strong>
+        <p>Vào <strong>Manage Jenkins → Credentials → System → Global credentials (unrestricted) → Add Credentials</strong>:</p>
+        <ul class="feature-list">
+          <li>Kind: <strong>Username with password</strong></li>
+          <li>Username: <code>dbadmin</code> – Password: <code>MySecretP@ssw0rd</code> (giá trị giả lập); <strong>Treat username as secret</strong>: không tick</li>
+          <li>ID: <code>dblogin</code> – Description: <code>Demo database login</code></li>
+        </ul>
+        <p class="code-note">💡 Job chỉ tham chiếu <strong>ID</strong> <code>dblogin</code>, không bao giờ chứa password. Các loại credential khác sẽ dùng trong section: <strong>SSH Username with private key</strong> (Lab 8), <strong>Secret text</strong> (Lab 12).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo job có parameter &amp; credential binding</strong>
+        <p>Tạo <strong>New Item → Freestyle project</strong> tên <code>lab03-variables</code> với cấu hình:</p>
+        <ul class="feature-list">
+          <li>General → tick <strong>This project is parameterized</strong>, thêm 3 parameter:
+            <ul class="feature-list">
+              <li><strong>String Parameter</strong> – Name <code>APP_ENV</code>, Default Value <code>dev</code></li>
+              <li><strong>Choice Parameter</strong> – Name <code>REGION</code>, Choices (mỗi giá trị 1 dòng): <code>ap-southeast-1</code>, <code>ap-northeast-1</code></li>
+              <li><strong>Boolean Parameter</strong> – Name <code>DRY_RUN</code>, Set by Default: tick</li>
+            </ul>
+          </li>
+          <li>Environment → tick <strong>Use secret text(s) or file(s)</strong> → Add <strong>Username and password (separated)</strong>: Username Variable <code>USERNAME</code>, Password Variable <code>PASSWORD</code>, Credentials <code>dbadmin/****** (Demo database login)</code></li>
+          <li>Build Steps → <strong>Execute shell</strong>: copy nội dung file <code>variables.sh</code></li>
+        </ul>
+        <pre class="code-block"><code class="language-bash">echo "===== 1. Built-in variables ====="
+echo "JOB_NAME     : ${JOB_NAME}"
+echo "BUILD_NUMBER : ${BUILD_NUMBER}"
+echo "BUILD_ID     : ${BUILD_ID}"
+echo "BUILD_URL    : ${BUILD_URL}"
+echo "WORKSPACE    : ${WORKSPACE}"
+echo "JENKINS_HOME : ${JENKINS_HOME}"
+echo "NODE_NAME    : ${NODE_NAME}"
+
+echo "===== 2. Global environment variable ====="
+echo "COMPANY_NAME : ${COMPANY_NAME}"
+
+echo "===== 3. Job parameters ====="
+echo "APP_ENV : ${APP_ENV}"
+echo "REGION  : ${REGION}"
+echo "DRY_RUN : ${DRY_RUN}"
+if [ "${DRY_RUN}" = "true" ]; then
+  echo "DRY_RUN = true -&gt; chỉ in thông tin, không deploy."
+else
+  echo "Deploying to ${APP_ENV} in ${REGION}..."
+fi
+
+echo "===== 4. Credential variables ====="
+echo "Username: ${USERNAME}"
+echo "Password: ${PASSWORD}"
+echo "Password length: ${#PASSWORD}"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Build with Parameters</strong>
+        <p>Nút <strong>Build Now</strong> đổi thành <strong>Build with Parameters</strong>. Nhập <code>APP_ENV</code> = <code>staging</code>, chọn <code>REGION</code> = <code>ap-northeast-1</code>, bỏ tick <code>DRY_RUN</code> → <strong>Build</strong>. Console Output:</p>
+        <pre class="output-box"><code>===== 3. Job parameters =====
+APP_ENV : staging
+REGION  : ap-northeast-1
+DRY_RUN : false
+Deploying to staging in ap-northeast-1...
+===== 4. Credential variables =====
+Username: dbadmin
+Password: ****
+Password length: 16</code></pre>
+        <p class="code-note">💡 Jenkins tự thay giá trị secret bằng <code>****</code> trong log (username chỉ bị che nếu tick <em>Treat username as secret</em> khi tạo credential). Tuy nhiên script vẫn đọc được giá trị thật (độ dài 16) – <strong>masking chỉ là lớp bảo vệ log</strong>, không ngăn được script cố tình gửi secret ra ngoài. Đừng bao giờ <code>echo</code> secret trong job thật.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Xem lại parameter của từng build</strong>
+        <p>Mở build vừa chạy → <strong>Parameters</strong>: Jenkins lưu lại giá trị parameter của mỗi lần build – giúp truy vết "ai deploy version nào lên môi trường nào". Chạy thêm 1 build với giá trị mặc định để so sánh.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: (Tham khảo) Cùng nội dung bằng Pipeline</strong>
+        <p>Trong Pipeline, credential được dùng qua <code>withCredentials</code>. Đoạn này sẽ dễ hiểu hơn sau chương <em>Jenkins Pipeline</em> – file đầy đủ: <code>lab3_variables_credentials/Jenkinsfile</code>.</p>
+        <pre class="code-block"><code class="language-groovy">withCredentials([usernamePassword(credentialsId: 'dblogin', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+    // Dùng nháy đơn để shell (không phải Groovy) đọc biến bí mật -&gt; tránh lộ secret
+    sh '''
+        echo "Username: $USERNAME"
+        echo "Password: $PASSWORD"
+    '''
+}</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Log in đúng giá trị built-in variable, <code>COMPANY_NAME</code> và các parameter đã nhập.</li>
+      <li>Password trong log hiển thị <code>****</code>, username hiển thị <code>dbadmin</code>.</li>
+      <li>Trang <strong>Parameters</strong> của từng build hiển thị giá trị khác nhau theo từng lần chạy.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Biến in ra rỗng (ví dụ <code>COMPANY_NAME :</code>)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai chính tả tên biến (phân biệt hoa/thường) hoặc chưa Save cấu hình global properties.<br/><strong>Giải pháp:</strong> Kiểm tra lại tên biến; với parameter, đảm bảo build bằng <strong>Build with Parameters</strong>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không thấy mục <strong>Use secret text(s) or file(s)</strong></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cài plugin <strong>Credentials Binding</strong> (có trong suggested plugins).<br/><strong>Giải pháp:</strong> Manage Jenkins → Plugins → Available plugins → tìm <code>Credentials Binding</code> → Install.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Credential <code>dblogin</code> không xuất hiện trong danh sách chọn</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tạo credential sai loại (ví dụ Secret text) hoặc tạo trong folder/domain khác.<br/><strong>Giải pháp:</strong> Tạo lại credential loại <strong>Username with password</strong> trong <strong>Global credentials</strong>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo resource trên AWS. Có thể xoá credential <code>dblogin</code> và job <code>lab03-variables</code> sau khi thực hành. Nhớ <strong>Stop</strong> Jenkins server nếu nghỉ học.</div>
+
+</body>
+</html>

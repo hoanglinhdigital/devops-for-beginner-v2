@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 8: Canary deployment lên ECS với CodeDeploy – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 8: Canary deployment lên ECS với CodeDeploy</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo <strong>custom deployment configuration</strong> kiểu Canary: chuyển <strong>25%</strong> traffic sang version mới, chờ <strong>5 phút</strong>, sau đó chuyển 100%.</li>
+    <li>Cập nhật deployment group của Lab 7 để dùng chiến lược Canary, reroute traffic tự động.</li>
+    <li>Push code, đo tỷ lệ request trả về version mới qua ALB trong giai đoạn canary.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:38px;height:38px;'/><br/>GitHub"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:38px;height:38px;'/><br/>nodejs-ecs-bluegreen-pipeline"]
+          CD["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:38px;height:38px;'/><br/><b>CodeDeploy</b><br/>ECSCanary25Percent5Minutes"]
+          L80["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:38px;height:38px;'/><br/>ALB :80<br/>weighted forward"]
+          subgraph SVC["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:24px;height:24px;'/> nodejs-service"]
+              direction TB
+              OLD["🟦 Task set v3 (original)"]
+              NEW["🟩 Task set v4 (replacement)"]
+          end
+      end
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Users"]
+      GH -->|"trigger"| CP --> CD
+      CD -.->|"điều chỉnh trọng số"| L80
+      User --> L80
+      L80 -->|"75% → 0%"| OLD
+      L80 -->|"25% → 100%"| NEW
+  </div>
+  <p class="arch-caption">Canary ở mức service: CodeDeploy điều chỉnh <strong>trọng số (weight)</strong> giữa 2 Target Group trên listener 80, không thay đổi số task của mỗi task set.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 7: ECS service ở controller <code>CODE_DEPLOY</code>, CodeDeploy application <code>nodejs-ecs-app</code>, deployment group <code>nodejs-ecs-dg</code>, pipeline <code>nodejs-ecs-bluegreen-pipeline</code>.</li>
+    <li>Deployment của Lab 7 đã kết thúc (task set cũ đã terminate).</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/lab8_ecs_canary/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo custom deployment configuration</strong>
+        <p>Vào <strong>CodeDeploy → Deployment configurations</strong>, tạo deployment configuration với thông số:</p>
+        <ul class="feature-list">
+          <li>Deployment configuration name: <code>ECSCanary25Percent5Minutes</code></li>
+          <li>Compute platform: <strong>Amazon ECS</strong></li>
+          <li>Type: <strong>Canary</strong>; Step: <strong>25</strong> (%); Interval: <strong>5</strong> (phút)</li>
+        </ul>
+        <p class="code-note">💡 AWS có sẵn các cấu hình như <code>CodeDeployDefault.ECSCanary10Percent5Minutes</code>, <code>CodeDeployDefault.ECSLinear10PercentEvery1Minutes</code>. Lab dùng 25% để dễ quan sát với số request nhỏ.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cập nhật deployment group</strong>
+        <p>Edit deployment group <code>nodejs-ecs-dg</code>:</p>
+        <ul class="feature-list">
+          <li>Traffic rerouting: <strong>Reroute traffic immediately</strong> (canary bắt đầu ngay khi task set mới sẵn sàng)</li>
+          <li>Deployment configuration: <code>ECSCanary25Percent5Minutes</code></li>
+          <li>Original revision termination: chờ <strong>5 phút</strong></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Sửa code &amp; push</strong>
+        <p>Sửa text thẻ <code>&lt;h1&gt;</code> trong <code>public/index.html</code> thành <code>Welcome to My Website – v4 Canary</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/nodejs-random-color
+git add public/index.html
+git commit -m "feat: update welcome message v4 canary"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Quan sát giai đoạn canary 25%</strong>
+        <p>Mở deployment trên CodeDeploy: phần <strong>Traffic shifting progress</strong> hiển thị <em>Original 75% / Replacement 25%</em>. Mở ALB → listener <strong>HTTP:80</strong>: rule forward tới 2 Target Group với trọng số tương ứng.</p>
+        <p>Gửi 20 request và đếm theo version (thay <code>&lt;alb-dns-name&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$" data-output="2-3"><code class="language-bash">for i in $(seq 1 20); do curl -s http://&lt;alb-dns-name&gt;/ | grep -o "&lt;h1[^&gt;]*&gt;[^&lt;]*" | sed 's/&lt;h1[^&gt;]*&gt;//'; done | sort | uniq -c
+     15 Welcome to My Website – v3 Blue/Green
+      5 Welcome to My Website – v4 Canary</code></pre>
+        <p>Kết quả xấp xỉ 25% request trả về v4 (có sai số do số request nhỏ). Lặp lại lệnh vài lần để thấy tỷ lệ ổn định.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Chờ hết 5 phút – 100% traffic sang version mới</strong>
+        <p>Sau 5 phút, CodeDeploy tự chuyển 100% traffic sang task set mới. Chạy lại lệnh đếm ở Bước 4 – toàn bộ 20 request trả về v4. Sau thêm 5 phút (Original revision termination), task set cũ bị terminate và pipeline <span class="badge badge-green">Succeeded</span>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6 (tuỳ chọn): Thử Linear &amp; rollback</strong>
+        <ul class="feature-list">
+          <li>Đổi deployment configuration sang <code>CodeDeployDefault.ECSLinear10PercentEvery1Minutes</code>, push code và quan sát traffic tăng 10% mỗi phút.</li>
+          <li>Trong giai đoạn canary, bấm <strong>Stop and roll back deployment</strong>: traffic quay về 100% version cũ ngay lập tức.</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <div class="alert alert-info"><strong>Có cần tăng số task lên 4?</strong> Không bắt buộc. Với CodeDeploy, task set mới được tạo với <strong>đủ số task</strong> như task set cũ, còn tỷ lệ 25% được điều khiển bằng trọng số của ALB – không phụ thuộc số task. Tăng <code>desired_count</code> chỉ giúp mô phỏng hệ thống lớn hơn (và tốn chi phí hơn).</div>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Trong 5 phút đầu, khoảng 25% request trả về v4, listener 80 có trọng số 75/25.</li>
+      <li>Sau 5 phút, 100% request trả về v4; deployment và pipeline <strong>Succeeded</strong>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Deployment vẫn dừng ở bước chờ reroute, không tự chuyển 25%</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Deployment group vẫn để <em>Specify when to reroute traffic</em> từ Lab 7.<br/><strong>Giải pháp:</strong> Bấm <strong>Reroute traffic</strong> để tiếp tục lần này, sau đó sửa deployment group thành <em>Reroute traffic immediately</em>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Traffic chuyển 100% ngay, không có giai đoạn 25%</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Deployment group vẫn dùng <code>CodeDeployDefault.ECSAllAtOnce</code>, hoặc pipeline chạy trước khi bạn lưu thay đổi.<br/><strong>Giải pháp:</strong> Kiểm tra lại Bước 2, xem cột <em>Deployment configuration</em> của deployment vừa chạy.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Tỷ lệ đếm được lệch nhiều so với 25%</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Số mẫu nhỏ, hoặc curl tái sử dụng kết nối.<br/><strong>Giải pháp:</strong> Tăng số request (ví dụ <code>seq 1 100</code>); tỷ lệ sẽ tiến gần 25%.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">Giữ lại toàn bộ nếu học tiếp Lab 9. Nếu dừng lại: xoá pipeline, CodeDeploy application, custom deployment configuration <code>ECSCanary25Percent5Minutes</code>, rồi chạy <code>terraform destroy</code> – <strong>ALB tính phí theo giờ</strong>.</div>
+
+</body>
+</html>

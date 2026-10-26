@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autoscaling cho EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Autoscaling cho EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Autoscaling trong Kubernetes có 2 cấp độ: <strong>scale số lượng Pod</strong> (Horizontal Pod Autoscaler – HPA) và <strong>scale số lượng node</strong> của cluster khi không còn chỗ chạy Pod.
+    Với EKS, có 2 phương pháp phổ biến để scale node:
+  </p>
+
+  <h2 class="section-heading">Các phương pháp Autoscaling chính</h2>
+  <ul class="feature-list">
+    <li><strong>Cluster Autoscaler:</strong> dựa trên cơ chế hoạt động của <strong>Auto Scaling Group</strong> (ASG). Khi có Pod pending vì thiếu node, Cluster Autoscaler tăng số node trong ASG; khi node dư tài nguyên, nó giảm bớt node.</li>
+    <li><strong>Karpenter:</strong> tool mã nguồn mở của AWS, provision node trực tiếp (không cần ASG), chọn đúng loại instance theo yêu cầu của Pod và nhanh hơn nhiều.</li>
+  </ul>
+
+  <div class="figure-centered">
+    <img src="../../images/section14/autoscaling-cluster-autoscaler.png" alt="Cluster Autoscaler dựa trên Auto Scaling Group" />
+    <div class="figure-title">Cluster Autoscaler hoạt động dựa trên Auto Scaling Group (ASG)</div>
+  </div>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="figure-centered">
+    <img src="../../images/section14/autoscaling-overview.png" alt="Tổng quan Autoscaling cho EKS" />
+    <div class="figure-title">Tổng quan Autoscaling cho EKS</div>
+  </div>
+
+  <h2 class="section-heading">Karpenter concept</h2>
+  <div class="figure-centered">
+    <img src="../../images/section14/karpenter-concept.png" alt="Karpenter concept" />
+    <div class="figure-title">Karpenter concept</div>
+  </div>
+
+  <h2 class="section-heading">Cluster Autoscaler vs Karpenter</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>Cluster Autoscaler</th><th>Karpenter</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Cơ chế</td><td>Scale ASG (node group)</td><td>Provision node trực tiếp</td></tr>
+      <tr><td>Tốc độ scale</td><td>Chậm hơn (chờ ASG launch instance)</td><td>Nhanh (chọn instance phù hợp ngay)</td></tr>
+      <tr><td>Chọn instance type</td><td>Theo node group cố định</td><td>Linh hoạt, tối ưu theo yêu cầu Pod</td></tr>
+      <tr><td>Quản lý</td><td>Phải định nghĩa node group/ASG</td><td>Khai báo provisioner, ít cấu hình ASG</td></tr>
+      <tr><td>Phù hợp</td><td>Môi trường đơn giản, quen thuộc</td><td>Cluster lớn, cần scale nhanh &amp; tối ưu chi phí</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Tự động điều chỉnh node theo tải, tiết kiệm chi phí khi traffic thấp.</li>
+        <li>Karpenter giảm thiểu instance dư thừa và scale nhanh hơn ASG.</li>
+        <li>Kết hợp HPA (scale Pod) + Cluster Autoscaler/Karpenter (scale node) cho khả năng mở rộng đầy đủ.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm / lưu ý</h4>
+      <ul class="feature-list-sm">
+        <li>Scale node có độ trễ (phải chờ instance mới join cluster).</li>
+        <li>Cần cấu hình đúng request/limit của Pod để hệ thống biết khi nào scale.</li>
+        <li>Scale down có thể làm gián đoạn Pod đang chạy nếu không dùng PodDisruptionBudget (PDB).</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>HPA (Horizontal Pod Autoscaler):</strong> scale số Pod dựa trên CPU/memory hoặc metric custom.</li>
+    <li><strong>VPA (Vertical Pod Autoscaler):</strong> điều chỉnh request/limit CPU/RAM của Pod.</li>
+    <li><strong>Cluster Autoscaler:</strong> chỉ scale node khi có Pod pending; scale down khi node dư tài nguyên và Pod có thể di chuyển.</li>
+    <li><strong>Karpenter:</strong> cần cài qua Helm/eksctl, khai báo <code>NodePool</code>/<code>EC2NodeClass</code> (phiên bản mới).</li>
+    <li><strong>Fargate:</strong> với Fargate bạn không cần quản lý node, AWS tự cấp tài nguyên cho Pod (serverless compute).</li>
+  </ul>
+
+</body>
+</html>

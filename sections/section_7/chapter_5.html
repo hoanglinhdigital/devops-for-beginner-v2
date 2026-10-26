@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Tạo nhánh develop, commit &amp; push – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Tạo nhánh develop, commit &amp; push</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo nhánh <code>develop</code> từ nhánh <code>main</code> của repository <code>demo-git</code>.</li>
+    <li>Thực hiện trọn vòng đời: <strong>Modify → Stage (<code>git add</code>) → Commit → Push</strong>.</li>
+    <li>Sử dụng <code>git status</code>, <code>git diff</code>, <code>git log</code> để quan sát thay đổi.</li>
+    <li>Tạo file <code>.gitignore</code> để không commit nhầm file nhạy cảm.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  gitGraph
+      commit id: "Initial commit"
+      branch develop
+      checkout develop
+      commit id: "feat: add index.html"
+      commit id: "docs: add section list"
+  </div>
+  <p class="arch-caption">Nhánh <code>develop</code> được tạo từ commit đầu tiên của <code>main</code>, sau đó có thêm 2 commit và được push lên GitHub.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 2: đã clone <code>demo-git</code> về <code>~/git-labs/demo-git</code> bằng SSH.</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab3_develop_branch/</code> (<code>commands.sh</code>, <code>index.html</code>, <code>README.md</code>, <code>.gitignore</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cập nhật code mới nhất của main</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout main
+git pull origin main</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo nhánh develop từ main</strong>
+        <p><code>checkout -b</code> = tạo branch mới + chuyển sang branch đó. Branch mới được tạo từ commit hiện tại của branch đang đứng (<code>main</code>):</p>
+        <pre class="command-line" data-prompt="$" data-output="2-3"><code class="language-bash">git checkout -b develop
+Switched to a new branch 'develop'
+git branch
+* develop
+  main</code></pre>
+        <p class="code-note">💡 Git từ bản 2.23 có lệnh mới tương đương, dễ đọc hơn: <code>git switch -c develop</code> (tạo &amp; chuyển) và <code>git switch main</code> (chỉ chuyển).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo/sửa file</strong>
+        <p>Mở repository bằng VS Code, sau đó copy 3 file từ thư mục <code>lab3_develop_branch</code> của source code vào thư mục gốc của <code>demo-git</code>:</p>
+        <ul class="feature-list">
+          <li><code>index.html</code> – trang web mẫu (file mới)</li>
+          <li><code>README.md</code> – ghi đè file README hiện tại (file sửa đổi)</li>
+          <li><code>.gitignore</code> – danh sách file Git bỏ qua (file mới)</li>
+        </ul>
+        <pre class="command-line" data-prompt="$" data-output="2-12"><code class="language-bash">code .
+git status
+On branch develop
+Changes not staged for commit:
+  (use "git add &lt;file&gt;..." to update what will be committed)
+        modified:   README.md
+
+Untracked files:
+  (use "git add &lt;file&gt;..." to include in what will be committed)
+        .gitignore
+        index.html
+
+no changes added to commit (use "git add" and/or "git commit -a")</code></pre>
+        <p><code>README.md</code> ở trạng thái <strong>modified</strong>, còn <code>index.html</code>, <code>.gitignore</code> là <strong>untracked</strong> (Git chưa theo dõi).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Xem thay đổi &amp; add vào staging area</strong>
+        <p><code>git diff</code> hiển thị nội dung thay đổi (dòng <code>+</code> là thêm, <code>-</code> là xoá). Nhấn <code>q</code> để thoát:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git diff README.md
+git add index.html README.md .gitignore
+git status</code></pre>
+        <p>Sau khi add, 3 file chuyển sang mục <strong>Changes to be committed</strong>. Có thể dùng <code>git add .</code> để add toàn bộ thay đổi trong thư mục hiện tại, nhưng hãy luôn <code>git status</code> trước để chắc chắn không add nhầm file.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Commit</strong>
+        <pre class="command-line" data-prompt="$" data-output="3-4"><code class="language-bash">git commit -m "feat: add index.html, .gitignore and update README"
+git log --oneline
+3f2a1b9 (HEAD -&gt; develop) feat: add index.html, .gitignore and update README
+a1c0d42 (origin/main, origin/HEAD, main) Initial commit</code></pre>
+        <p>Commit hiện mới chỉ nằm ở local: <code>develop</code> đi trước <code>main</code> 1 commit và chưa có trên GitHub.</p>
+        <p class="code-note">💡 Commit message nên ngắn gọn, mô tả “làm gì”. Quy ước <strong>Conventional Commits</strong> hay dùng: <code>feat:</code> (tính năng), <code>fix:</code> (sửa lỗi), <code>docs:</code> (tài liệu), <code>chore:</code> (việc lặt vặt), <code>refactor:</code>, <code>test:</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Push nhánh develop lên GitHub</strong>
+        <p>Lần push đầu tiên của một branch mới cần <code>-u</code> (<code>--set-upstream</code>) để liên kết branch local với branch trên remote:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git push -u origin develop
+git branch -vv</code></pre>
+        <p>Trên GitHub, mục branch giờ có thêm <code>develop</code>. Chọn branch <code>develop</code> để thấy file <code>index.html</code>; branch <code>main</code> vẫn chưa có thay đổi.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Sửa thêm 1 lần, commit &amp; push</strong>
+        <p>Mở <code>index.html</code>, thêm 1 dòng vào danh sách <code>&lt;ul&gt;</code>:</p>
+        <pre class="code-block"><code class="language-html">    &lt;li&gt;Lab 4: Protect branch và Pull Request&lt;/li&gt;</code></pre>
+        <p>Từ lần thứ 2, chỉ cần <code>git push</code> (đã có upstream):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add index.html
+git commit -m "docs: add section list to index page"
+git push
+git log --oneline --graph --all</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>GitHub có 2 branch: <code>main</code> và <code>develop</code>.</li>
+      <li>Branch <code>develop</code> trên GitHub có <code>index.html</code>, <code>.gitignore</code>, <code>README.md</code> mới và 2 commit mới (xem ở mục <strong>Commits</strong>).</li>
+      <li><code>git status</code> ở local báo <em>Your branch is up to date with 'origin/develop'</em> và <em>nothing to commit, working tree clean</em>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>fatal: The current branch develop has no upstream branch.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Push branch mới mà không chỉ rõ remote/branch.<br/><strong>Giải pháp:</strong> Dùng <code>git push -u origin develop</code> cho lần đầu.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Author identity unknown *** Please tell me who you are.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cấu hình <code>user.name</code>, <code>user.email</code>.<br/><strong>Giải pháp:</strong> Chạy lại bước 2 của Lab 1: <code>git config --global user.name "Your Name"</code> và <code>git config --global user.email "your_email@example.com"</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>! [rejected] develop -&gt; develop (fetch first)</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Branch trên remote có commit mới mà local chưa có (ví dụ bạn đã sửa file trực tiếp trên web GitHub).<br/><strong>Giải pháp:</strong> <code>git pull origin develop</code> để lấy về và merge, sau đó <code>git push</code> lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Lỡ <code>git add</code> nhầm file (ví dụ <code>.env</code>)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Dùng <code>git add .</code> khi chưa kiểm tra <code>git status</code>.<br/><strong>Giải pháp:</strong> Chưa commit: <code>git restore --staged .env</code>, sau đó thêm <code>.env</code> vào <code>.gitignore</code>. Nếu đã push secret lên GitHub: coi như secret đã lộ, phải <strong>đổi (rotate)</strong> secret ngay.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ nguyên repository và branch <code>develop</code> để tiếp tục Lab 4. Lab không phát sinh chi phí.</div>
+
+</body>
+</html>

@@ -1,0 +1,94 @@
+// Jenkinsfile: pipeline build Docker image → push ECR → deploy ECS cho Final Assignment.
+// Đây là pipeline mẫu, có thể tách thành 2 pipeline riêng cho frontend và backend.
+// Tham khảo Section 10 – Jenkins và Section 11 – Blue/Green để hiểu sâu từng bước.
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Tag của Docker image')
+        choice(name: 'COMPONENT', choices: ['frontend', 'backend', 'both'], description: 'Build & deploy thành phần nào')
+    }
+
+    environment {
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_FRONTEND   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/final-assignment-frontend"
+        ECR_BACKEND    = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/final-assignment-backend"
+        ECS_CLUSTER    = 'final-assignment-cluster'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Login ECR') {
+            steps {
+                script {
+                    sh '''
+                      aws ecr get-login-password --region ${AWS_REGION} \
+                        | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    '''
+                }
+            }
+        }
+
+        stage('Build & Push Frontend') {
+            when { expression { params.COMPONENT == 'frontend' || params.COMPONENT == 'both' } }
+            steps {
+                script {
+                    sh '''
+                      docker build -f docker/Dockerfile.frontend -t ${ECR_FRONTEND}:${IMAGE_TAG} .
+                      docker push ${ECR_FRONTEND}:${IMAGE_TAG}
+                    '''
+                }
+            }
+        }
+
+        stage('Build & Push Backend') {
+            when { expression { params.COMPONENT == 'backend' || params.COMPONENT == 'both' } }
+            steps {
+                script {
+                    sh '''
+                      docker build -f docker/Dockerfile.backend -t ${ECR_BACKEND}:${IMAGE_TAG} .
+                      docker push ${ECR_BACKEND}:${IMAGE_TAG}
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Frontend to ECS') {
+            when { expression { params.COMPONENT == 'frontend' || params.COMPONENT == 'both' } }
+            steps {
+                script {
+                    sh '''
+                      aws ecs update-service --cluster ${ECS_CLUSTER} --service frontend-service \
+                        --task-definition final-assignment-frontend --force-new-deployment \
+                        --region ${AWS_REGION}
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Backend to ECS') {
+            when { expression { params.COMPONENT == 'backend' || params.COMPONENT == 'both' } }
+            steps {
+                script {
+                    sh '''
+                      aws ecs update-service --cluster ${ECS_CLUSTER} --service backend-service \
+                        --task-definition final-assignment-backend --force-new-deployment \
+                        --region ${AWS_REGION}
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}

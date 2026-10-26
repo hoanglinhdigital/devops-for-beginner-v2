@@ -1,0 +1,60 @@
+// Lab 7 – Job deploy image mới lên Amazon ECS Service (rolling update)
+// Job: lab07-deploy-ecs | This project is parameterized: String parameter IMAGE_TAG (vd: ver-1, ver-2)
+// Pipeline definition: Pipeline script (dán nội dung file này)
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+    }
+
+    environment {
+        AWS_REGION     = 'ap-southeast-1'
+        ECR_REPO       = 'nodejs-random-color'
+        // Các giá trị dưới đây lấy từ terraform output của terraform_ecs_stack
+        ECS_CLUSTER    = 'jenkins-lab-cluster'
+        ECS_SERVICE    = 'nodejs-service'
+        TASK_FAMILY    = 'jenkins-lab-nodejs-task'
+        CONTAINER_NAME = 'nodejs-container'
+    }
+
+    stages {
+        stage('Register new task definition') {
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    FULL_IMAGE=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}
+                    echo "Deploying image: ${FULL_IMAGE}"
+
+                    # Kiểm tra image tag có tồn tại trên ECR, nếu không job dừng ngay tại đây
+                    aws ecr describe-images --region ${AWS_REGION} --repository-name ${ECR_REPO} --image-ids imageTag=${IMAGE_TAG} > /dev/null
+
+                    # Lấy task definition hiện tại -> đổi image của container -> bỏ các field chỉ đọc
+                    aws ecs describe-task-definition --region ${AWS_REGION} --task-definition ${TASK_FAMILY} |
+                    jq --arg IMAGE "${FULL_IMAGE}" --arg NAME "${CONTAINER_NAME}" '.taskDefinition | (.containerDefinitions[] | select(.name == $NAME) | .image) = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' > new-task-definition.json
+
+                    # Đăng ký revision mới, lưu số revision ra file để stage sau sử dụng
+                    aws ecs register-task-definition --region ${AWS_REGION} --cli-input-json file://new-task-definition.json --query 'taskDefinition.revision' --output text > revision.txt
+                    echo "New revision: ${TASK_FAMILY}:$(cat revision.txt)"
+                '''
+            }
+        }
+
+        stage('Update ECS service') {
+            steps {
+                sh '''
+                    NEW_REVISION=$(cat revision.txt)
+                    aws ecs update-service --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --task-definition ${TASK_FAMILY}:${NEW_REVISION} --force-new-deployment --query 'service.deployments[0].{status:status,taskDefinition:taskDefinition}'
+                '''
+            }
+        }
+
+        stage('Wait for service stable') {
+            steps {
+                // Chờ rolling update hoàn tất: task mới healthy, task cũ đã dừng
+                sh 'aws ecs wait services-stable --region ${AWS_REGION} --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE}'
+                echo "Deploy ${params.IMAGE_TAG} thành công!"
+            }
+        }
+    }
+}

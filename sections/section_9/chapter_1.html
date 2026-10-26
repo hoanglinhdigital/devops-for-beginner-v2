@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu AWS Developer Tools: CodeCommit, CodeBuild, CodeDeploy, CodePipeline – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu AWS Developer Tools</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu của section</h2>
+  <ul class="feature-list">
+    <li>Hiểu vai trò của các dịch vụ <strong>CodeCommit, CodeBuild, CodeDeploy, CodePipeline</strong> trong một luồng CI/CD trên AWS.</li>
+    <li>Sử dụng <strong>CodeBuild</strong> để build các loại project phổ biến: Java (Maven), Node.js (Webpack), Docker image.</li>
+    <li>Kết hợp các dịch vụ trong <strong>CodePipeline</strong> để deploy tự động lên <strong>Elastic Beanstalk</strong> và <strong>Amazon ECS</strong>.</li>
+    <li>Tìm hiểu &amp; thực hành các chiến lược deployment: <strong>Rolling update, Blue/Green, Canary</strong> với CodeDeploy.</li>
+    <li>Thêm bước <strong>Manual approval</strong> và <strong>notification</strong> vào pipeline – mô phỏng quy trình release thực tế.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Ở Section 3 bạn đã biết CI/CD là một chuỗi các bước tự động: <em>lấy source code → build → test → deploy</em>.
+    Có nhiều công cụ để hiện thực hoá chuỗi này (Jenkins, GitHub Actions, GitLab CI...). Trên AWS, nhóm dịch vụ
+    <strong>AWS Developer Tools</strong> cung cấp sẵn từng mảnh ghép dưới dạng <strong>managed service</strong> – bạn không cần cài đặt, vá lỗi hay scale server CI/CD,
+    chỉ cần cấu hình và trả tiền theo mức sử dụng. Bốn dịch vụ cốt lõi là <strong>CodeCommit</strong> (lưu source code), <strong>CodeBuild</strong> (build &amp; test),
+    <strong>CodeDeploy</strong> (deploy) và <strong>CodePipeline</strong> (điều phối toàn bộ luồng).
+  </p>
+
+  <h2 class="section-heading">Các dịch vụ chính</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4><img src="../../assets/aws-svg/CodeCommit.svg" alt="" class="table-icon" /> AWS CodeCommit</h4>
+      <p>Dịch vụ Git repository được AWS quản lý: lưu trữ source code, cấu hình, tài liệu trong kho Git riêng tư; mã hoá dữ liệu at-rest &amp; in-transit; phân quyền bằng IAM; tích hợp trực tiếp với CodeBuild, CodePipeline.</p>
+    </div>
+    <div class="usecase-card">
+      <h4><img src="../../assets/aws-svg/CodeBuild.svg" alt="" class="table-icon" /> AWS CodeBuild</h4>
+      <p>Dịch vụ build &amp; test: biên dịch source code, chạy unit test, tạo ra artifact (file <code>.jar</code>, file tĩnh, Docker image) dựa trên file cấu hình <code>buildspec.yml</code>. Mỗi lần build chạy trong một container sạch, tự scale, trả tiền theo phút build.</p>
+    </div>
+    <div class="usecase-card">
+      <h4><img src="../../assets/aws-svg/CodeDeploy.svg" alt="" class="table-icon" /> AWS CodeDeploy</h4>
+      <p>Dịch vụ deploy tự động lên <strong>EC2 / On-premises, AWS Lambda, Amazon ECS</strong>. Hỗ trợ các chiến lược In-place, Blue/Green, Canary, Linear; tự động rollback khi deploy lỗi hoặc khi CloudWatch Alarm kích hoạt.</p>
+    </div>
+    <div class="usecase-card">
+      <h4><img src="../../assets/aws-svg/CodePipeline.svg" alt="" class="table-icon" /> AWS CodePipeline</h4>
+      <p>Dịch vụ điều phối (orchestration) luồng CI/CD: định nghĩa các <strong>stage</strong> (Source → Build → Approval → Deploy), tự động chạy mỗi khi có commit mới, truyền artifact giữa các stage và tích hợp được cả công cụ bên thứ ba (GitHub, Jenkins...).</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Đặc điểm chung</h2>
+  <ul class="feature-list">
+    <li><strong>Fully managed:</strong> không có server CI/CD để cài đặt, vá lỗi, backup – khác với việc tự dựng Jenkins trên EC2.</li>
+    <li><strong>Pay-as-you-go:</strong> CodeBuild tính theo phút build, CodePipeline V2 tính theo phút chạy action, CodeDeploy miễn phí khi deploy lên EC2/Lambda/ECS.</li>
+    <li><strong>Bảo mật với IAM:</strong> mỗi dịch vụ chạy bằng một <strong>service role</strong>, không cần lưu access key trong pipeline.</li>
+    <li><strong>Tích hợp sâu với AWS:</strong> S3 (artifact), ECR (image), Elastic Beanstalk, ECS, Lambda, CloudWatch Logs, SNS, Secrets Manager.</li>
+    <li><strong>Kết hợp linh hoạt:</strong> có thể dùng riêng lẻ (chỉ CodeBuild) hoặc ghép với GitHub, Bitbucket, GitLab qua <strong>AWS CodeConnections</strong>.</li>
+    <li><strong>Hỗ trợ chiến lược deployment nâng cao:</strong> Blue/Green, Canary, Linear kèm tự động rollback – khó tự làm nếu chỉ dùng script.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <p class="body-text">Một pipeline điển hình mà bạn sẽ xây dựng dần trong section này:</p>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>Developer</b><br/>git push"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>(hoặc CodeCommit)"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:26px;height:26px;'/> CodePipeline"]
+              direction LR
+              S1["① Source"] --> S2["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:34px;height:34px;'/><br/>② Build<br/>CodeBuild"]
+              S2 --> S3A["✋ ③ Approval<br/>(tuỳ chọn)"]
+              S3A --> S4["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:34px;height:34px;'/><br/>④ Deploy<br/>CodeDeploy / ECS / Beanstalk"]
+          end
+          S3B["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>S3 Artifact Bucket"]
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR"]
+          Target["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:36px;height:36px;'/> <img src='../../assets/aws-svg/Elastic-Beanstalk.svg' style='width:36px;height:36px;'/><br/>ECS · Elastic Beanstalk"]
+      end
+      Dev --> GH
+      GH -->|"trigger (webhook)"| S1
+      S2 -.->|"push image"| ECR
+      CP <-.->|"lưu / lấy artifact"| S3B
+      S4 --> Target
+  </div>
+  <p class="arch-caption">CodePipeline điều phối, CodeBuild build, CodeDeploy (hoặc action deploy có sẵn) triển khai. Artifact giữa các stage được lưu trên S3.</p>
+
+  <h3 class="section-subheading">Mapping giai đoạn CI/CD ↔ dịch vụ AWS</h3>
+  <table class="compare-table">
+    <thead><tr><th>Giai đoạn</th><th>Dịch vụ AWS</th><th>Công cụ tương đương bạn có thể đã biết</th></tr></thead>
+    <tbody>
+      <tr><td>Source code</td><td>CodeCommit (hoặc GitHub qua CodeConnections)</td><td>GitHub, GitLab, Bitbucket</td></tr>
+      <tr><td>Build &amp; Test</td><td>CodeBuild</td><td>Jenkins job, GitHub Actions runner</td></tr>
+      <tr><td>Lưu artifact</td><td>S3, ECR, CodeArtifact</td><td>Nexus, Artifactory, Docker Hub</td></tr>
+      <tr><td>Deploy</td><td>CodeDeploy, action deploy của CodePipeline</td><td>Ansible, script SSH, Argo CD</td></tr>
+      <tr><td>Điều phối pipeline</td><td>CodePipeline</td><td>Jenkins Pipeline, GitHub Actions workflow</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off: AWS Developer Tools vs Jenkins / GitHub Actions</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>AWS CodePipeline + CodeBuild</th><th>Jenkins (tự host)</th><th>GitHub Actions</th></tr></thead>
+    <tbody>
+      <tr><td>Vận hành</td><td>Không cần quản lý server</td><td>Tự cài đặt, vá lỗi, backup, scale</td><td>Không cần quản lý (GitHub-hosted runner)</td></tr>
+      <tr><td>Tích hợp AWS</td><td>Rất tốt, dùng IAM role trực tiếp</td><td>Cần plugin, credential</td><td>Tốt (OIDC + IAM role)</td></tr>
+      <tr><td>Hệ sinh thái plugin</td><td>Hạn chế hơn</td><td>Rất lớn</td><td>Marketplace lớn</td></tr>
+      <tr><td>Multi-cloud / on-prem</td><td>Chủ yếu cho AWS</td><td>Linh hoạt</td><td>Linh hoạt</td></tr>
+      <tr><td>Chi phí</td><td>Theo phút build / phút action</td><td>Chi phí EC2 chạy 24/7 + công vận hành</td><td>Theo phút runner (có free quota)</td></tr>
+    </tbody>
+  </table>
+  <ul class="feature-list">
+    <li><strong>Nên dùng</strong> khi hệ thống chạy chủ yếu trên AWS, team muốn giảm công vận hành CI/CD, cần Blue/Green/Canary cho ECS, Lambda.</li>
+    <li><strong>Cân nhắc</strong> khi hệ thống multi-cloud/on-premise, cần nhiều plugin đặc thù, hoặc team đã chuẩn hoá trên Jenkins/GitHub Actions – khi đó vẫn có thể dùng riêng CodeDeploy hoặc CodeBuild.</li>
+  </ul>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Startup chạy 100% trên AWS</h4>
+      <p>Team nhỏ, không có người chuyên vận hành Jenkins: dùng GitHub + CodePipeline + CodeBuild để mỗi lần merge vào <code>main</code> là tự động build Docker image và deploy lên ECS Fargate.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Release an toàn cho hệ thống production</h4>
+      <p>Doanh nghiệp cần deploy không downtime, có bước phê duyệt của Team Lead: CodePipeline với stage Manual approval + CodeDeploy Blue/Green, rollback tự động khi lỗi.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Kết hợp với công cụ sẵn có</h4>
+      <p>Team đã dùng GitHub Actions cho CI nhưng muốn deploy canary cho Lambda/ECS: gọi CodeDeploy từ workflow, tận dụng traffic shifting và rollback theo CloudWatch Alarm.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Lộ trình các bài lab trong section</h2>
+  <div class="mermaid">
+  flowchart LR
+      L1["🧪 <b>Lab 1</b><br/>Fork repo · GitHub connection<br/>S3 bucket"] --> L2["🧪 <b>Lab 2–4</b><br/>CodeBuild<br/>Java · Node.js · Docker"]
+      L2 --> L5["🧪 <b>Lab 5</b><br/>Pipeline → Elastic Beanstalk"]
+      L5 --> L6["🧪 <b>Lab 6</b><br/>Pipeline → ECS<br/>Rolling update"]
+      L6 --> L7["🧪 <b>Lab 7–8</b><br/>CodeDeploy<br/>Blue/Green · Canary"]
+      L7 --> L9["🧪 <b>Lab 9</b><br/>Manual approval<br/>Notification"]
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-warning"><strong>Về CodeCommit:</strong> từ 07/2024 AWS ngừng cho phép tài khoản mới tạo repository CodeCommit; đến 11/2025 AWS thông báo CodeCommit hoạt động trở lại đầy đủ (xem Section 7 – Lab 8).
+    Để mọi học viên đều làm được, các lab trong section này dùng <strong>GitHub</strong> làm source và kết nối với AWS qua <strong>AWS CodeConnections</strong> (tên cũ: CodeStar Connections). Nếu bạn muốn dùng CodeCommit, chỉ cần chọn Source provider là CodeCommit – các bước còn lại không đổi.</div>
+  <ul class="feature-list">
+    <li><strong>Chi phí tham khảo (region Singapore):</strong> CodeBuild tính theo phút build tuỳ loại compute (instance nhỏ nhất vài <em>cent</em>/10 phút); CodePipeline V2 tính theo phút chạy action (có quota miễn phí hằng tháng); CodeDeploy miễn phí khi deploy lên EC2, Lambda, ECS. Luôn kiểm tra trang <em>Pricing</em> chính thức trước khi dùng.</li>
+    <li><strong>Chi phí lớn nhất thường nằm ở resource đích</strong> (ALB, ECS task, EC2 của Elastic Beanstalk), không phải ở bản thân pipeline. Hãy dọn dẹp sau mỗi lab.</li>
+    <li><strong>Region:</strong> tất cả lab dùng <code>ap-southeast-1</code> (Singapore). Pipeline, CodeBuild project, S3 artifact bucket, ECR nên cùng region.</li>
+    <li><strong>Chứng chỉ:</strong> các dịch vụ này xuất hiện nhiều trong đề thi <strong>AWS Developer Associate (DVA)</strong> và <strong>DevOps Engineer Professional (DOP)</strong> – đặc biệt là cấu trúc <code>buildspec.yml</code>, <code>appspec.yml</code> và các deployment configuration.</li>
+  </ul>
+
+</body>
+</html>

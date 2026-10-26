@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giới thiệu Jenkins &amp; CI/CD với Jenkins – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giới thiệu Jenkins &amp; CI/CD với Jenkins</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu của section</h2>
+  <ul class="feature-list">
+    <li>Hiểu <strong>Jenkins là gì</strong>, kiến trúc và các thành phần cơ bản: controller, agent, job, plugin, workspace, credential.</li>
+    <li>Tự cài đặt một <strong>Jenkins server trên EC2</strong>, thiết lập các setting &amp; plugin cơ bản.</li>
+    <li>Làm quen với Jenkins qua các bài lab từ dễ đến khó: job Freestyle, biến &amp; credential, Declarative / Scripted Pipeline.</li>
+    <li>Tạo các job <strong>Build/Deploy</strong> cho từng loại project: Java (Maven), Node.js (Webpack), Docker image → S3, ECR, ECS.</li>
+    <li>Kết hợp Jenkins với <strong>GitHub</strong> (Pipeline from SCM, webhook, Git tag) và <strong>Slack</strong> để có một luồng CI/CD hoàn chỉnh.</li>
+  </ul>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Jenkins</strong> là công cụ <strong>mã nguồn mở</strong> (viết bằng Java) dùng để tự động hoá quy trình phát triển phần mềm: build source code,
+    chạy automation test, đóng gói artifact, deploy ứng dụng và thông báo kết quả. Bạn định nghĩa công việc dưới dạng các <strong>job</strong>;
+    Jenkins chạy job khi có người bấm nút, theo lịch hoặc khi có commit mới trên Git.
+    Ở Section 9 bạn đã dùng dịch vụ managed của AWS (CodePipeline, CodeBuild); trong section này bạn sẽ <strong>tự host</strong> một CI/CD server –
+    cách làm vẫn rất phổ biến ở doanh nghiệp, đặc biệt với hệ thống on-premise hoặc multi-cloud.
+  </p>
+
+  <h2 class="section-heading">Tại sao Jenkins được sử dụng nhiều?</h2>
+  <ul class="feature-list">
+    <li><strong>Miễn phí &amp; mã nguồn mở:</strong> không tốn phí license, chỉ trả chi phí server chạy Jenkins.</li>
+    <li><strong>Dễ bắt đầu:</strong> giao diện web thân thiện, tạo và quản lý job ngay trên trình duyệt; nâng cao dần lên Pipeline as Code (<code>Jenkinsfile</code>).</li>
+    <li><strong>Đa nền tảng:</strong> chạy trên Linux, Windows, macOS, Docker, Kubernetes; build được mọi ngôn ngữ (Java, Node.js, Python, Go, .NET...).</li>
+    <li><strong>Hệ sinh thái plugin khổng lồ:</strong> hơn 2.000 plugin tích hợp với Git, GitHub, Docker, AWS, Slack, SonarQube, Nexus...</li>
+    <li><strong>Mở rộng linh hoạt:</strong> mô hình controller – agent cho phép phân tán build ra nhiều máy, chạy song song nhiều job.</li>
+    <li><strong>Cộng đồng lớn:</strong> tài liệu, hướng dẫn, diễn đàn phong phú – gặp lỗi gì gần như đều đã có người gặp trước.</li>
+  </ul>
+
+  <h2 class="section-heading">Các thành phần cơ bản</h2>
+  <table class="compare-table">
+    <thead><tr><th>Thành phần</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Controller</strong> (tên cũ: master)</td><td>Server Jenkins chính: giao diện web, lưu cấu hình job, lịch sử build, điều phối build. Thư mục dữ liệu <code>JENKINS_HOME</code> (<code>/var/lib/jenkins</code>).</td></tr>
+      <tr><td><strong>Agent</strong> (node)</td><td>Máy thực thi build. Bài lab dùng luôn controller làm agent (<code>built-in node</code>); production nên tách agent riêng (EC2, Docker, Kubernetes pod).</td></tr>
+      <tr><td><strong>Executor</strong></td><td>Một "slot" chạy build trên agent – số executor = số build chạy song song tối đa trên agent đó.</td></tr>
+      <tr><td><strong>Job / Project</strong></td><td>Định nghĩa một công việc: lấy code ở đâu, chạy lệnh gì, trigger khi nào. Các loại chính: <strong>Freestyle</strong>, <strong>Pipeline</strong>, <strong>Multibranch Pipeline</strong>.</td></tr>
+      <tr><td><strong>Build</strong></td><td>Một lần chạy của job, đánh số tăng dần (<code>#1, #2...</code>), có log (Console Output) và trạng thái SUCCESS / FAILURE / UNSTABLE / ABORTED.</td></tr>
+      <tr><td><strong>Workspace</strong></td><td>Thư mục làm việc của job trên agent (<code>/var/lib/jenkins/workspace/&lt;job-name&gt;</code>) – nơi checkout code và build.</td></tr>
+      <tr><td><strong>Plugin</strong></td><td>Mở rộng tính năng: Git, Pipeline, Credentials, GitHub, Slack Notification...</td></tr>
+      <tr><td><strong>Credential</strong></td><td>Nơi lưu secret (password, SSH key, token) đã mã hoá; job tham chiếu qua <strong>credential ID</strong>, không ghi secret vào code.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <p class="body-text">Hệ thống bạn sẽ xây dựng dần trong section này – Jenkins server chạy trên EC2, dùng IAM Role để thao tác với AWS:</p>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>Developer</b><br/>Browser :8080 · SSH :22"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>source code · Jenkinsfile"]
+      Slack["<img src='../../assets/aws-svg/slack.svg' style='width:36px;height:36px;'/><br/><b>Slack</b><br/>notification"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> EC2 Ubuntu – jenkins-server"]
+              direction TB
+              J["<img src='../../assets/svg-icon/jenkins-logo.png' style='width:44px;height:44px;'/><br/><b>Jenkins</b><br/>controller + built-in agent"]
+              Tools["🧰 Java · Maven · Node.js<br/>Docker · AWS CLI · jq"]
+              J --- Tools
+          end
+          IAM["<img src='../../assets/aws-svg/IAM.svg' style='width:34px;height:34px;'/><br/>IAM Role<br/>jenkins-server-role"]
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>S3<br/>artifact · static web"]
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR"]
+          ECS["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:36px;height:36px;'/><br/>ECS Fargate<br/>sau ALB"]
+      end
+      Dev --> J
+      GH -->|"checkout / webhook"| J
+      IAM -.->|"credential tạm thời"| EC2
+      J -->|"upload"| S3
+      J -->|"docker push"| ECR
+      J -->|"update service"| ECS
+      ECR -.->|"pull image"| ECS
+      J -->|"kết quả job"| Slack
+  </div>
+  <p class="arch-caption">Jenkins lấy code từ GitHub, dùng các tool cài sẵn trên server để build, sau đó đẩy artifact lên S3/ECR và deploy lên ECS.</p>
+
+  <h3 class="section-subheading">Một job CI/CD điển hình</h3>
+  <div class="mermaid">
+  flowchart LR
+      T["⚡ Trigger<br/>bấm tay · cron · webhook"] --> C["📥 Checkout<br/>source code"]
+      C --> B["🔨 Build<br/>mvn · npm · docker build"]
+      B --> TS["🧪 Test<br/>unit test"]
+      TS --> P["📦 Push artifact<br/>S3 · ECR · Nexus"]
+      P --> D["🚀 Deploy<br/>EC2 · Beanstalk · ECS · S3"]
+      D --> N["🔔 Notify<br/>Slack · Email"]
+  </div>
+
+  <h2 class="section-heading">Trade-off: Jenkins vs AWS CodePipeline vs GitHub Actions</h2>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Jenkins (tự host)</th><th>AWS CodePipeline + CodeBuild</th><th>GitHub Actions</th></tr></thead>
+    <tbody>
+      <tr><td>Vận hành</td><td>Tự cài đặt, nâng cấp, vá lỗi, backup, scale</td><td>Fully managed</td><td>Fully managed (GitHub-hosted runner)</td></tr>
+      <tr><td>Chi phí</td><td>Miễn phí license, trả tiền server chạy 24/7 + công vận hành</td><td>Theo phút build / phút action</td><td>Theo phút runner, có free quota</td></tr>
+      <tr><td>Tuỳ biến &amp; plugin</td><td>Rất cao, hơn 2.000 plugin</td><td>Hạn chế hơn</td><td>Marketplace lớn</td></tr>
+      <tr><td>Multi-cloud / on-premise</td><td>Rất linh hoạt, chạy được trong mạng nội bộ</td><td>Chủ yếu cho AWS</td><td>Linh hoạt (self-hosted runner)</td></tr>
+      <tr><td>Bảo mật</td><td>Tự chịu trách nhiệm: plugin cũ, lộ port, credential</td><td>IAM role, AWS quản lý hạ tầng</td><td>OIDC + IAM role, GitHub quản lý hạ tầng</td></tr>
+    </tbody>
+  </table>
+  <ul class="feature-list">
+    <li><strong>Nên dùng Jenkins</strong> khi cần chạy CI/CD trong mạng nội bộ / on-premise, multi-cloud, cần plugin đặc thù hoặc doanh nghiệp đã có sẵn hệ thống Jenkins.</li>
+    <li><strong>Cân nhắc</strong> khi team nhỏ, không có người vận hành server CI/CD – managed service (CodePipeline, GitHub Actions) thường rẻ và an toàn hơn về tổng thể.</li>
+    <li>Dù dùng công cụ nào, <strong>khái niệm CI/CD là như nhau</strong> (Section 3): checkout → build → test → push artifact → deploy. Học Jenkins giúp bạn hiểu rõ từng bước "bên dưới" mà dịch vụ managed đã che đi.</li>
+  </ul>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Doanh nghiệp có hệ thống on-premise</h4>
+      <p>Ngân hàng, công ty tài chính không cho source code ra Internet: Jenkins đặt trong mạng nội bộ, build và deploy lên server on-premise lẫn AWS qua VPN/Direct Connect.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Dự án nhiều loại ứng dụng</h4>
+      <p>Một Jenkins phục vụ nhiều team: backend Java build ra <code>.jar</code>, frontend Vue build ra file tĩnh lên S3, microservice build Docker image lên ECR rồi deploy ECS.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Quy trình release theo nhánh &amp; tag</h4>
+      <p>Merge vào <code>develop</code> → tự động deploy môi trường Dev; tạo tag <code>v1.2.0</code> trên <code>master</code> → Team Lead bấm job release lên Production, kết quả báo về Slack.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Lộ trình các bài lab trong section</h2>
+  <div class="mermaid">
+  flowchart LR
+      L1["🧪 <b>Lab 1–3</b><br/>Cài Jenkins · Freestyle job<br/>Variable · Credential"] --> T["📘 <b>Pipeline</b><br/>Jenkinsfile"]
+      T --> L4["🧪 <b>Lab 4–6</b><br/>Build Java · Node.js<br/>Docker → S3 · ECR"]
+      L4 --> L7["🧪 <b>Lab 7</b><br/>Deploy ECS<br/>(Terraform stack)"]
+      L7 --> L8["🧪 <b>Lab 8–10</b><br/>Pipeline from SCM<br/>Webhook · Release by tag"]
+      L8 --> L11["🧪 <b>Lab 11–12</b><br/>Scripted Pipeline<br/>Slack notification"]
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Phiên bản:</strong> luôn dùng bản <strong>LTS</strong> (Long-Term Support, phát hành mỗi ~12 tuần) cho môi trường thật; bản <em>Weekly</em> có tính năng mới nhưng kém ổn định hơn. Jenkins LTS hiện tại yêu cầu <strong>Java 17 hoặc 21</strong> – bài lab dùng Java 21.</li>
+    <li><strong>Cấu hình server tối thiểu:</strong> 2 vCPU, 4 GiB RAM, 30 GiB ổ đĩa cho lab có build Docker (<code>t3.medium</code>). Server quá nhỏ (<code>t3.micro</code>) dễ bị treo khi chạy <code>npm install</code>, <code>mvn</code> hoặc <code>docker build</code>.</li>
+    <li><strong>Chi phí:</strong> Jenkins miễn phí nhưng EC2 + Public IPv4 tính phí theo giờ. Hãy <strong>Stop instance</strong> khi không học, chỉ start lại khi làm lab (EBS volume vẫn giữ nguyên dữ liệu Jenkins).</li>
+    <li><strong>Bảo mật:</strong> không mở port 8080 cho <code>0.0.0.0/0</code> lâu dài, luôn cập nhật plugin, dùng IAM Role thay vì access key, lưu secret trong Jenkins Credentials.</li>
+    <li><strong>Lưu ý chứng chỉ:</strong> đề thi AWS (DVA, DOP) không hỏi sâu về Jenkins, nhưng có thể xuất hiện các tình huống "tích hợp Jenkins với CodePipeline/CodeBuild" hoặc "chuyển từ Jenkins sang dịch vụ managed".</li>
+  </ul>
+
+</body>
+</html>

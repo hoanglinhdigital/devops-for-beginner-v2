@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canary deployment (&amp; Linear) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">11. Chiến lược deployment</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Canary deployment (&amp; Linear)</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Canary deployment</strong> release version mới cho <strong>một lượng nhỏ</strong> người dùng/server trước (ví dụ 10%).
+    Nếu sau khoảng thời gian quy định không phát hiện vấn đề gì, version mới mới được release cho toàn bộ phần còn lại.
+    Tên gọi bắt nguồn từ việc thợ mỏ mang chim hoàng yến (canary) xuống hầm để phát hiện khí độc sớm – nhóm người dùng nhỏ chính là “chú chim” giúp
+    phát hiện lỗi trước khi ảnh hưởng tới tất cả. <strong>Linear</strong> là biến thể tăng traffic theo các nấc đều nhau (vd thêm 10% mỗi phút).
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Chia traffic theo trọng số:</strong> vd 90% version cũ (stable) – 10% version mới (canary); tăng dần 25% → 50% → 100%.</li>
+    <li><strong>Phát hiện sớm vấn đề:</strong> lỗi chỉ ảnh hưởng nhóm nhỏ người dùng (blast radius nhỏ) trong khi phần lớn vẫn dùng version ổn định.</li>
+    <li><strong>Kiểm thử bằng traffic thật:</strong> phát hiện lỗi mà môi trường test khó tái hiện (dữ liệu thật, hành vi người dùng thật, tải thật).</li>
+    <li><strong>Phụ thuộc monitoring:</strong> phải so sánh được tỷ lệ lỗi, độ trễ của canary với stable – không có monitoring thì canary vô nghĩa.</li>
+    <li><strong>Rollback nhanh:</strong> đưa trọng số canary về 0% – người dùng lập tức quay lại version cũ.</li>
+    <li><strong>Nên tự động hoá:</strong> các bước tăng trọng số, chờ, kiểm tra alarm, rollback nên do công cụ (CodeDeploy, ECS, pipeline) thực hiện.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h3 class="section-subheading">Phương án thường dùng: ALB weighted target group</h3>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>End-users"]
+      L80["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>ALB listener :80<br/>weighted forward"]
+      subgraph Stable["🟦 Stable · v2.1.0"]
+          S1["Task"]
+          S2["Task"]
+      end
+      subgraph Canary["🐤 Canary · v2.2.0"]
+          C1["Task"]
+          C2["Task"]
+      end
+      CW["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:34px;height:34px;'/><br/>CloudWatch<br/>5xx · latency<br/>theo Target Group"]
+      User --> L80
+      L80 -->|"90%"| Stable
+      L80 -->|"10%"| Canary
+      Canary -.-> CW
+      Stable -.-> CW
+  </div>
+  <p class="arch-caption">Một listener forward tới tối đa 5 Target Group với trọng số 0 – 999. Đây chính là cách Lab 5 và CodeDeploy (Section 9 – Lab 8) chia traffic.</p>
+
+  <h3 class="section-subheading">Phương án khác: Route 53 weighted routing</h3>
+  <div class="mermaid">
+  flowchart LR
+      Client["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Client"]
+      R53["<img src='../../assets/aws-svg/Route-53.svg' style='width:36px;height:36px;'/><br/>Route 53<br/>app.example.com<br/>weighted records"]
+      LB1["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:32px;height:32px;'/><br/>ALB stack v1"]
+      LB2["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:32px;height:32px;'/><br/>ALB stack v2"]
+      Client -->|"DNS query"| R53
+      R53 -->|"weight 90"| LB1
+      R53 -->|"weight 10"| LB2
+  </div>
+  <p class="arch-caption">Phù hợp khi 2 version ở 2 stack/2 Load Balancer/2 region khác nhau. Tỷ lệ thực tế không chính xác vì client cache kết quả DNS theo TTL.</p>
+
+  <h3 class="section-subheading">Canary vs Linear</h3>
+  <table class="compare-table">
+    <thead><tr><th>Thời điểm</th><th>Canary 10% / 5 phút</th><th>Linear 10% mỗi phút</th></tr></thead>
+    <tbody>
+      <tr><td>Phút 0</td><td>10% version mới</td><td>10%</td></tr>
+      <tr><td>Phút 1 → 4</td><td>10% (chờ &amp; theo dõi)</td><td>20% → 50%</td></tr>
+      <tr><td>Phút 5</td><td>100%</td><td>60%</td></tr>
+      <tr><td>Phút 9</td><td>100%</td><td>100%</td></tr>
+      <tr><td>Config CodeDeploy tương ứng</td><td><code>ECSCanary10Percent5Minutes</code>, <code>LambdaCanary10Percent5Minutes</code></td><td><code>ECSLinear10PercentEvery1Minutes</code>, <code>LambdaLinear10PercentEvery1Minute</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Giảm thiểu rủi ro, phát hiện sớm vấn đề với traffic thật.</li>
+        <li>Rollback nhanh – chỉ cần đưa trọng số về 0.</li>
+        <li>Linh hoạt kiểm soát tỷ lệ release version mới (theo %, theo nhóm người dùng, theo region).</li>
+        <li>Không downtime.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Cần cơ chế monitoring để phát hiện kịp thời (metric riêng cho từng version).</li>
+        <li>Cần automation cho các tác vụ deploy, tăng trọng số, rollback.</li>
+        <li>Cần nhiều tool hỗ trợ nếu không dùng dịch vụ cloud (service mesh, feature flag...).</li>
+        <li>Thách thức lớn với thay đổi DB schema và tương thích API vì 2 version cùng chạy trong thời gian dài.</li>
+      </ul>
+    </div>
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Tình huống</th><th>Blue/Green</th><th>Canary</th></tr></thead>
+    <tbody>
+      <tr><td>Muốn QA kiểm thử kỹ trước khi người dùng thấy</td><td>✅ Test listener</td><td>Có thể kết hợp (test trước, canary sau)</td></tr>
+      <tr><td>Muốn kiểm tra với traffic thật nhưng ít người bị ảnh hưởng</td><td>❌ Switch 100% một lần</td><td>✅</td></tr>
+      <tr><td>Chưa có monitoring/alarm tốt</td><td>✅ Dễ áp dụng hơn</td><td>⚠️ Không nên</td></tr>
+      <tr><td>Thay đổi không tương thích ngược giữa 2 version</td><td>⚠️ Khó</td><td>❌ Rất khó</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Mạng xã hội / ứng dụng lớn</h4>
+      <p>Tính năng news feed mới: 1% → 5% → 25% → 100% trong 1 ngày, mỗi nấc so sánh crash rate, thời gian phản hồi, tương tác người dùng.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>API thanh toán</h4>
+      <p>Thay đổi tích hợp cổng thanh toán: canary 10% trong 30 phút với CloudWatch Alarm trên tỷ lệ 5xx – alarm kích hoạt thì CodeDeploy tự rollback.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Lambda function</h4>
+      <p>Lambda alias <code>live</code> trỏ 90% version 5, 10% version 6 (alias routing) – SAM/CodeDeploy tự chuyển dần (Section SAM).</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Sticky session:</strong> mặc định mỗi request được chia ngẫu nhiên theo trọng số – một người dùng có thể thấy lúc v1 lúc v2. Bật <em>target group stickiness</em> trên forward action (1 giây – 7 ngày) để người dùng ở lại một version.</li>
+    <li><strong>Metric theo Target Group:</strong> ALB cung cấp <code>RequestCount</code>, <code>HTTPCode_Target_5XX_Count</code>, <code>TargetResponseTime</code> theo từng Target Group – so sánh trực tiếp stable và canary.</li>
+    <li><strong>Hỗ trợ trên AWS:</strong> CodeDeploy (ECS, Lambda), ECS native Canary/Linear (2025), API Gateway canary release (stage), CloudFront continuous deployment (staging distribution), App Mesh/VPC Lattice weighted routing.</li>
+    <li><strong>Feature flag</strong> (vd AWS AppConfig): một cách “canary” ở tầng code – deploy code cho tất cả nhưng chỉ bật tính năng cho một nhóm người dùng.</li>
+    <li><strong>Chi phí:</strong> với ALB weighted, cả 2 môi trường chạy song song trong suốt quá trình canary – nên đặt thời gian theo dõi hợp lý và dọn môi trường cũ sau khi promote 100%.</li>
+  </ul>
+
+</body>
+</html>

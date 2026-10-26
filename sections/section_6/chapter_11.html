@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 8: Lập lịch tác vụ với Cron job – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 8: Lập lịch tác vụ với Cron job</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu <strong>cron job</strong> là gì và cú pháp 5 trường thời gian của cron.</li>
+    <li>Cài đặt và chạy service <code>crond</code> trên Amazon Linux 2023.</li>
+    <li>Tạo script ghi log ra file và lập lịch chạy mỗi phút bằng <code>crontab -e</code> (crontab của user).</li>
+    <li>Cấu hình cron job trong <code>/etc/crontab</code> (crontab hệ thống, có chỉ định user).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b>"]
+      subgraph EC2["🖥️ EC2 · linux-lab-server"]
+          direction LR
+          CROND["⏰ <b>crond</b><br/>kiểm tra lịch mỗi phút"]
+          TAB["📜 crontab<br/>* * * * * script.sh"]
+          SCRIPT["📄 <b>script.sh</b>"]
+          LOG["🗒️ log.txt"]
+          TAB --> CROND
+          CROND -->|"đến giờ → chạy"| SCRIPT
+          SCRIPT -->|"&gt;&gt; append"| LOG
+      end
+      PC -->|"SSH :22"| EC2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Instance <code>linux-lab-server</code> đang Running, SSH được bằng <code>ec2-user</code>.</li>
+    <li>Biết dùng Vim (Lab 2), hiểu quyền execute (Lab 4) và quản lý service (Lab 6).</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab8_cronjob/</code> gồm <code>script.sh</code>, <code>commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tìm hiểu cú pháp cron</strong>
+        <p>Cron job là công cụ lên lịch thực thi tác vụ tự động vào thời điểm cụ thể (backup database lúc 2h sáng, dọn log mỗi Chủ nhật...). Mỗi dòng cron gồm 5 trường thời gian + lệnh:</p>
+        <pre class="code-block"><code class="language-bash"># .---------------- minute (0 - 59)
+# |  .------------- hour (0 - 23)
+# |  |  .---------- day of month (1 - 31)
+# |  |  |  .------- month (1 - 12) OR jan,feb,mar,apr ...
+# |  |  |  |  .---- day of week (0 - 6) (Sunday=0 or 7) OR sun,mon,tue,wed,thu,fri,sat
+# |  |  |  |  |
+# *  *  *  *  * [user-name]  command to be executed</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Biểu thức</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>* * * * *</code></td><td>Chạy mỗi phút</td></tr>
+            <tr><td><code>*/30 * * * *</code></td><td>Chạy mỗi 30 phút</td></tr>
+            <tr><td><code>30 1 * * 6</code></td><td>1:30 sáng mỗi thứ Bảy</td></tr>
+            <tr><td><code>0 2 * * *</code></td><td>2:00 sáng hằng ngày (ví dụ backup)</td></tr>
+            <tr><td><code>0 9 1 * *</code></td><td>9:00 sáng ngày 1 hằng tháng</td></tr>
+            <tr><td><code>0 8-17 * * 1-5</code></td><td>Mỗi giờ đúng từ 8h đến 17h, thứ Hai đến thứ Sáu</td></tr>
+          </tbody>
+        </table>
+        <p class="code-note">💡 Thời gian cron theo timezone của server (EC2 mặc định là <strong>UTC</strong>, chậm hơn giờ Việt Nam 7 tiếng). Dùng <a href="https://crontab.guru" target="_blank" rel="noopener">crontab.guru</a> để kiểm tra biểu thức cron.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cài đặt cron</strong>
+        <p>Amazon Linux 2023 <strong>không cài sẵn cron</strong> (AWS khuyến nghị systemd timer). Cài package <code>cronie</code> và khởi động service <code>crond</code>:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo dnf install -y cronie
+sudo systemctl enable --now crond
+systemctl status crond</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo script</strong>
+        <p>Tạo file và copy nội dung file <code>script.sh</code> trong source code:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">vim /home/ec2-user/script.sh</code></pre>
+        <p class="code-note">📄 <code>lab8_cronjob/script.sh</code></p>
+        <pre class="code-block"><code class="language-bash">#!/bin/bash
+# Script đơn giản ghi log ra file, được cron gọi mỗi phút
+LOG_FILE=/home/ec2-user/log.txt
+
+echo "Hello from Cronjob!!! - $(date '+%Y-%m-%d %H:%M:%S') - user: $(whoami)" &gt;&gt; "$LOG_FILE"</code></pre>
+        <p>Cấp quyền execute và chạy thử bằng tay trước khi giao cho cron:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">chmod 755 /home/ec2-user/script.sh
+/home/ec2-user/script.sh
+cat /home/ec2-user/log.txt</code></pre>
+        <p>Script dùng <strong>đường dẫn tuyệt đối</strong> cho file log vì cron không chạy trong thư mục home như khi bạn gõ lệnh.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cách 1 – crontab của user (crontab -e)</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2"><code class="language-bash">crontab -l
+no crontab for ec2-user
+crontab -e</code></pre>
+        <p>Trình soạn thảo Vim mở ra. Nhấn <code>i</code>, thêm dòng sau (crontab của user <strong>không có</strong> cột user), <code>Esc</code> → <code>:wq</code>:</p>
+        <pre class="code-block"><code class="language-bash">* * * * * /home/ec2-user/script.sh</code></pre>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">crontab -l</code></pre>
+        <p>Đợi 2–3 phút rồi kiểm tra file log có thêm một dòng mỗi phút. <code>tail -f</code> theo dõi liên tục, nhấn <strong>Ctrl + C</strong> để thoát:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">cat /home/ec2-user/log.txt
+tail -f /home/ec2-user/log.txt</code></pre>
+        <p>Xem log của cron daemon (AL2023 ghi log vào journald, không có file <code>/var/log/cron</code>):</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo journalctl -u crond --since "10 minutes ago" --no-pager</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Cách 2 – crontab hệ thống (/etc/crontab)</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">cat /etc/crontab
+sudo vim /etc/crontab</code></pre>
+        <p>Thêm dòng sau vào cuối file (crontab hệ thống <strong>bắt buộc có</strong> cột user), chạy mỗi 2 phút với quyền <code>ec2-user</code>:</p>
+        <pre class="code-block"><code class="language-bash">*/2 * * * * ec2-user /home/ec2-user/script.sh</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Đặc điểm</th><th><code>crontab -e</code></th><th><code>/etc/crontab</code>, <code>/etc/cron.d/</code></th></tr></thead>
+          <tbody>
+            <tr><td>Phạm vi</td><td>Riêng từng user (lưu ở <code>/var/spool/cron/&lt;user&gt;</code>)</td><td>Toàn hệ thống</td></tr>
+            <tr><td>Cột user</td><td>Không có</td><td>Bắt buộc có</td></tr>
+            <tr><td>Quyền sửa</td><td>User tự sửa của mình</td><td>Cần <code>sudo</code></td></tr>
+            <tr><td>Xem danh sách</td><td><code>crontab -l</code>, <code>sudo crontab -l -u &lt;user&gt;</code></td><td><code>cat /etc/crontab</code>, <code>ls /etc/cron.d/</code></td></tr>
+          </tbody>
+        </table>
+        <p>Không cần restart <code>crond</code> — cron tự phát hiện thay đổi. Sau vài phút, log sẽ có các dòng từ cả 2 cron job.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>systemctl is-active crond</code> trả về <code>active</code>.</li>
+      <li><code>crontab -l</code> hiển thị dòng <code>* * * * * /home/ec2-user/script.sh</code>.</li>
+      <li>File <code>/home/ec2-user/log.txt</code> có thêm dòng <code>Hello from Cronjob!!!</code> mỗi phút, với <code>user: ec2-user</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>-bash: crontab: command not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Amazon Linux 2023 chưa cài cron.<br/><strong>Giải pháp:</strong> <code>sudo dnf install -y cronie</code> và <code>sudo systemctl enable --now crond</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Cron job không chạy, file log không có dòng mới</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Script chưa có quyền execute, service <code>crond</code> chưa chạy, hoặc sai cú pháp (thừa/thiếu cột user).<br/><strong>Giải pháp:</strong> Kiểm tra <code>ls -l ~/script.sh</code>, <code>systemctl status crond</code>, <code>sudo journalctl -u crond</code>. Nhớ: <code>crontab -e</code> không có cột user, <code>/etc/crontab</code> phải có.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Script chạy tay được nhưng chạy bằng cron thì lỗi <code>command not found</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Cron chạy với biến môi trường tối giản (<code>PATH</code> ngắn, không đọc <code>.bashrc</code>).<br/><strong>Giải pháp:</strong> Dùng đường dẫn tuyệt đối cho lệnh và file (ví dụ <code>/usr/bin/aws</code>), hoặc khai báo <code>PATH=...</code> ở đầu crontab/script. Ghi thêm lỗi ra file: <code>* * * * * /home/ec2-user/script.sh &gt;&gt; /home/ec2-user/cron-error.log 2&gt;&amp;1</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Cron job chạy sai giờ so với mong muốn</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Server dùng timezone UTC.<br/><strong>Giải pháp:</strong> Quy đổi giờ (giờ Việt Nam = UTC + 7), hoặc đổi timezone server bằng <code>sudo timedatectl set-timezone Asia/Ho_Chi_Minh</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Xoá các cron job để script không chạy mãi, tránh file log phình to. Giữ lại instance cho Lab 9.</div>
+  <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">crontab -r
+crontab -l
+sudo vim /etc/crontab</code></pre>
+  <p class="body-text">Trong <code>/etc/crontab</code>, xoá dòng <code>*/2 * * * * ec2-user /home/ec2-user/script.sh</code> (đưa con trỏ tới dòng đó, gõ <code>dd</code>, sau đó <code>:wq</code>). Cuối cùng xoá script và file log:</p>
+  <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">rm /home/ec2-user/script.sh /home/ec2-user/log.txt</code></pre>
+
+</body>
+</html>

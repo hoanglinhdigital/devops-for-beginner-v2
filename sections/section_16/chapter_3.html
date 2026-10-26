@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Giải pháp Managed Service cho Monitoring EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Giải pháp Managed Service cho Monitoring EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Nếu không muốn tự cài và vận hành Prometheus, Grafana, Elasticsearch... thì AWS cung cấp sẵn các <strong>Managed Service</strong>:
+    bạn chỉ việc <em>gửi dữ liệu vào</em>, AWS lo phần lưu trữ, scale và HA. Điều này giúp đội ngũ tập trung vào ứng dụng thay vì "nuôi" hệ thống giám sát.
+    Ưu điểm lớn nhất là <strong>tích hợp mượt mà với EKS</strong> và các dịch vụ AWS khác, cùng với việc <strong>thanh toán theo mức dùng</strong>.
+  </p>
+
+  <h2 class="section-heading">Phân loại dịch vụ AWS theo mục đích</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Mục đích</th><th>Một số Services thường dùng</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Giám sát cluster/node status</td><td>CloudWatch</td></tr>
+      <tr><td>Thu thập metrics</td><td>CloudWatch</td></tr>
+      <tr><td>Thu thập log</td><td>CloudWatch Agent, Fluent Bit</td></tr>
+      <tr><td>Lưu trữ log</td><td>Amazon OpenSearch, CloudWatch Logs</td></tr>
+      <tr><td>Visualize metrics</td><td>CloudWatch Dashboard, Amazon Managed Grafana</td></tr>
+      <tr><td>Visualize log</td><td>CloudWatch Logs Insights</td></tr>
+      <tr><td>Health check</td><td>Amazon Managed Prometheus + Alertmanager, CloudWatch Alarm, ALB Health Check</td></tr>
+      <tr><td>Service Mesh</td><td>AWS App Mesh</td></tr>
+      <tr><td>Request Tracing</td><td>AWS X-Ray</td></tr>
+      <tr><td>Alert</td><td>CloudWatch Alarm</td></tr>
+      <tr><td>Resource Provisioning</td><td>Cluster Autoscaler</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Bức tranh Observability trên AWS</h2>
+  <p class="body-text">
+    AWS cung cấp một hệ sinh thái observability khép kín gồm 3 nhóm:
+    <strong>native services</strong> (CloudWatch, X-Ray), <strong>managed open source</strong> (Amazon Managed Grafana, Amazon Managed Service for Prometheus), và
+    <strong>third-party solutions</strong> (các SaaS partner bán trên AWS Marketplace). Mọi dữ liệu đều có thể đổ về một chỗ để quan sát.
+  </p>
+  <div class="mermaid">
+  flowchart TB
+      subgraph Collectors["Collectors &amp; SDKs"]
+          CWA["CloudWatch Agent"]
+          ADOT["AWS Distro for OpenTelemetry"]
+          FB["Fluent Bit"]
+          RUM["CloudWatch RUM"]
+          XR["AWS X-Ray"]
+      end
+      subgraph Storage["Lưu trữ / Dịch vụ"]
+          CW["CloudWatch<br/>(Metrics, Logs)"]
+          AMP["Amazon Managed<br/>Prometheus"]
+          OS["Amazon OpenSearch"]
+      end
+      subgraph Visual["Visualize &amp; Alert"]
+          AMG["Amazon Managed Grafana"]
+          CWID["CloudWatch Dashboards<br/>+ Alarms"]
+          CWLI["Logs Insights"]
+          SL["ServiceLens"]
+      end
+      CWA --> CW
+      ADOT --> AMP
+      ADOT --> CW
+      FB --> CW
+      FB --> OS
+      RUM --> CW
+      XR --> CW
+      CW --> CWID
+      CW --> CWLI
+      AMP --> AMG
+      CW --> SL
+      XR --> SL
+      OS --> AMG
+  </div>
+  <p class="arch-caption">Hệ sinh thái observability của AWS: thu thập bằng agent/SDK, lưu trữ ở CloudWatch/AMP/OpenSearch, rồi visualize ở Grafana/CloudWatch.</p>
+
+  <h2 class="section-heading">Amazon Managed Service for Prometheus + Amazon Managed Grafana</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/amp-grafana.png" alt="Amazon Managed Service for Prometheus kết hợp với Amazon Managed Grafana" />
+    <div class="figure-title">Amazon Managed Prometheus (AMP) kết hợp Amazon Managed Grafana</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Amazon Managed Service for Prometheus (AMP):</strong> dịch vụ lưu trữ metrics tương thích Prometheus, bạn không cần tự quản lý server Prometheus. Dữ liệu được gửi tới qua AWS Distro for OpenTelemetry (ADOT) Collector.</li>
+    <li><strong>Amazon Managed Grafana (AMG):</strong> dịch vụ Grafana được quản lý, có thể kết nối trực tiếp với AMP (cũng như CloudWatch, X-Ray, OpenSearch) để vẽ dashboard.</li>
+    <li>Kết hợp AMP + AMG giúp bạn có <strong>trải nghiệm Prometheus/Grafana quen thuộc</strong> mà không phải tự vận hành.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section15/amp-grafana-architecture.png" alt="Kiến trúc AMP + AMG với ADOT Collector" />
+    <div class="figure-title">Kiến trúc điển hình: app → ADOT Collector → AMP → Managed Grafana</div>
+  </div>
+
+  <h2 class="section-heading">AWS CloudWatch — nền tảng giám sát native</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/cloudwatch-stack.png" alt="AWS CloudWatch stack cho container, log và metrics" />
+    <div class="figure-title">AWS CloudWatch stack — giám sát metrics, log và container insights</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>CloudWatch Metrics:</strong> lưu trữ và vẽ đồ thị các chỉ số của EKS (node, pod, container).</li>
+    <li><strong>CloudWatch Logs:</strong> thu thập log từ container qua Fluent Bit/CloudWatch Agent, truy vấn bằng <em>Logs Insights</em>.</li>
+    <li><strong>Container Insights:</strong> tự động thu thập metrics/ log cho EKS, ECS một cách có sẵn (out-of-the-box).</li>
+    <li><strong>CloudWatch Alarms + Dashboards:</strong> cảnh báo khi vượt ngưỡng và dựng dashboard tổng quan.</li>
+  </ul>
+
+  <h2 class="section-heading">AWS X-Ray — Request Tracing</h2>
+  <p class="body-text">
+    <strong>AWS X-Ray</strong> là dịch vụ truy vết (tracing) của AWS. Khi tích hợp X-Ray (qua ADOT Collector hoặc X-Ray SDK), bạn thấy được <strong>hành trình của một request</strong> qua các service
+    trên EKS, kèm service map và độ trễ từng đoạn — tương đương chức năng của Jaeger nhưng là dịch vụ được quản lý.
+  </p>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Không phải cài/vận hành/nâng cấp — AWS lo HA, scale, bảo mật.</li>
+        <li>Tích hợp sâu với EKS, IAM, CloudWatch — ít cấu hình.</li>
+        <li>Thanh toán theo mức dùng, phù hợp bắt đầu nhỏ.</li>
+        <li>Hỗ trợ chuẩn open source (AMP/Grafana) nên ít bị khoá chặt.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Chi phí có thể tăng nhanh khi lượng metrics/log lớn.</li>
+        <li>Ít linh hoạt hơn so với tự cài (bị giới hạn theo tính năng dịch vụ).</li>
+        <li>Chỉ tối ưu khi ở trong hệ sinh thái AWS; dùng multi-cloud sẽ khó đồng bộ.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="body-text">
+    <strong>Khi nào nên dùng:</strong> ứng dụng chạy trên EKS, đội ngũ nhỏ, muốn nhanh gọn và không muốn nuôi hạ tầng giám sát.
+    <strong>Khi nào không nên:</strong> cần giám sát multi-cloud, hoặc khối lượng metrics/log quá lớn khiến chi phí managed service trở nên đắt đỏ.
+  </p>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Giám sát EKS "không phải nghĩ"</h4>
+      <p>Bật Container Insights + CloudWatch Logs là có ngay dashboard và log cho cluster EKS, không cần cài gì phức tạp.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Giữ chuẩn Prometheus mà không tự vận hành</h4>
+      <p>Dùng ADOT Collector gửi metrics vào AMP, vẽ trên Managed Grafana — quen thuộc với team đã dùng Prometheus.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Truy vết request trên microservices</h4>
+      <p>Tích hợp X-Ray để dựng service map và tìm bottleneck giữa các service chạy trên EKS.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Tiết kiệm chi phí:</strong> đặt retention ngắn cho CloudWatch Logs, chỉ giữ metrics chi tiết trong thời gian ngắn, dùng alarm để không phải "ngồi nhìn" dashboard 24/7.
+  </div>
+  <p class="body-text">
+    Tài liệu chính thức: <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Container-Insights.html" target="_blank" rel="noopener">CloudWatch Container Insights</a>,
+    <a href="https://docs.aws.amazon.com/prometheus/latest/userguide/what-is-Amazon-Managed-Service-Prometheus.html" target="_blank" rel="noopener">Amazon Managed Prometheus</a>.
+  </p>
+
+</body>
+</html>

@@ -1,0 +1,72 @@
+// Lab 12 – Gửi notification kết quả job sang Slack channel
+// Job: lab12-slack-notification | Pipeline definition: Pipeline script (dán nội dung file này)
+// This project is parameterized: Boolean parameter SIMULATE_FAILURE (Default: không tick)
+// Yêu cầu: plugin "Slack Notification" đã cấu hình ở Manage Jenkins -> System -> Slack
+def COLOR_MAP = [
+    'SUCCESS' : 'good',
+    'FAILURE' : 'danger',
+    'UNSTABLE': 'warning',
+    'ABORTED' : '#808080',
+]
+
+pipeline {
+    agent any
+
+    environment {
+        // Thay <your-github-username>; credential github-ssh-key đã tạo ở Lab 8
+        GIT_REPO      = 'git@github.com:<your-github-username>/nodejs-random-color.git'
+        AWS_REGION    = 'ap-southeast-1'
+        ECR_REPO      = 'nodejs-random-color'
+        IMAGE_TAG     = "slack-${BUILD_NUMBER}"
+        SLACK_CHANNEL = '#jenkins-notification'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}", credentialsId: 'github-ssh-key'
+            }
+        }
+
+        stage('Unit test') {
+            steps {
+                // Giả lập test thất bại khi tick SIMULATE_FAILURE để kiểm tra notification lỗi
+                sh '''
+                    if [ "${SIMULATE_FAILURE}" = "true" ]; then
+                        echo "Unit test failed: expected 200 but got 500"
+                        exit 1
+                    fi
+                    echo "All tests passed"
+                '''
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker image prune -f'
+            echo 'Build has been finished! Notify to Slack'
+            slackSend channel: "${SLACK_CHANNEL}",
+                color: COLOR_MAP[currentBuild.currentResult],
+                message: "*${currentBuild.currentResult}:* Job `${env.JOB_NAME}` build #${env.BUILD_NUMBER} (image tag `${IMAGE_TAG}`)\nThời gian: ${currentBuild.durationString}\nChi tiết: ${env.BUILD_URL}"
+        }
+    }
+}

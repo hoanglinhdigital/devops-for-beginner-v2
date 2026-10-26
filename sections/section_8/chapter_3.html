@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Cài đặt Docker &amp; Docker Compose, đăng ký Docker Hub – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Cài đặt Docker &amp; Docker Compose, đăng ký Docker Hub</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt <strong>Docker</strong> và <strong>Docker Compose</strong> theo 1 trong 2 cách: Docker Desktop trên máy local (Windows/MacOS) hoặc Docker Engine trên EC2 Amazon Linux 2023.</li>
+    <li>Kiểm tra version và chạy container đầu tiên <code>hello-world</code>.</li>
+    <li>Đăng ký tài khoản <strong>Docker Hub</strong> và đăng nhập bằng Personal Access Token.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Opt1["Cách 1: Máy local"]
+          PC["<img src='../../assets/aws-svg/laptop.svg' style='width:44px;height:44px;'/><br/><b>Docker Desktop</b><br/>Windows / MacOS"]
+      end
+      subgraph Opt2["Cách 2: AWS Cloud"]
+          Dev["<img src='../../assets/aws-svg/laptop.svg' style='width:36px;height:36px;'/><br/>PC Local"]
+          EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:44px;height:44px;'/><br/><b>EC2 Amazon Linux 2023</b><br/>Docker Engine + Compose"]
+          Dev -->|"SSH :22"| EC2
+      end
+      Hub["<img src='../../assets/svg-icon/docker.svg' style='width:44px;height:44px;'/><br/><b>Docker Hub</b>"]
+      PC -->|"pull image"| Hub
+      EC2 -->|"pull image"| Hub
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li><strong>Cách 1 – Windows:</strong> Windows 10/11 64-bit, bật Virtualization trong BIOS, RAM tối thiểu 8 GB (khuyến nghị 16 GB).</li>
+    <li><strong>Cách 1 – MacOS:</strong> MacOS phiên bản được Docker hỗ trợ (3 bản mới nhất), biết máy dùng chip Apple Silicon hay Intel.</li>
+    <li><strong>Cách 2 – EC2:</strong> AWS account, đã biết tạo EC2 và SSH (Section 6 – Lab 1).</li>
+    <li>Source code: <code>sourcecode/section_8_docker_basic_operation/lab1_install_docker/commands.sh</code>.</li>
+  </ul>
+  <div class="alert alert-info">
+    <strong>Vì sao không dùng AWS Cloud9 như phiên bản cũ?</strong> Từ 07/2024, AWS ngừng cho khách hàng mới sử dụng Cloud9. EC2 Amazon Linux 2023 mang lại các ưu điểm tương tự:
+    tương thích native với Linux, không bị chặn bởi rule mạng công ty khi pull package/image, cấu hình linh hoạt và có thể Stop khi không dùng để tiết kiệm chi phí.
+  </div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+
+  <h3 class="section-subheading">Cách 1: Docker Desktop trên Windows / MacOS</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1 (chỉ Windows): Cài đặt WSL 2</strong>
+        <p>Docker Desktop trên Windows chạy Linux container thông qua WSL 2. Mở <strong>PowerShell (Run as Administrator)</strong> và chạy lệnh sau, sau đó khởi động lại máy:</p>
+        <pre class="command-line" data-prompt="PS>"><code class="language-powershell">wsl --install</code></pre>
+        <p>Kiểm tra sau khi khởi động lại:</p>
+        <pre class="command-line" data-prompt="PS>"><code class="language-powershell">wsl --status</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tải và cài đặt Docker Desktop</strong>
+        <ul class="feature-list">
+          <li>Windows: <a href="https://docs.docker.com/desktop/setup/install/windows-install/" target="_blank" rel="noopener">docs.docker.com/desktop/setup/install/windows-install</a> – khi cài, chọn <strong>Use WSL 2 instead of Hyper-V</strong>.</li>
+          <li>MacOS: <a href="https://docs.docker.com/desktop/setup/install/mac-install/" target="_blank" rel="noopener">docs.docker.com/desktop/setup/install/mac-install</a> – chọn đúng bản <strong>Apple Silicon</strong> hoặc <strong>Intel chip</strong>.</li>
+        </ul>
+        <p>Mở Docker Desktop, chấp nhận điều khoản sử dụng và đợi tới khi góc dưới trái hiển thị trạng thái <strong>Engine running</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kiểm tra version</strong>
+        <p>Mở Terminal (MacOS) hoặc PowerShell / Git Bash (Windows):</p>
+        <pre class="command-line" data-prompt="$" data-output="2,4"><code class="language-bash">docker --version
+Docker version 28.x.x, build xxxxxxx
+docker compose version
+Docker Compose version v2.x.x-desktop.1</code></pre>
+        <p class="code-note">💡 Docker Desktop đã bao gồm Docker Engine, Docker CLI, Docker Compose và Buildx. Version cụ thể trên máy bạn có thể mới hơn.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="section-subheading">Cách 2: Docker Engine trên EC2 Amazon Linux 2023</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo Security Group</strong>
+        <p>Tạo Security Group <code>docker-lab-sg</code> trong Default VPC với các inbound rule:</p>
+        <ul class="feature-list">
+          <li>SSH (TCP 22) – Source: <strong>My IP</strong></li>
+          <li>Custom TCP 8080 – Source: <strong>My IP</strong> (truy cập web từ các bài lab)</li>
+          <li>MySQL/Aurora (TCP 3306) – Source: <strong>My IP</strong> (dùng ở Lab 7 để kết nối MySQL Workbench)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo EC2 instance</strong>
+        <p>Tạo EC2 instance với các thông số:</p>
+        <ul class="feature-list">
+          <li>Name: <code>docker-lab-server</code></li>
+          <li>AMI: <strong>Amazon Linux 2023</strong> (64-bit x86)</li>
+          <li>Instance type: <code>t3.small</code> (2 vCPU, 2 GB RAM – đủ để build Node.js và chạy MySQL ở các lab sau)</li>
+          <li>Key pair: tạo mới <code>docker-lab-key</code> (định dạng <code>.pem</code>), lưu vào <code>~/.ssh/</code></li>
+          <li>Network: Default VPC, public subnet, Auto-assign public IP: <strong>Enable</strong></li>
+          <li>Security Group: <code>docker-lab-sg</code></li>
+          <li>EBS Volume: <strong>20 GB gp3</strong> (image Docker chiếm khá nhiều dung lượng)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: SSH vào EC2 và cài Docker Engine</strong>
+        <p>Thay <code>&lt;EC2_PUBLIC_IP&gt;</code> bằng Public IPv4 của instance:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh -i ~/.ssh/docker-lab-key.pem ec2-user@&lt;EC2_PUBLIC_IP&gt;</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo dnf update -y
+sudo dnf install -y docker
+sudo systemctl enable --now docker
+sudo systemctl status docker</code></pre>
+        <p>Trạng thái <code>active (running)</code> nghĩa là Docker daemon đã chạy. Nhấn <code>q</code> để thoát màn hình status.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cho phép ec2-user chạy docker không cần sudo</strong>
+        <p>Thêm <code>ec2-user</code> vào group <code>docker</code> (xem lại Section 6 – User &amp; Group), sau đó thoát SSH và đăng nhập lại để group mới có hiệu lực:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo usermod -aG docker ec2-user
+exit</code></pre>
+        <pre class="command-line" data-prompt="$" data-output="3"><code class="language-bash">ssh -i ~/.ssh/docker-lab-key.pem ec2-user@&lt;EC2_PUBLIC_IP&gt;
+groups
+ec2-user adm wheel systemd-journal docker</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Cài Docker Compose plugin &amp; Buildx plugin</strong>
+        <p>Package <code>docker</code> của Amazon Linux 2023 chưa kèm Compose. Cài Compose V2 dạng CLI plugin (dùng lệnh <code>docker compose</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+docker compose version</code></pre>
+        <p>Cài thêm Buildx để tránh cảnh báo <em>“legacy builder is deprecated”</em> khi chạy <code>docker build</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">BUILDX_VERSION=$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep '"tag_name"' | cut -d '"' -f 4)
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+sudo curl -SL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${ARCH}" -o /usr/local/lib/docker/cli-plugins/docker-buildx
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+docker buildx version</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Cài Git &amp; lấy source code của khoá học</strong>
+        <p>Cài Git để clone source code về EC2 (hoặc copy thư mục <code>section_8_docker_basic_operation</code> lên EC2 bằng <code>scp</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo dnf install -y git</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="section-subheading">Chạy container đầu tiên &amp; đăng ký Docker Hub (áp dụng cho cả 2 cách)</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chạy container hello-world</strong>
+        <pre class="command-line" data-prompt="$" data-output="2-9"><code class="language-bash">docker run hello-world
+Unable to find image 'hello-world:latest' locally
+latest: Pulling from library/hello-world
+...
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+
+To generate this message, Docker took the following steps:
+ 1. The Docker client contacted the Docker daemon.</code></pre>
+        <p>Đọc kỹ 4 bước Docker in ra: Client → Daemon → pull image từ Docker Hub → tạo container và in kết quả. Đây chính là kiến trúc đã học ở chương trước.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Đăng ký tài khoản Docker Hub</strong>
+        <p>Truy cập <a href="https://hub.docker.com/signup" target="_blank" rel="noopener">hub.docker.com/signup</a> và đăng ký tài khoản miễn phí (Personal). Sau khi đăng nhập, bạn có thể tìm kiếm image (ví dụ <code>nginx</code>, <code>httpd</code>) và xem các tag, hướng dẫn sử dụng của image đó.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo Personal Access Token &amp; đăng nhập</strong>
+        <p>Trong Docker Hub, vào <strong>Account settings → Personal access tokens</strong>, tạo token với thông số:</p>
+        <ul class="feature-list">
+          <li>Description: <code>docker-lab</code></li>
+          <li>Expiration: 30 days</li>
+          <li>Access permissions: <strong>Read-only</strong> (đủ để pull image)</li>
+        </ul>
+        <p>Copy token (chỉ hiển thị 1 lần), sau đó đăng nhập. Khi được hỏi <em>Password</em>, dán token vào:</p>
+        <pre class="command-line" data-prompt="$" data-output="2-3"><code class="language-bash">docker login -u &lt;DOCKERHUB_USERNAME&gt;
+Password:
+Login Succeeded</code></pre>
+        <p class="code-note">💡 Docker Hub giới hạn số lần pull image với người dùng chưa đăng nhập. Đăng nhập giúp tăng giới hạn này, tránh lỗi <code>toomanyrequests</code> khi làm lab.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>docker --version</code> và <code>docker compose version</code> trả về version, không báo lỗi.</li>
+      <li><code>docker run hello-world</code> in ra <strong>Hello from Docker!</strong></li>
+      <li><code>docker info</code> hiển thị thông tin Server (daemon), không báo lỗi kết nối.</li>
+      <li><code>docker login</code> trả về <strong>Login Succeeded</strong>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Docker Desktop báo <code>WSL 2 installation is incomplete</code> / <code>Virtualization support not detected</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> WSL 2 chưa cài hoặc Virtualization (Intel VT-x / AMD-V) bị tắt trong BIOS.<br/><strong>Giải pháp:</strong> Chạy <code>wsl --install</code>, <code>wsl --update</code> trong PowerShell (Administrator); bật Virtualization trong BIOS rồi khởi động lại máy.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> User hiện tại chưa thuộc group <code>docker</code>, hoặc đã thêm nhưng chưa đăng nhập lại.<br/><strong>Giải pháp:</strong> Chạy <code>sudo usermod -aG docker ec2-user</code>, thoát SSH và đăng nhập lại, kiểm tra bằng lệnh <code>groups</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Cannot connect to the Docker daemon. Is the docker daemon running?</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Docker Desktop chưa mở, hoặc service <code>docker</code> trên EC2 chưa chạy.<br/><strong>Giải pháp:</strong> Mở Docker Desktop và đợi <em>Engine running</em>; trên EC2 chạy <code>sudo systemctl start docker</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>docker: 'compose' is not a docker command</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa cài Compose plugin, hoặc tải sai kiến trúc CPU.<br/><strong>Giải pháp:</strong> Thực hiện lại Bước 5, kiểm tra file <code>/usr/local/lib/docker/cli-plugins/docker-compose</code> có quyền thực thi (<code>ls -l</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>toomanyrequests: You have reached your unauthenticated pull rate limit</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Vượt giới hạn pull của Docker Hub cho người dùng ẩn danh (hay gặp khi nhiều người dùng chung 1 IP public).<br/><strong>Giải pháp:</strong> <code>docker login</code> bằng tài khoản Docker Hub rồi pull lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">
+    <strong>EC2 tính phí theo giờ khi đang chạy.</strong> Nếu dùng Cách 2, hãy <strong>Stop</strong> instance <code>docker-lab-server</code> mỗi khi nghỉ học và <strong>Start</strong> lại khi làm lab tiếp theo (Public IP sẽ thay đổi).
+    Instance sẽ được dùng xuyên suốt Lab 2 → Lab 9 và xoá ở chương cuối của section. EBS volume vẫn tính phí kể cả khi instance đã Stop.
+  </div>
+
+</body>
+</html>

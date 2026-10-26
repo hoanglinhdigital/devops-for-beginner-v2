@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Làm quen với trình soạn thảo Vim &amp; Nano – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Làm quen với trình soạn thảo Vim &amp; Nano</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt trình soạn thảo <strong>Vim</strong> và <strong>Nano</strong> trên EC2 bằng <code>dnf</code>.</li>
+    <li>Hiểu các <strong>mode</strong> của Vim và thao tác: nhập liệu, lưu, thoát, copy/paste, xoá, undo, tìm kiếm, thay thế.</li>
+    <li>Thao tác file với Nano – trình soạn thảo đơn giản, phù hợp người mới.</li>
+    <li>Đây là kỹ năng bắt buộc để sửa file cấu hình trên server ở các lab sau (<code>sshd_config</code>, <code>fstab</code>, <code>crontab</code>...).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b>"]
+      EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:44px;height:44px;'/><br/><b>linux-lab-server</b><br/>Amazon Linux 2023<br/>📝 vim · nano"]
+      PC -->|"SSH :22"| EC2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1: instance <code>linux-lab-server</code> đang Running và SSH được bằng <code>ec2-user</code>.</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab2_vim_nano/sample.txt</code> (nội dung mẫu để thực hành).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt Vim và Nano</strong>
+        <p>Amazon Linux 2023 chỉ có sẵn bản <code>vim-minimal</code> (lệnh <code>vi</code>). Cài bản đầy đủ và Nano bằng trình quản lý gói <code>dnf</code>:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sudo dnf install -y vim-enhanced nano
+vim --version | head -1
+nano --version | head -1</code></pre>
+        <p><code>sudo</code> cho phép chạy lệnh với quyền <code>root</code> (cài phần mềm cần quyền quản trị). <code>-y</code> tự động đồng ý, không hỏi lại.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Hiểu các mode của Vim</strong>
+        <div class="mermaid">
+        flowchart LR
+            N["⌨️ <b>Normal mode</b><br/>di chuyển, copy, xoá"]
+            I["✏️ <b>Insert mode</b><br/>gõ nội dung"]
+            C["💬 <b>Command mode</b><br/>:w :q :wq :q!"]
+            N -->|"i / a / o"| I
+            I -->|"Esc"| N
+            N -->|":"| C
+            C -->|"Enter / Esc"| N
+        </div>
+        <p>Vim mở file ở <strong>Normal mode</strong>: các phím bạn gõ là lệnh chứ không phải nội dung. Muốn gõ nội dung phải chuyển sang <strong>Insert mode</strong>. Khi bối rối, cứ nhấn <strong>Esc</strong> để quay về Normal mode.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo file đầu tiên với Vim</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">mkdir -p ~/linux-lab/editor
+cd ~/linux-lab/editor
+vim sample.txt</code></pre>
+        <ul class="feature-list">
+          <li>Nhấn <code>i</code> để vào Insert mode (góc dưới hiện <code>-- INSERT --</code>).</li>
+          <li>Copy nội dung file <code>sample.txt</code> trong source code và dán vào terminal (Git Bash: <strong>Shift + Insert</strong> hoặc chuột phải → Paste; Mac: <strong>Cmd + V</strong>).</li>
+          <li>Nhấn <code>Esc</code>, gõ <code>:wq</code> rồi <strong>Enter</strong> để lưu và thoát.</li>
+        </ul>
+        <pre class="command-line" data-prompt="[ec2-user editor]$"><code class="language-bash">cat sample.txt</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Thực hành các thao tác trong Vim</strong>
+        <p>Mở lại file và thử lần lượt các phím trong bảng dưới (ở Normal mode):</p>
+        <pre class="command-line" data-prompt="[ec2-user editor]$"><code class="language-bash">vim sample.txt</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Phím / lệnh</th><th>Chức năng</th></tr></thead>
+          <tbody>
+            <tr><td><code>i</code> / <code>a</code> / <code>o</code></td><td>Insert tại con trỏ / sau con trỏ / mở dòng mới bên dưới</td></tr>
+            <tr><td><code>Esc</code></td><td>Thoát Insert mode, về Normal mode</td></tr>
+            <tr><td><code>:w</code> / <code>:q</code> / <code>:wq</code> / <code>:q!</code></td><td>Lưu / thoát / lưu và thoát / thoát không lưu</td></tr>
+            <tr><td><code>dd</code> / <code>yy</code> / <code>p</code></td><td>Xoá (cut) dòng hiện tại / copy dòng / paste xuống dưới</td></tr>
+            <tr><td><code>5dd</code> / <code>3yy</code></td><td>Xoá 5 dòng / copy 3 dòng (số đứng trước lệnh là số lần lặp)</td></tr>
+            <tr><td><code>u</code> / <code>Ctrl + r</code></td><td>Undo / Redo</td></tr>
+            <tr><td><code>/từ_khoá</code>, <code>n</code>, <code>N</code></td><td>Tìm kiếm, tới kết quả tiếp theo / trước đó</td></tr>
+            <tr><td><code>:%s/Linux/LINUX/g</code></td><td>Thay thế toàn bộ <code>Linux</code> thành <code>LINUX</code> trong file</td></tr>
+            <tr><td><code>:set number</code></td><td>Hiển thị số dòng</td></tr>
+          </tbody>
+        </table>
+        <h4 class="sub-sub-heading">Di chuyển con trỏ</h4>
+        <table class="compare-table">
+          <thead><tr><th>Phím</th><th>Chức năng</th></tr></thead>
+          <tbody>
+            <tr><td><code>h</code> <code>j</code> <code>k</code> <code>l</code></td><td>Trái / xuống / lên / phải (hoặc dùng phím mũi tên)</td></tr>
+            <tr><td><code>w</code> / <code>b</code></td><td>Đầu từ tiếp theo / đầu từ trước đó</td></tr>
+            <tr><td><code>0</code> / <code>$</code></td><td>Đầu dòng / cuối dòng</td></tr>
+            <tr><td><code>gg</code> / <code>G</code> / <code>:10</code></td><td>Dòng đầu tiên / dòng cuối cùng / tới dòng 10</td></tr>
+            <tr><td><code>Ctrl + f</code> / <code>Ctrl + b</code></td><td>Xuống / lên một trang</td></tr>
+            <tr><td><code>Ctrl + d</code> / <code>Ctrl + u</code></td><td>Xuống / lên nửa trang</td></tr>
+          </tbody>
+        </table>
+        <p>Bài tập nhỏ: copy dòng 8 bằng <code>yy</code> rồi paste 2 lần bằng <code>p</code>; xoá dòng 9 bằng <code>dd</code> rồi <code>u</code> để khôi phục; tìm <code>/DevOps</code>; thay thế <code>Linux</code> → <code>LINUX</code>; cuối cùng lưu bằng <code>:wq</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Thực hành với Nano</strong>
+        <pre class="command-line" data-prompt="[ec2-user editor]$"><code class="language-bash">nano notes.txt</code></pre>
+        <p>Nano không có mode, mở ra là gõ được ngay. Các phím tắt hiển thị ở cuối màn hình, ký hiệu <code>^</code> = <strong>Ctrl</strong>, <code>M-</code> = <strong>Alt</strong>.</p>
+        <table class="compare-table">
+          <thead><tr><th>Phím tắt</th><th>Chức năng</th></tr></thead>
+          <tbody>
+            <tr><td>Phím mũi tên</td><td>Di chuyển con trỏ</td></tr>
+            <tr><td><code>Ctrl + O</code>, <strong>Enter</strong></td><td>Lưu file (xác nhận tên file)</td></tr>
+            <tr><td><code>Ctrl + X</code></td><td>Thoát (nếu chưa lưu, Nano hỏi <code>Y/N</code>)</td></tr>
+            <tr><td><code>Ctrl + K</code> / <code>Ctrl + U</code></td><td>Cắt dòng hiện tại / dán dòng đã cắt</td></tr>
+            <tr><td><code>Ctrl + W</code></td><td>Tìm kiếm</td></tr>
+            <tr><td><code>Ctrl + \</code></td><td>Tìm và thay thế</td></tr>
+            <tr><td><code>Ctrl + _</code></td><td>Nhảy tới số dòng</td></tr>
+            <tr><td><code>Alt + U</code> / <code>Alt + E</code></td><td>Undo / Redo</td></tr>
+            <tr><td><code>Alt + N</code></td><td>Bật/tắt hiển thị số dòng</td></tr>
+          </tbody>
+        </table>
+        <p>Gõ vài dòng ghi chú, lưu bằng <code>Ctrl + O</code> → <strong>Enter</strong>, thoát bằng <code>Ctrl + X</code>, sau đó kiểm tra:</p>
+        <pre class="command-line" data-prompt="[ec2-user editor]$"><code class="language-bash">cat notes.txt</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <div class="tip-box"><strong>Nên dùng Vim hay Nano?</strong> Nano dễ dùng cho người mới. Tuy nhiên <code>vi</code>/<code>vim</code> có mặt trên hầu hết mọi server Linux (kể cả container tối giản), nên DevOps Engineer cần thuộc tối thiểu: <code>i</code>, <code>Esc</code>, <code>:wq</code>, <code>:q!</code>, <code>dd</code>, <code>/tìm_kiếm</code>.</div>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>vim --version</code> và <code>nano --version</code> in ra thông tin phiên bản.</li>
+      <li>File <code>~/linux-lab/editor/sample.txt</code> có nội dung đã chỉnh sửa (dòng được copy, chữ <code>LINUX</code> được thay thế).</li>
+      <li>File <code>~/linux-lab/editor/notes.txt</code> được tạo bằng Nano.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Gõ phím trong Vim nhưng không thấy chữ xuất hiện, file bị thay đổi lung tung</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Đang ở Normal mode nên các phím bị hiểu là lệnh.<br/><strong>Giải pháp:</strong> Nhấn <code>Esc</code>, gõ <code>:q!</code> để thoát không lưu, mở lại file và nhấn <code>i</code> trước khi gõ.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>E37: No write since last change (add ! to override)</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Gõ <code>:q</code> khi file có thay đổi chưa lưu.<br/><strong>Giải pháp:</strong> Dùng <code>:wq</code> để lưu rồi thoát, hoặc <code>:q!</code> để bỏ thay đổi.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>E45: 'readonly' option is set</code> / <code>Permission denied</code> khi lưu file</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File thuộc quyền <code>root</code> (ví dụ file trong <code>/etc</code>) nhưng mở bằng user thường.<br/><strong>Giải pháp:</strong> Thoát bằng <code>:q!</code> và mở lại bằng <code>sudo vim &lt;tên_file&gt;</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Thấy cảnh báo <code>Found a swap file by the name ".sample.txt.swp"</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Lần trước Vim bị đóng đột ngột (mất kết nối SSH) nên còn file swap.<br/><strong>Giải pháp:</strong> Nhấn <code>R</code> để khôi phục hoặc <code>D</code> để xoá swap file, sau đó tiếp tục làm việc.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo thêm resource trên AWS. Giữ lại instance <code>linux-lab-server</code> cho các lab tiếp theo, hoặc <strong>Stop</strong> instance nếu nghỉ học lâu.</div>
+
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Tạo NodePort Service – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Tạo NodePort Service</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo Deployment + Service kiểu <strong>NodePort</strong> cho nginx.</li>
+    <li>Truy cập ứng dụng từ ngoài cluster bằng <code>minikube service</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Browser["<img src='../../assets/svg-icon/browser.svg' style='width:32px;height:32px;'/><br/>Browser<br/>http://127.0.0.1:64451"]
+      Node["<img src='../../assets/svg-icon/eks-node.svg' style='width:32px;height:32px;'/><br/>Minikube node<br/>nodePort: 30099"]
+      SVC["Service<br/>nginx-service<br/>port:80 → targetPort:80"]
+      subgraph Pods["3 Pod nginx"]
+          P1["<img src='../../assets/svg-icon/eks-pod.svg' style='width:26px;height:26px;'/><br/>Pod"]:::p
+          P2["<img src='../../assets/svg-icon/eks-pod.svg' style='width:26px;height:26px;'/><br/>Pod"]:::p
+          P3["<img src='../../assets/svg-icon/eks-pod.svg' style='width:26px;height:26px;'/><br/>Pod"]:::p
+      end
+      Browser --> Node --> SVC --> Pods
+      classDef p fill:#eef2ff,stroke:#8f0c9e,stroke-width:1px
+  </div>
+  <p class="arch-caption">Service NodePort mở cổng 30099 trên node. Với Minikube, dùng <code>minikube service nginx-service --url</code> để tạo tunnel từ localhost tới cổng đó.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong> (Minikube chạy).</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/lab2_service_nodeport/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo file cấu hình NodePort Service</strong>
+        <p>Tạo file <code>nginx-nodeport.yaml</code> (Deployment + Service NodePort):</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: NodePort
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      nodePort: 30099
+      port: 80
+      targetPort: 80</code></pre>
+        <p class="code-note">💡 Một file YAML có thể chứa nhiều resource, ngăn cách bằng dòng <code>---</code>. Service có <code>nodePort: 30099</code> (nằm trong range 30000–32767).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Apply và kiểm tra</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f nginx-nodeport.yaml
+kubectl get service
+kubectl get service nginx-service -o wide
+kubectl get deployment
+kubectl get pods -o wide</code></pre>
+        <p>Quan sát cột <code>PORT(S)</code> của Service: <code>80:30099/TCP</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Truy cập dịch vụ</strong>
+        <p>Lấy IP của Minikube (chỉ có tác dụng trong mạng nội bộ của Kubernetes, không truy cập được từ bên ngoài):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube ip</code></pre>
+        <p>Tạo tunnel để truy cập từ ngoài và lấy URL:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">minikube service nginx-service --url
+http://127.0.0.1:64451</code></pre>
+        <p>Copy URL dán vào trình duyệt (hoặc dùng <code>curl</code>) – bạn sẽ thấy trang chào mừng của nginx.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Xoá resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f nginx-nodeport.yaml</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get service nginx-service</code> hiển thị <code>TYPE = NodePort</code> và <code>PORT(S) = 80:30099/TCP</code>.</li>
+      <li>Mở URL từ <code>minikube service nginx-service --url</code> thấy trang nginx.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Không mở được <code>http://127.0.0.1:&lt;port&gt;</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> tunnel chưa được tạo hoặc đã tắt terminal.<br/><strong>Giải pháp:</strong> chạy lại <code>minikube service nginx-service --url</code> (terminal phải giữ mở khi dùng <code>minikube tunnel</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Service hiển thị <code>&lt;none&gt;</code> ở cột PORT</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> sai selector, Service không tìm thấy Pod.<br/><strong>Giải pháp:</strong> kiểm tra <code>selector.app</code> khớp với <code>template.metadata.labels.app</code> của Deployment.</div>
+  </div>
+
+</body>
+</html>

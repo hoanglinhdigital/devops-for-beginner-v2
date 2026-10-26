@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Chuẩn bị source code trên GitHub &amp; tạo kết nối GitHub – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Chuẩn bị source code trên GitHub &amp; tạo kết nối GitHub</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Fork 3 repository mẫu (Java, Node.js Webpack, Node.js Docker) về GitHub account của bạn và clone về máy.</li>
+    <li>Tạo <strong>GitHub connection</strong> bằng <strong>AWS CodeConnections</strong> để CodeBuild, CodePipeline đọc được source code và nhận webhook.</li>
+    <li>Tạo <strong>S3 bucket</strong> dùng chung để lưu artifact cho các lab sau.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b><br/>git clone · push"]
+      subgraph GHS["<img src='../../assets/aws-svg/github.svg' style='width:24px;height:24px;'/> GitHub – account của bạn"]
+          direction TB
+          R1["📁 java-elasticbeanstalk-sample"]
+          R2["📁 simple-vue-webpack"]
+          R3["📁 nodejs-random-color"]
+      end
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction TB
+          CONN["🔗 <b>CodeConnections</b><br/>github-connection<br/>(GitHub App)"]
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:40px;height:40px;'/><br/><b>S3</b><br/>codebuild-artifact-&lt;suffix&gt;"]
+      end
+      PC <-->|"SSH"| GHS
+      CONN <-->|"đọc source · webhook"| GHS
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Tài khoản GitHub đã cấu hình SSH key (Section 7 – Lab 2).</li>
+    <li>Git Bash (Windows) hoặc Terminal (MacOS/Linux), AWS CLI v2 đã cấu hình profile (Section 5 – Lab 1).</li>
+    <li>Tài khoản AWS, đăng nhập Console bằng IAM user có quyền Administrator (khuyến nghị cho môi trường học).</li>
+    <li>Source code: <code>sourcecode/section_9_code_pipeline/lab1_prepare_source/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Fork 3 repository mẫu</strong>
+        <p>Truy cập từng repository dưới đây trên GitHub và <strong>Fork</strong> về account của bạn, giữ nguyên tên repository (các lab sau dùng đúng tên này):</p>
+        <table class="compare-table">
+          <thead><tr><th>Repository</th><th>Branch</th><th>Ứng dụng</th><th>Dùng cho</th></tr></thead>
+          <tbody>
+            <tr><td><code>https://github.com/hoanglinhdigital/java-elasticbeanstalk-sample</code></td><td><code>main</code></td><td>Spring Boot (Maven), port 5000</td><td>Lab 2, Lab 5</td></tr>
+            <tr><td><code>https://github.com/hoanglinhdigital/simple-vue-webpack</code></td><td><code>master</code></td><td>Vue 3 + Webpack, build ra file tĩnh</td><td>Lab 3</td></tr>
+            <tr><td><code>https://github.com/hoanglinhdigital/nodejs-random-color</code></td><td><code>master</code></td><td>Express, port 3000, có <code>Dockerfile</code></td><td>Lab 4, Lab 6 → Lab 9</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Clone repository về máy</strong>
+        <p>Thay <code>&lt;your-github-username&gt;</code> bằng username GitHub của bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/codepipeline-labs
+cd ~/codepipeline-labs
+git clone git@github.com:&lt;your-github-username&gt;/java-elasticbeanstalk-sample.git
+git clone git@github.com:&lt;your-github-username&gt;/simple-vue-webpack.git
+git clone git@github.com:&lt;your-github-username&gt;/nodejs-random-color.git
+ls</code></pre>
+        <p>Kiểm tra branch mặc định – các lab sau sẽ push lên đúng branch này:</p>
+        <pre class="command-line" data-prompt="$" data-output="2,4,6"><code class="language-bash">git -C java-elasticbeanstalk-sample branch --show-current
+main
+git -C simple-vue-webpack branch --show-current
+master
+git -C nodejs-random-color branch --show-current
+master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo GitHub connection (AWS CodeConnections)</strong>
+        <p>Vào <strong>Developer Tools → Settings → Connections</strong> (region Singapore), tạo connection với các thông số:</p>
+        <ul class="feature-list">
+          <li>Provider: <strong>GitHub</strong></li>
+          <li>Connection name: <code>github-connection</code></li>
+          <li>GitHub App: chọn <strong>Install a new app</strong> → đăng nhập GitHub → cài app <em>AWS Connector for GitHub</em> cho account của bạn, phạm vi <strong>Only select repositories</strong> → chọn 3 repository vừa fork.</li>
+        </ul>
+        <p>Sau khi hoàn tất, connection phải ở trạng thái <span class="badge badge-green">Available</span>. Connection này được dùng chung cho CodeBuild (Lab 2 → Lab 4) và CodePipeline (Lab 5 → Lab 9).</p>
+        <div class="alert alert-info">CodeConnections (tên cũ: <em>CodeStar Connections</em>) dùng GitHub App nên không cần tạo Personal Access Token hay lưu password GitHub trên AWS. Nếu connection ở trạng thái <strong>Pending</strong>, chọn connection và hoàn tất bước <strong>Update pending connection</strong>.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo S3 bucket chứa artifact</strong>
+        <p>Tên bucket là duy nhất toàn cầu, thay <code>&lt;your-suffix&gt;</code> bằng tên/ngày của bạn (ví dụ <code>codebuild-artifact-linh-20261025</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 mb s3://codebuild-artifact-&lt;your-suffix&gt; --region ap-southeast-1
+aws s3 ls</code></pre>
+        <p>Hoặc tạo trên S3 Console với thông số: Region <code>ap-southeast-1</code>, Block all public access: <strong>On</strong>, các thiết lập khác để mặc định.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>GitHub account của bạn có 3 repository đã fork, thư mục <code>~/codepipeline-labs</code> có 3 bản clone.</li>
+      <li>Connection <code>github-connection</code> ở trạng thái <strong>Available</strong>.</li>
+      <li>Lệnh <code>aws s3 ls</code> hiển thị bucket <code>codebuild-artifact-&lt;your-suffix&gt;</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>git@github.com: Permission denied (publickey)</code> khi clone</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> SSH key chưa được thêm vào GitHub hoặc ssh-agent chưa load key.<br/><strong>Giải pháp:</strong> Xem lại Section 7 – Lab 2, kiểm tra bằng <code>ssh -T git@github.com</code>; hoặc clone bằng HTTPS.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không thấy repository khi chọn source ở CodeBuild/CodePipeline</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> GitHub App chỉ được cấp quyền cho một số repository.<br/><strong>Giải pháp:</strong> Trên GitHub vào <strong>Settings → Applications → AWS Connector for GitHub → Configure</strong>, thêm repository cần dùng.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>BucketAlreadyExists</code> khi tạo bucket</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tên bucket đã có người dùng (tên S3 là duy nhất toàn cầu).<br/><strong>Giải pháp:</strong> Đổi suffix khác, ví dụ thêm ngày tháng.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại repository, connection và S3 bucket để dùng cho các lab tiếp theo. Connection và S3 bucket rỗng không phát sinh chi phí đáng kể; hướng dẫn xoá ở chương Tổng kết.</div>
+
+</body>
+</html>

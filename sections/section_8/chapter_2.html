@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Docker là gì? Kiến trúc &amp; các thành phần cơ bản – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">8. Thao tác cơ bản với Docker</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Docker là gì? Kiến trúc &amp; các thành phần cơ bản</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>Docker</strong> là nền tảng phần mềm cho phép bạn dựng, kiểm thử và triển khai ứng dụng một cách nhanh chóng. Docker đóng gói phần mềm vào các đơn vị tiêu chuẩn hoá gọi là <strong>container</strong>,
+    chứa mọi thứ phần mềm cần để chạy: thư viện, công cụ hệ thống, code, runtime. Nhờ Docker, bạn có thể nhanh chóng triển khai và thay đổi quy mô ứng dụng trên bất kỳ môi trường nào
+    và biết chắc rằng code sẽ chạy được – <strong>“Build once, run anywhere”</strong>.
+  </p>
+  <div class="alert alert-info">
+    <strong>Lưu ý:</strong> Docker không phải là nền tảng duy nhất để chạy container. Một số lựa chọn khác: <strong>Podman</strong>, <strong>containerd</strong> + nerdctl, <strong>CRI-O</strong> (dùng trong Kubernetes). Tuy nhiên Docker vẫn là công cụ phổ biến nhất cho developer.
+  </div>
+
+  <h2 class="section-heading">Các khái niệm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Image:</strong> “khuôn mẫu” chỉ đọc (read-only) chứa ứng dụng và môi trường chạy, được tạo thành từ nhiều <strong>layer</strong> xếp chồng. Định danh bằng <code>&lt;repository&gt;:&lt;tag&gt;</code>, ví dụ <code>nginx:1.27</code>.</li>
+    <li><strong>Container:</strong> một instance đang chạy của image (giống quan hệ <em>class – object</em> trong lập trình). Từ 1 image có thể chạy nhiều container.</li>
+    <li><strong>Dockerfile:</strong> file text mô tả các bước để build ra image (base image, copy code, cài thư viện, lệnh khởi động...).</li>
+    <li><strong>Registry:</strong> nơi lưu trữ và phân phối image. Mặc định là <strong>Docker Hub</strong>; trên AWS dùng <strong>Amazon ECR</strong>.</li>
+    <li><strong>Volume:</strong> vùng lưu trữ dữ liệu bền vững nằm ngoài vòng đời container (container bị xoá, dữ liệu vẫn còn).</li>
+    <li><strong>Network:</strong> mạng ảo cho phép các container giao tiếp với nhau và với bên ngoài (bridge, host, none...).</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc của Docker</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Client["💻 Docker Client"]
+          direction TB
+          C1["docker build"]
+          C2["docker pull"]
+          C3["docker run"]
+      end
+      subgraph Host["<img src='../../assets/svg-icon/docker.svg' style='width:32px;height:32px;'/> Docker Host"]
+          direction TB
+          D["⚙️ <b>Docker daemon</b><br/>(dockerd)"]
+          subgraph Images["Images"]
+              I1["🗂️ nginx"]
+              I2["🗂️ my-app"]
+          end
+          subgraph Containers["Containers"]
+              CT1["📦 web-1"]
+              CT2["📦 web-2"]
+          end
+          D --> Images
+          Images --> Containers
+      end
+      subgraph Registry["☁️ Registry"]
+          direction TB
+          DH["🐳 Docker Hub"]
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:32px;height:32px;'/><br/>Amazon ECR"]
+      end
+      Client -->|"REST API"| D
+      D <-->|"pull / push"| Registry
+  </div>
+  <p class="arch-caption">Docker Client gửi lệnh tới Docker daemon qua REST API. Daemon quản lý image, container, volume, network và pull/push image từ Registry.</p>
+
+  <ul class="feature-list">
+    <li><strong>Docker daemon (<code>dockerd</code>):</strong> nơi quản lý các thành phần của Docker như image, container, volume, network. Daemon nhận API từ Client để thực thi các nhiệm vụ.</li>
+    <li><strong>Docker Client (<code>docker</code> CLI):</strong> cung cấp phương thức để tương tác với Docker daemon. Mỗi lệnh <code>docker ...</code> bạn gõ sẽ được gửi tới daemon.</li>
+    <li><strong>Docker Registry:</strong> nơi lưu trữ Docker image. Mặc định Docker kết nối tới <strong>Docker Hub</strong> (<code>docker.io</code>).</li>
+  </ul>
+  <div class="alert alert-tip">
+    Khi cài <strong>Docker Desktop</strong> (Windows/MacOS), Daemon và Client cùng nằm trên máy tính của bạn – daemon thực chất chạy trong một máy ảo Linux nhỏ do Docker Desktop quản lý (WSL 2 trên Windows).
+    Client cũng có thể điều khiển daemon trên một máy khác (remote host).
+  </div>
+
+  <h2 class="section-heading">Image layer</h2>
+  <p class="body-text">
+    Mỗi chỉ thị trong Dockerfile (<code>FROM</code>, <code>RUN</code>, <code>COPY</code>...) tạo ra một <strong>layer</strong>. Các layer được cache và <strong>dùng chung</strong> giữa các image:
+    nếu 10 image cùng dùng base <code>node:20</code>, layer của <code>node:20</code> chỉ lưu và tải về 1 lần. Khi chạy container, Docker thêm một layer <strong>có thể ghi (writable)</strong> lên trên cùng;
+    mọi thay đổi trong container chỉ nằm ở layer này và <strong>mất đi khi container bị xoá</strong> – đó là lý do cần Volume cho dữ liệu cần giữ lại.
+  </p>
+  <div class="mermaid">
+  flowchart TB
+      W["✏️ Container layer (read-write) – mất khi xoá container"]
+      L3["🧱 Layer 3: COPY . /app"]
+      L2["🧱 Layer 2: RUN npm install"]
+      L1["🧱 Layer 1: FROM node:20 (base image)"]
+      W --- L3 --- L2 --- L1
+  </div>
+  <p class="arch-caption">Image gồm nhiều layer chỉ đọc; container = image + 1 layer có thể ghi.</p>
+
+  <h2 class="section-heading">Các bước cơ bản để xây dựng ứng dụng Docker</h2>
+  <div class="mermaid">
+  flowchart LR
+      DF["📄 <b>Dockerfile</b><br/>+ source code"] -->|"docker build"| IMG["🗂️ <b>Image</b><br/>my-app:1.0"]
+      IMG -->|"docker images"| CHK["🔍 Kiểm tra image"]
+      CHK -->|"docker run"| CT["📦 <b>Container</b>"]
+      CT -->|"http://host:port"| TEST["<img src='../../assets/aws-svg/user.svg' style='width:32px;height:32px;'/><br/>Kiểm tra ứng dụng"]
+      IMG -.->|"docker push"| REG["☁️ Registry<br/>Docker Hub / ECR"]
+  </div>
+  <ol class="step-list">
+    <li><div><strong>Chuẩn bị Dockerfile:</strong><p>mô tả các bước cần thiết để tạo ra môi trường container chứa ứng dụng của bạn.</p></div></li>
+    <li><div><strong>Build Docker Image:</strong><p>dùng lệnh <code>docker build</code> để xây dựng image từ Dockerfile.</p></div></li>
+    <li><div><strong>Kiểm tra Docker Image:</strong><p>dùng lệnh <code>docker images</code> để đảm bảo image đã được build thành công và xuất hiện trong danh sách.</p></div></li>
+    <li><div><strong>Chạy Docker Container:</strong><p>dùng lệnh <code>docker run</code> để chạy container từ image.</p></div></li>
+    <li><div><strong>Kiểm tra ứng dụng:</strong><p>truy cập ứng dụng qua địa chỉ IP hoặc tên miền cùng với port đã chỉ định.</p></div></li>
+  </ol>
+  <p class="body-text">Trong thực tế khi triển khai lên Cloud sẽ có thêm các bước: push image lên registry (ECR), deploy lên ECS/EKS thông qua pipeline CI/CD – sẽ được trình bày ở các section sau.</p>
+
+  <h2 class="section-heading">Trade-off: Docker vs các lựa chọn khác</h2>
+  <table class="compare-table">
+    <thead><tr><th>Công cụ</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Docker</strong></td><td>Phổ biến nhất, tài liệu &amp; cộng đồng lớn, Docker Desktop + Compose dễ dùng</td><td>Daemon chạy quyền root; Docker Desktop cần license trả phí với doanh nghiệp lớn</td></tr>
+      <tr><td><strong>Podman</strong></td><td>Không cần daemon, chạy rootless, lệnh tương thích Docker</td><td>Hệ sinh thái/công cụ GUI ít hơn, một số khác biệt nhỏ với Compose</td></tr>
+      <tr><td><strong>containerd / CRI-O</strong></td><td>Nhẹ, là runtime mặc định của Kubernetes</td><td>Hướng tới hệ thống, không thân thiện cho developer dùng hằng ngày</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Thử nhanh phần mềm</h4>
+      <p>Cần MySQL, Redis, Nginx để test? Chỉ cần <code>docker run</code>, không phải cài trực tiếp lên máy, xoá đi cũng không để lại “rác”.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Chuẩn hoá build</h4>
+      <p>Build ứng dụng Java/Node.js bên trong container với version JDK/Node cố định, không phụ thuộc vào môi trường của build server.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Đóng gói để deploy lên AWS</h4>
+      <p>Image build từ Dockerfile được push lên ECR và chạy trên ECS, EKS, App Runner hoặc Lambda (container image).</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Tag <code>latest</code></strong> chỉ là tên tag mặc định khi không chỉ định tag, <strong>không</strong> đảm bảo là bản mới nhất. Trong dự án thực tế nên dùng tag cụ thể (<code>1.0.3</code>, commit SHA...).</li>
+    <li><strong>Official image</strong> trên Docker Hub (ví dụ <code>nginx</code>, <code>node</code>, <code>mysql</code>) được Docker kiểm duyệt – ưu tiên dùng làm base image.</li>
+    <li><strong>CPU architecture:</strong> image có thể build cho <code>linux/amd64</code> (Intel/AMD) hoặc <code>linux/arm64</code> (Apple Silicon, AWS Graviton). Chú ý khi build trên Mac M-series rồi chạy trên server x86.</li>
+  </ul>
+
+</body>
+</html>

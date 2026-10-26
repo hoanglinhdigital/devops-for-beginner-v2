@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Triển khai ứng dụng URL Shortener bằng SAM – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Serverless Application Model (SAM)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Triển khai ứng dụng URL Shortener bằng SAM</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Đọc hiểu template SAM của ứng dụng <strong>URL Shortener</strong>: 1 API Gateway, 2 Lambda function, 1 DynamoDB table.</li>
+    <li>Hiểu cách truyền tên table vào Lambda qua biến môi trường và cấp quyền tối thiểu bằng <strong>SAM policy templates</strong>.</li>
+    <li>Build và deploy toàn bộ ứng dụng bằng 2 lệnh; kiểm tra bằng <code>curl</code> và AWS Console.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Client<br/>curl / Postman"]
+      subgraph Stack["Stack url-shorten-app"]
+          APIGW["<img src='../../assets/aws-svg/API-Gateway.svg' style='width:34px;height:34px;'/><br/>API Gateway<br/>stage dev"]
+          GEN["<img src='../../assets/aws-svg/Lambda.svg' style='width:32px;height:32px;'/><br/>GenerateShortUrlFunction"]
+          GET["<img src='../../assets/aws-svg/Lambda.svg' style='width:32px;height:32px;'/><br/>GetUrlFunction"]
+          DDB["<img src='../../assets/aws-svg/DynamoDB.svg' style='width:34px;height:34px;'/><br/>UrlShortenTable<br/>PK: short_url"]
+      end
+      User -->|"POST /generate-short-url"| APIGW
+      User -->|"GET /link/{short_url}"| APIGW
+      APIGW --> GEN
+      APIGW --> GET
+      GEN -->|"PutItem"| DDB
+      GET -->|"GetItem"| DDB
+  </div>
+  <p class="arch-caption">Người dùng gửi URL dài → nhận mã rút gọn. Truy cập <code>/link/&lt;mã&gt;</code> sẽ được redirect (HTTP 308) tới URL gốc.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong>: đã cài SAM CLI, AWS CLI có credential, Python 3.13 (hoặc dùng <code>--use-container</code>).</li>
+    <li>Source code: <code>sourcecode/section_12_serverless_application_model/lab2_url_shorten_app/</code>.</li>
+    <li>Công cụ gọi API: <code>curl</code> hoặc Postman.</li>
+  </ul>
+  <div class="alert alert-info"><strong>Chi phí:</strong> DynamoDB dùng chế độ On-demand (trả theo request), Lambda và API Gateway nằm trong free tier với lượng request nhỏ.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Mở project và đọc hiểu template</strong>
+        <p>Mở thư mục <code>sourcecode/section_12_serverless_application_model/lab2_url_shorten_app</code> bằng VS Code và đọc file <code>template.yaml</code>. Các điểm quan trọng cần nhận biết:</p>
+        <pre class="code-block"><code class="language-yaml">Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 10
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref UrlShortenTable      # tên table thật truyền vào mọi function
+
+Resources:
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev                          # URL có dạng .../dev/...
+
+  GenerateShortUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: generate_short_url/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBWritePolicy:                # chỉ được ghi vào đúng table này
+            TableName: !Ref UrlShortenTable
+      Events:
+        GenerateShortUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /generate-short-url
+            Method: post
+
+  UrlShortenTable:
+    Type: AWS::DynamoDB::Table               # resource CloudFormation thông thường
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: short_url
+          AttributeType: S
+      KeySchema:
+        - AttributeName: short_url
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST</code></pre>
+        <ul class="feature-list">
+          <li><strong>Hai function</strong> với hai thư mục code riêng (<code>generate_short_url/</code>, <code>get_url/</code>), cùng đọc <code>TABLE_NAME</code> từ biến môi trường.</li>
+          <li><strong>Policies</strong>: <code>DynamoDBWritePolicy</code> cho function tạo link, <code>DynamoDBReadPolicy</code> cho function tra cứu – SAM tự sinh IAM Role tương ứng, không cần viết role thủ công.</li>
+          <li><strong>Không đặt <code>TableName</code></strong>: CloudFormation tự sinh tên duy nhất nên có thể deploy lại nhiều lần mà không xung đột.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Đọc hiểu code Lambda</strong>
+        <p>Mở <code>generate_short_url/app.py</code> và <code>get_url/app.py</code>. Ý chính của <code>generate_short_url</code>: đọc <code>url</code> từ body, sinh mã ngẫu nhiên 15 ký tự và lưu vào DynamoDB.</p>
+        <pre class="code-block"><code class="language-python"># Khởi tạo bên ngoài handler để tái sử dụng kết nối giữa các lần invoke (warm start)
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["TABLE_NAME"])
+
+def lambda_handler(event, context):
+    body = json.loads(event.get("body") or "{}")
+    original_url = body.get("url")
+    if not original_url:
+        return response(400, {"status": "error", "message": "Attribute 'url' is required"})
+
+    short_url = "".join(secrets.choice(alphabet) for _ in range(15))
+    table.put_item(Item={"short_url": short_url, "original_url": original_url})
+    return response(200, {"short_url_code": short_url})</code></pre>
+        <p><code>get_url</code> đọc <code>pathParameters.short_url</code>, gọi <code>get_item</code>, trả về HTTP 308 kèm header <code>Location</code> hoặc 404 nếu không tìm thấy.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Validate và Build</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_12_serverless_application_model/lab2_url_shorten_app
+sam validate --lint
+sam build</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Deploy</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam deploy --guided</code></pre>
+        <p>Trả lời các câu hỏi:</p>
+        <ul class="feature-list">
+          <li>Stack Name: <code>url-shorten-app</code></li>
+          <li>AWS Region: <code>ap-southeast-1</code></li>
+          <li>Confirm changes before deploy: <strong>y</strong></li>
+          <li>Allow SAM CLI IAM role creation: <strong>y</strong></li>
+          <li>Disable rollback: <strong>n</strong></li>
+          <li><code>GenerateShortUrlFunction</code> / <code>GetUrlFunction</code> has no authentication. Is this okay: <strong>y</strong> (cả hai câu hỏi – API công khai phục vụ bài học)</li>
+          <li>Save arguments to configuration file: <strong>y</strong></li>
+        </ul>
+        <p>Xem danh sách thay đổi trong change set (các resource <em>Add</em>), nhập <strong>y</strong> để deploy. Lấy giá trị Outputs:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sam list stack-outputs --stack-name url-shorten-app</code></pre>
+        <p>Ghi lại giá trị <code>ApiUrl</code> (ví dụ <code>https://abc123xyz.execute-api.ap-southeast-1.amazonaws.com/dev</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo short URL</strong>
+        <p>Gọi API tạo link rút gọn (thay <code>&lt;ApiUrl&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">curl -X POST "&lt;ApiUrl&gt;/generate-short-url" -H "Content-Type: application/json" -d '{"url": "https://aws.amazon.com/serverless/sam/"}'
+{"short_url_code": "jDdfskaJKJ8f9d1"}</code></pre>
+        <p class="code-note">💡 Dùng Postman: method <strong>POST</strong>, URL <code>&lt;ApiUrl&gt;/generate-short-url</code>, Body → raw → JSON với nội dung <code>{"url": "https://aws.amazon.com/serverless/sam/"}</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Truy cập link rút gọn</strong>
+        <p>Dùng mã nhận được ở bước 5 (thay <code>&lt;short_url_code&gt;</code>). Kết quả là HTTP 308 và header <code>location</code> trỏ tới URL gốc:</p>
+        <pre class="command-line" data-prompt="$" data-output="2,3"><code class="language-bash">curl -i "&lt;ApiUrl&gt;/link/&lt;short_url_code&gt;"
+HTTP/2 308
+location: https://aws.amazon.com/serverless/sam/</code></pre>
+        <p>Dán thẳng link <code>&lt;ApiUrl&gt;/link/&lt;short_url_code&gt;</code> vào trình duyệt – trình duyệt sẽ tự chuyển tới trang gốc. Thử một mã không tồn tại để nhận lỗi 404.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Kiểm tra resource trên AWS Console</strong>
+        <ul class="feature-list">
+          <li><strong>DynamoDB</strong> → Tables → table có tên dạng <code>url-shorten-app-UrlShortenTable-xxxx</code> → <em>Explore table items</em>: thấy item vừa tạo (<code>short_url</code>, <code>original_url</code>).</li>
+          <li><strong>Lambda</strong> → function <code>GetUrlFunction</code> → tab <em>Configuration</em>: mục <em>Environment variables</em> có <code>TABLE_NAME</code>; mục <em>Permissions</em> → execution role chỉ có policy đọc đúng table (không phải <code>dynamodb:*</code> trên mọi resource).</li>
+          <li><strong>CloudFormation</strong> → stack <code>url-shorten-app</code> → tab <em>Resources</em> và <em>Outputs</em>.</li>
+        </ul>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Stack <code>url-shorten-app</code> ở trạng thái <strong>CREATE_COMPLETE</strong>.</li>
+      <li><code>POST /generate-short-url</code> trả về <code>short_url_code</code> và item xuất hiện trong DynamoDB.</li>
+      <li><code>GET /link/&lt;short_url_code&gt;</code> redirect tới URL gốc; mã không tồn tại trả 404.</li>
+      <li>Gọi POST với body rỗng hoặc thiếu <code>url</code> trả về 400.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>{"message": "Missing Authentication Token"}</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> URL sai – thiếu stage <code>/dev</code> hoặc sai path / method.<br/><strong>Giải pháp:</strong> Dùng đúng <code>ApiUrl</code> từ Outputs; <code>generate-short-url</code> là POST, <code>link/{mã}</code> là GET.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>{"message": "Internal server error"}</code> khi gọi API</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Lambda bị lỗi (ví dụ thiếu quyền, lỗi code).<br/><strong>Giải pháp:</strong> Xem log bằng <code>sam logs --stack-name url-shorten-app --name GenerateShortUrlFunction</code> (chi tiết ở Lab 3) hoặc CloudWatch Logs.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>AccessDeniedException ... is not authorized to perform: dynamodb:PutItem</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Function gọi thao tác không nằm trong policy template (ví dụ <code>GetUrlFunction</code> chỉ có quyền đọc).<br/><strong>Giải pháp:</strong> Đổi sang policy phù hợp, ví dụ <code>DynamoDBCrudPolicy</code>, rồi build &amp; deploy lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error: Build Failed ... python3.13</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Không có Python 3.13 trên máy.<br/><strong>Giải pháp:</strong> Chạy <code>sam build --use-container</code> (cần Docker).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info"><strong>Giữ nguyên stack</strong> <code>url-shorten-app</code> để làm tiếp Lab 3 và Lab 4. Chỉ xoá khi bạn dừng học section này.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">sam delete --stack-name url-shorten-app</code></pre>
+
+</body>
+</html>

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3: Variable, Map &amp; Variable file – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 3: Variable, Map &amp; Variable file</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Hiểu về Input Variable (parameter) và các kiểu dữ liệu: <code>string</code>, <code>number</code>, <code>bool</code>, <code>list</code>, <code>map</code>.</li>
+    <li>Dùng <strong>map</strong> để chọn instance type theo môi trường (dev/test/prod).</li>
+    <li>Biết các cách truyền giá trị cho variable: <code>default</code>, file <code>terraform.tfvars</code>, tham số <code>-var</code> và <code>-var-file</code> trên command line.</li>
+    <li>Thêm <strong>validation</strong> để chặn giá trị không hợp lệ ngay ở bước plan.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph Input["⚙️ Giá trị đầu vào"]
+          direction TB
+          D["default<br/>(variable.tf)"]
+          F["terraform.tfvars"]
+          V["-var / -var-file<br/>(command line)"]
+      end
+      TF["<img src='../../assets/svg-icon/terraform.svg' style='width:40px;height:40px;'/><br/><b>main.tf</b><br/>var.environment<br/>var.instance_types[...]"]
+      subgraph AWS["☁️ AWS – Default VPC"]
+          EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:44px;height:44px;'/><br/><b>udemy-demo-dev</b><br/>t3.micro"]
+      end
+      D --> TF
+      F --> TF
+      V --> TF
+      TF -->|"apply"| EC2
+  </div>
+  <p class="arch-caption">Cùng một template, chỉ thay đổi giá trị biến là có thể deploy EC2 với cấu hình khác nhau cho từng môi trường.</p>
+
+  <h2 class="section-heading">Kiến thức cần nắm</h2>
+  <h3 class="section-subheading">Khai báo variable</h3>
+  <pre class="code-block"><code class="language-hcl">variable "instance_type" {
+  type        = string            # kiểu dữ liệu
+  description = "EC2 size"        # mô tả
+  default     = "t3.micro"        # giá trị mặc định (không có default = bắt buộc truyền)
+  nullable    = false             # không cho phép null
+}</code></pre>
+  <h3 class="section-subheading">Thứ tự ưu tiên khi truyền giá trị (thấp → cao)</h3>
+  <table class="compare-table">
+    <thead><tr><th>Ưu tiên</th><th>Nguồn giá trị</th><th>Ví dụ</th></tr></thead>
+    <tbody>
+      <tr><td>1 (thấp nhất)</td><td><code>default</code> trong khối variable</td><td><code>default = "dev"</code></td></tr>
+      <tr><td>2</td><td>Biến môi trường <code>TF_VAR_&lt;tên&gt;</code></td><td><code>export TF_VAR_environment=test</code></td></tr>
+      <tr><td>3</td><td>File <code>terraform.tfvars</code>, <code>*.auto.tfvars</code> (tự động load)</td><td><code>environment = "dev"</code></td></tr>
+      <tr><td>4 (cao nhất)</td><td><code>-var</code> và <code>-var-file</code> trên command line</td><td><code>terraform plan -var="environment=prod"</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 2: đã có keypair tại <code>~/terraform-labs/keypair/udemy-key.pub</code> và đã destroy resource của Lab 2.</li>
+    <li>Region <code>ap-southeast-1</code> có Default VPC.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo thư mục lab</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab3_variables
+cd ~/terraform-labs/lab3_variables
+code .</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo file variable.tf</strong>
+        <p>Khai báo toàn bộ biến. Chú ý biến <code>instance_types</code> kiểu <code>map(string)</code> và khối <code>validation</code> của biến <code>environment</code>:</p>
+        <p class="code-note">📄 <code>lab3_variables/variable.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">variable "region" {
+  type        = string
+  description = "AWS region để deploy resource"
+  default     = "ap-southeast-1"
+}
+
+variable "environment" {
+  type        = string
+  description = "Tên môi trường: dev, test hoặc prod"
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "test", "prod"], var.environment)
+    error_message = "environment chỉ nhận một trong các giá trị: dev, test, prod."
+  }
+}
+
+# Map: mỗi môi trường dùng một instance type khác nhau
+variable "instance_types" {
+  type        = map(string)
+  description = "Instance type tương ứng với từng môi trường"
+  default = {
+    dev  = "t3.micro"
+    test = "t3.small"
+    prod = "t3.medium"
+  }
+}
+
+variable "keypair_path" {
+  type        = string
+  description = "Đường dẫn tới public key"
+  default     = "../keypair/udemy-key.pub"
+}
+
+variable "allowed_ssh_cidr" {
+  type        = string
+  description = "Dải IP được phép SSH vào EC2"
+  default     = "0.0.0.0/0"
+}
+
+variable "tags" {
+  type        = map(string)
+  description = "Tag dùng chung cho resource"
+  default     = {}
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo file main.tf</strong>
+        <p>So với Lab 2, các giá trị cố định đã được thay bằng <code>var.xxx</code>. Instance type được lấy từ map theo môi trường: <code>var.instance_types[var.environment]</code>. Chuỗi <code>"udemy-demo-${var.environment}"</code> là cú pháp <strong>string interpolation</strong>.</p>
+        <p class="code-note">📄 <code>lab3_variables/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+resource "aws_key_pair" "udemy_keypair" {
+  key_name   = "udemy-keypair-${var.environment}"
+  public_key = file(var.keypair_path)
+}
+
+resource "aws_security_group" "demo_sg" {
+  name        = "demo-sg-${var.environment}"
+  description = "Allow HTTP, SSH"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.allowed_ssh_cidr]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_instance" "demo_instance" {
+  ami                    = data.aws_ami.amazon_linux.id
+  instance_type          = var.instance_types[var.environment]
+  key_name               = aws_key_pair.udemy_keypair.key_name
+  vpc_security_group_ids = [aws_security_group.demo_sg.id]
+
+  # merge(): gộp tag chung (từ biến) với tag riêng của resource
+  tags = merge(var.tags, {
+    Name        = "udemy-demo-${var.environment}"
+    Environment = var.environment
+  })
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Tạo file terraform.tfvars</strong>
+        <p>File này chứa giá trị cho các biến và được Terraform <strong>tự động load</strong>:</p>
+        <p class="code-note">📄 <code>lab3_variables/terraform.tfvars</code></p>
+        <pre class="code-block"><code class="language-hcl">region           = "ap-southeast-1"
+environment      = "dev"
+allowed_ssh_cidr = "0.0.0.0/0"
+tags = {
+  Owner   = "Udemy"
+  Project = "terraform-lab3"
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Deploy với giá trị trong terraform.tfvars</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform init
+terraform plan
+terraform apply -auto-approve</code></pre>
+        <p>Kiểm tra trên <strong>EC2 → Instances</strong>: instance <code>udemy-demo-dev</code>, type <code>t3.micro</code>, có các tag <code>Owner</code>, <code>Project</code>, <code>Environment</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Ghi đè biến bằng tham số -var</strong>
+        <p>Xem Terraform sẽ thay đổi gì nếu chuyển sang môi trường <code>test</code> (không cần apply):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform plan -var="environment=test"</code></pre>
+        <p>Plan cho thấy instance type đổi thành <code>t3.small</code> và tên/tag đổi theo. Thử truyền giá trị không hợp lệ để thấy validation hoạt động:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform plan -var="environment=staging"
+Error: Invalid value for variable ... environment chỉ nhận một trong các giá trị: dev, test, prod.</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Dùng variable file riêng với -var-file</strong>
+        <p>Trong thực tế mỗi môi trường thường có một file biến riêng. Tạo file <code>prod.tfvars</code> với nội dung:</p>
+        <pre class="code-block"><code class="language-hcl">environment = "prod"
+tags = {
+  Owner   = "Udemy"
+  Project = "terraform-lab3-prod"
+}</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform plan -var-file="prod.tfvars"</code></pre>
+        <p>Plan hiển thị instance type <code>t3.medium</code>. Giá trị trong <code>prod.tfvars</code> ghi đè giá trị trong <code>terraform.tfvars</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Biến bắt buộc nhập (không có default)</strong>
+        <p>Tạm xoá dòng <code>environment = "dev"</code> trong <code>terraform.tfvars</code> và xoá dòng <code>default = "dev"</code> trong <code>variable.tf</code>, chạy <code>terraform plan</code>: Terraform sẽ hỏi bạn nhập giá trị cho <code>var.environment</code> trên terminal. Nhập <code>dev</code> để tiếp tục, sau đó khôi phục lại 2 dòng đã xoá.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>EC2 <code>udemy-demo-dev</code> được tạo với type <code>t3.micro</code> và đầy đủ tag gộp từ biến <code>tags</code>.</li>
+      <li><code>-var="environment=test"</code> cho plan đổi sang <code>t3.small</code>; <code>-var-file="prod.tfvars"</code> cho plan đổi sang <code>t3.medium</code>.</li>
+      <li>Giá trị <code>staging</code> bị validation chặn ngay ở bước plan.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Reference to undeclared input variable</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Dùng <code>var.xxx</code> trong main.tf nhưng chưa khai báo trong variable.tf (hoặc gõ sai tên).<br/><strong>Giải pháp:</strong> Kiểm tra tên biến giữa 2 file, VS Code extension sẽ gạch chân biến chưa khai báo.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Value for undeclared variable</code> (warning)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> File tfvars có biến không được khai báo trong variable.tf.<br/><strong>Giải pháp:</strong> Xoá biến thừa trong tfvars hoặc bổ sung khai báo.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Invalid index</code> khi truy cập <code>var.instance_types[var.environment]</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Map không có key tương ứng với giá trị environment.<br/><strong>Giải pháp:</strong> Bổ sung key vào map, hoặc dùng <code>lookup(var.instance_types, var.environment, "t3.micro")</code> để có giá trị dự phòng.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Luôn xoá resource sau khi thực hành để tránh phát sinh chi phí.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+
+</body>
+</html>

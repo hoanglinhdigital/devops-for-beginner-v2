@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 4: Build Java project (Maven) &amp; upload artifact lên S3 – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 4: Build Java project (Maven) &amp; upload artifact lên S3</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Khai báo <strong>JDK</strong> và <strong>Maven</strong> trong <em>Manage Jenkins → Tools</em>.</li>
+    <li><strong>Phần 1 – Freestyle:</strong> checkout repository Java mẫu từ GitHub, build bằng Maven, kiểm tra file <code>.jar</code> trong workspace.</li>
+    <li><strong>Phần 2:</strong> thêm bước upload artifact lên <strong>S3 bucket</strong> bằng AWS CLI (quyền từ IAM Role).</li>
+    <li><strong>Phần 3 – Declarative Pipeline:</strong> làm lại toàn bộ bằng Jenkinsfile với các stage Checkout → Build → Test → Upload.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>simple-java-maven-app"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:26px;height:26px;'/> jenkins-server"]
+              direction TB
+              J1["① Checkout"] --> J2["② mvn clean package<br/>JDK21 · M3"]
+              J2 --> J3["③ Test<br/>surefire report"]
+              J3 --> J4["④ aws s3 cp"]
+          end
+          S3["<img src='../../assets/aws-svg/S3.svg' style='width:38px;height:38px;'/><br/>jenkins-artifact-‹suffix›<br/>my-app-1.0-SNAPSHOT.jar"]
+      end
+      GH -->|"git clone"| J1
+      J4 -->|"IAM Role"| S3
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1 → Lab 3: Jenkins có Java 21 (JDK), AWS CLI, IAM Role <code>jenkins-server-role</code>.</li>
+    <li>Fork repository <a href="https://github.com/hoanglinhdigital/simple-java-maven-app" target="_blank" rel="noopener"><code>hoanglinhdigital/simple-java-maven-app</code></a> (branch <code>master</code>) về GitHub account của bạn, giữ chế độ <strong>Public</strong>.</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab4_build_java/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Khai báo JDK cho Jenkins</strong>
+        <p>Tìm đường dẫn <code>JAVA_HOME</code> trên Jenkins server:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">java -XshowSettings:properties -version 2&gt;&amp;1 | grep 'java.home'
+    java.home = /usr/lib/jvm/java-21-openjdk-amd64</code></pre>
+        <p>Vào <strong>Manage Jenkins → Tools → JDK installations → Add JDK</strong>:</p>
+        <ul class="feature-list">
+          <li>Name: <code>JDK21</code></li>
+          <li>Install automatically: <strong>không tick</strong>; JAVA_HOME: <code>/usr/lib/jvm/java-21-openjdk-amd64</code></li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Khai báo Maven cho Jenkins</strong>
+        <p>Cùng trang Tools, mục <strong>Maven installations → Add Maven</strong>:</p>
+        <ul class="feature-list">
+          <li>Name: <code>M3</code></li>
+          <li>Install automatically: <strong>tick</strong> → Install from Apache, chọn version <strong>3.9.x</strong> mới nhất</li>
+        </ul>
+        <p>Save. Maven sẽ được Jenkins tự tải về <code>/var/lib/jenkins/tools/</code> ở lần build đầu tiên.</p>
+        <p class="code-note">💡 Tên <code>JDK21</code> và <code>M3</code> sẽ được tham chiếu trong job/Jenkinsfile. Cách này cho phép nhiều project dùng nhiều version Maven/JDK khác nhau trên cùng một server.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo S3 bucket chứa artifact</strong>
+        <p>Vào <strong>S3 → Create bucket</strong>:</p>
+        <ul class="feature-list">
+          <li>Bucket name: <code>jenkins-artifact-&lt;your-suffix&gt;</code> (tên bucket là duy nhất toàn cầu, ví dụ <code>jenkins-artifact-linh2026</code>)</li>
+          <li>Region: <code>ap-southeast-1</code>; Block all public access: <strong>giữ bật</strong>; các thông số khác mặc định</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4 (Phần 1): Tạo job Freestyle build Java</strong>
+        <p>Tạo <strong>New Item → Freestyle project</strong> tên <code>lab04-java-freestyle</code>:</p>
+        <ul class="feature-list">
+          <li>Source Code Management: <strong>Git</strong>; Repository URL: <code>https://github.com/&lt;your-github-username&gt;/simple-java-maven-app.git</code>; Credentials: <em>- none -</em>; Branch Specifier: <code>*/master</code></li>
+          <li>Build Steps → <strong>Invoke top-level Maven targets</strong>: Maven Version <code>M3</code>; Goals: <code>clean package</code></li>
+        </ul>
+        <p><strong>Build Now</strong> và xem Console Output: Jenkins clone repository, tải Maven, tải dependency, chạy unit test và kết thúc bằng:</p>
+        <pre class="output-box"><code>[INFO] Building jar: /var/lib/jenkins/workspace/lab04-java-freestyle/target/my-app-1.0-SNAPSHOT.jar
+[INFO] BUILD SUCCESS
+...
+Finished: SUCCESS</code></pre>
+        <p>Vào <strong>Workspace → target</strong> để thấy file <code>my-app-1.0-SNAPSHOT.jar</code> – đây chính là <strong>artifact</strong> của quá trình build.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5 (Phần 2): Thêm bước upload artifact lên S3</strong>
+        <p>Vào <strong>Configure</strong>, thêm build step <strong>Execute shell</strong> phía sau bước Maven (thay <code>&lt;your-suffix&gt;</code>):</p>
+        <pre class="code-block"><code class="language-bash">ls -la "${WORKSPACE}/target/"
+aws s3 cp "${WORKSPACE}/target/my-app-1.0-SNAPSHOT.jar" "s3://jenkins-artifact-&lt;your-suffix&gt;/lab04-java-freestyle/${BUILD_NUMBER}/"</code></pre>
+        <p>Save → <strong>Build Now</strong>. Mỗi build upload artifact vào một thư mục theo <code>BUILD_NUMBER</code> – giữ được lịch sử các version để rollback.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6 (Phần 3): Tạo Declarative Pipeline</strong>
+        <p>Tạo <strong>New Item → Pipeline</strong> tên <code>lab04-java-pipeline</code>. Mục <strong>Pipeline</strong>: Definition <strong>Pipeline script</strong>, dán nội dung <code>lab4_build_java/Jenkinsfile</code> và sửa 2 dòng <code>GIT_REPO</code>, <code>S3_BUCKET</code>:</p>
+        <pre class="code-block"><code class="language-groovy">pipeline {
+    agent any
+
+    // Tên tool phải trùng với tên đã khai báo ở Manage Jenkins -&gt; Tools
+    tools {
+        jdk 'JDK21'
+        maven 'M3'
+    }
+
+    environment {
+        // Thay &lt;your-github-username&gt; và &lt;your-suffix&gt; bằng giá trị của bạn
+        GIT_REPO  = 'https://github.com/&lt;your-github-username&gt;/simple-java-maven-app.git'
+        S3_BUCKET = 'jenkins-artifact-&lt;your-suffix&gt;'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}"
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn -B -DskipTests clean package'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'mvn -B test'
+            }
+            post {
+                always {
+                    // Hiển thị kết quả unit test trên giao diện Jenkins
+                    junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('Upload artifact to S3') {
+            steps {
+                sh 'aws s3 cp "${WORKSPACE}/target/my-app-1.0-SNAPSHOT.jar" "s3://${S3_BUCKET}/lab04-java-pipeline/${BUILD_NUMBER}/"'
+            }
+        }
+    }
+
+    post {
+        success {
+            // Lưu artifact ngay trên Jenkins để tải về từ trang build
+            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+        }
+    }
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Build pipeline &amp; quan sát các stage</strong>
+        <p><strong>Build Now</strong>. Trang job hiển thị từng stage (Checkout, Build, Test, Upload artifact to S3) cùng thời gian chạy; click vào một stage để xem log riêng của stage đó. Trang build có thêm mục <strong>Tests</strong> (kết quả unit test) và <strong>Build Artifacts</strong> (file <code>.jar</code> tải về được).</p>
+        <p class="code-note">💡 So sánh với Phần 1: cùng kết quả nhưng toàn bộ cấu hình nằm trong một đoạn code – có thể copy sang project khác, đưa vào Git (Lab 8) và review như source code.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Cả 2 job <code>lab04-java-freestyle</code> và <code>lab04-java-pipeline</code> build <strong>SUCCESS</strong>.</li>
+      <li>S3 bucket có file <code>lab04-java-freestyle/&lt;build-number&gt;/my-app-1.0-SNAPSHOT.jar</code> và <code>lab04-java-pipeline/&lt;build-number&gt;/my-app-1.0-SNAPSHOT.jar</code>.</li>
+    </ul>
+    <pre class="command-line" data-prompt="$"><code class="language-bash">aws s3 ls s3://jenkins-artifact-&lt;your-suffix&gt;/ --recursive</code></pre>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Tool type "maven" does not have an install of "M3" configured</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Tên Maven trong Jenkinsfile khác với tên khai báo ở Tools.<br/><strong>Giải pháp:</strong> Kiểm tra lại Bước 2, tên phân biệt hoa/thường.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>upload failed ... An error occurred (AccessDenied) when calling the PutObject operation</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> IAM Role của Jenkins server thiếu quyền S3 hoặc sai tên bucket.<br/><strong>Giải pháp:</strong> Kiểm tra role <code>jenkins-server-role</code> có <code>AmazonS3FullAccess</code>; chạy thử <code>sudo -u jenkins aws s3 ls</code> trên server.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>The user-provided path .../target/my-app-1.0-SNAPSHOT.jar does not exist</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Bước Maven bị lỗi hoặc tên artifact khác (đã sửa <code>artifactId</code>/<code>version</code> trong <code>pom.xml</code>).<br/><strong>Giải pháp:</strong> Xem log bước Maven, dùng <code>ls -la target/</code> để biết đúng tên file.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Jenkins không khởi động lại được sau khi cài thêm Java khác</div>
+    <div class="fix"><strong>Nguyên nhân &amp; giải pháp:</strong> Xem Troubleshoot của Lab 1 – chọn lại Java 21 bằng <code>sudo update-alternatives --config java</code>. Muốn build bằng JDK khác, hãy cài thêm và khai báo ở Tools, <strong>không đổi Java mặc định</strong> của hệ thống.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại bucket <code>jenkins-artifact-&lt;your-suffix&gt;</code> cho Lab 5. Dung lượng file <code>.jar</code> rất nhỏ nên chi phí S3 không đáng kể; bucket sẽ được xoá ở chương tổng kết. Nhớ <strong>Stop</strong> Jenkins server nếu nghỉ học.</div>
+
+</body>
+</html>

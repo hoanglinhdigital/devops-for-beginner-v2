@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các phương án implement CICD cho Kubernetes/EKS – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CICD for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các phương án implement CICD cho Kubernetes/EKS</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Không có một "công thức duy nhất" để làm CI/CD cho EKS. Tuỳ vào <strong>yêu cầu dự án</strong> và <strong>kỹ năng của DevOps engineer</strong>, bạn có thể chọn một trong nhiều phương án.
+    Các công cụ phổ biến trong hệ sinh thái gồm: <strong>Jenkins, GitHub Actions, GitLab CI, AWS CodePipeline</strong> (nhóm CI) và <strong>Helm, ArgoCD, Terraform</strong> (nhóm CD/quản lý cấu hình).
+  </p>
+
+  <h2 class="section-heading">Bức tranh các công cụ CICD</h2>
+  <div class="mermaid">
+  flowchart TB
+      Root["🔧 CICD cho Kubernetes/EKS"]
+      CI["⚙️ <b>CI - Build &amp; Push image</b>"]
+      CD["🚀 <b>CD - Deploy lên cluster</b>"]
+      Root --> CI
+      Root --> CD
+      CI --> J["Jenkins"]
+      CI --> GH["GitHub Actions"]
+      CI --> GL["GitLab CI"]
+      CI --> CP["AWS CodePipeline<br/>(CodeBuild)"]
+      CD --> Kubectl["kubectl apply<br/>(push-based)"]
+      CD --> Helm["Helm chart"]
+      CD --> ArgoCD["ArgoCD / FluxCD<br/>(GitOps, pull-based)"]
+      CD --> TF["Terraform / CDK8s<br/>(provisioning)"]
+  </div>
+  <p class="arch-caption">CI/CD có thể kết hợp linh hoạt: một công cụ CI (Jenkins/GitHub Actions/CodePipeline) với một cơ chế CD (kubectl/Helm/ArgoCD/Terraform).</p>
+
+  <h2 class="section-heading">Các phương án chính</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Phương án</th><th>Mô tả</th><th>Đặc điểm nổi bật</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Jenkins + Helm</strong></td><td>Jenkins chạy pipeline build image, rồi dùng Helm để cài/nâng cấp ứng dụng lên EKS.</td><td>Linh hoạt, phổ biến, phù hợp team đã quen Jenkins; tự vận hành Jenkins server.</td></tr>
+      <tr><td><strong>CodePipeline</strong> (CodeCommit + CodeBuild + CodeDeploy)</td><td>Dùng bộ AWS Developer Tools, tích hợp sâu với ECR và EKS.</td><td>Managed service, ít phải vận hành, tích hợp IAM tốt; gắn chặt với AWS.</td></tr>
+      <tr><td><strong>GitHub Actions</strong></td><td>Workflow chạy trên GitHub, build image push ECR rồi <code>kubectl apply</code> lên EKS.</td><td>Nằm sát code trên GitHub, dễ cấu hình bằng YAML, cộng đồng action phong phú.</td></tr>
+      <tr><td><strong>ArgoCD (GitOps)</strong> kết hợp Jenkins/GitHub Actions</td><td>CI chỉ build &amp; push image; ArgoCD tự đồng bộ manifest từ Git xuống cluster (pull-based).</td><td>Git là nguồn sự thật duy nhất, tự phục hồi drift, rollback bằng Git.</td></tr>
+      <tr><td><strong>Terraform / CDK8s</strong></td><td>Dùng IaC để quản lý cluster và cả manifest ứng dụng một cách khai báo.</td><td>Đồng bộ hạ tầng + ứng dụng trong cùng một công cụ; phù hợp đội đã dùng Terraform.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">So sánh nhanh các công cụ CI</h2>
+  <table class="req-table">
+    <thead>
+      <tr><th>Tiêu chí</th><th>Jenkins</th><th>GitHub Actions</th><th>GitLab CI</th><th>CodePipeline</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Loại</td><td>Self-hosted</td><td>SaaS (GitHub)</td><td>SaaS/self-hosted</td><td>Managed (AWS)</td></tr>
+      <tr><td>Vận hành</td><td>Tự quản lý server</td><td>Không cần</td><td>Không cần (SaaS)</td><td>Không cần</td></tr>
+      <tr><td>Cấu hình</td><td>Groovy/Jenkinsfile</td><td>YAML workflow</td><td>YAML (.gitlab-ci.yml)</td><td>Console + buildspec</td></tr>
+      <tr><td>Hệ sinh thái</td><td>Plugin khổng lồ</td><td>Actions + Marketplace</td><td>Tích hợp GitLab</td><td>Gắn chặt AWS</td></tr>
+      <tr><td>Phù hợp khi</td><td>Cần tự chủ, tuỳ biến sâu</td><td>Code trên GitHub</td><td>Code trên GitLab</td><td>Hệ sinh thái AWS</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Tiêu chí chọn phương án</h2>
+  <ul class="feature-list">
+    <li><strong>Nơi đặt code:</strong> code trên GitHub thì GitHub Actions tiện; trên GitLab thì GitLab CI; cần managed AWS thì CodePipeline.</li>
+    <li><strong>Kỹ năng đội ngũ:</strong> team đã quen Jenkins thì tiếp tục Jenkins + Helm; muốn đơn giản thì dùng GitHub Actions.</li>
+    <li><strong>Nhu cầu vận hành:</strong> không muốn "nuôi" server CI thì chọn managed/SaaS (CodePipeline, GitHub Actions, GitLab CI SaaS).</li>
+    <li><strong>Mức độ audit &amp; rollback:</strong> cần truy vết "ai deploy gì, khi nào" và rollback dễ → ưu tiên GitOps (ArgoCD).</li>
+    <li><strong>Chi phí:</strong> Jenkins self-hosted tốn EC2; CodePipeline/GitHub Actions tính phí theo phút build (có free tier).</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Managed / SaaS (CodePipeline, GitHub Actions)</h4>
+      <ul class="feature-list-sm">
+        <li>Không lo cài đặt, bảo trì, nâng cấp.</li>
+        <li>Bảo mật tích hợp sẵn (IAM, secret, OIDC).</li>
+        <li>Triển khai nhanh, ít rào cản.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Self-hosted (Jenkins) / GitOps (ArgoCD)</h4>
+      <ul class="feature-list-sm">
+        <li>Jenkins: tự vận hành, phải lo HA, backup, bảo mật server.</li>
+        <li>ArgoCD: thêm một thành phần trên cluster cần quản lý, nhưng bù lại rollback &amp; audit mạnh.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Doanh nghiệp truyền thống đã dùng Jenkins</h4>
+      <p>Tiếp tục Jenkins + Helm để tận dụng kinh nghiệm sẵn có, ít tốn công chuyển đổi.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Startup code trên GitHub</h4>
+      <p>Dùng GitHub Actions vì nằm ngay trên repo, miễn phí cho public repo và dễ duy trì.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Hệ thống cần audit chặt &amp; rollback nhanh</h4>
+      <p>Dùng GitOps với ArgoCD: mọi thay đổi đều qua Git, rollback chỉ là revert commit.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-info">
+    <strong>Lộ trình của chương này:</strong> bạn sẽ thực hành <strong>2 cách phổ biến</strong> là CodePipeline (Lab 2) và GitHub Actions (Lab 3), sau đó nâng cấp lên <strong>GitOps với ArgoCD</strong> (Lab 4) — từ đó tự rút ra ưu/nhược của từng cách.
+  </div>
+  <p class="body-text">
+    Về bản chất, các công cụ chỉ là "phương tiện": luồng <em>build image → push registry → deploy lên cluster</em> là giống nhau. Nắm vững luồng này, bạn có thể chuyển đổi giữa các công cụ dễ dàng.
+  </p>
+
+</body>
+</html>

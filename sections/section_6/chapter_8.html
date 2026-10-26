@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 5: Quản lý Process – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">6. Thao tác cơ bản với Linux</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 5: Quản lý Process</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Liệt kê process bằng các biến thể của lệnh <code>ps</code> và hiểu ý nghĩa các cột PID, PPID, USER, %CPU, %MEM, STAT.</li>
+    <li>Theo dõi tài nguyên real-time bằng <code>top</code>.</li>
+    <li>Chạy process ở background/foreground với <code>&amp;</code>, <code>jobs</code>, <code>fg</code>, <code>bg</code>, <code>Ctrl + Z</code>.</li>
+    <li>Kết thúc process bằng <code>kill</code>, <code>kill -9</code>, <code>pkill</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b>"]
+      subgraph EC2["🖥️ EC2 · linux-lab-server"]
+          direction TB
+          SD["⚙️ systemd · PID 1"] --> SSHD["🔐 sshd"]
+          SSHD --> BASH["⌨️ bash"]
+          BASH --> S1["💤 sleep 1000 &amp;"]
+          BASH --> S2["💤 sleep 2000 &amp;"]
+          BASH --> TOP["📊 top / ps"]
+      end
+      PC -->|"SSH :22"| SSHD
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Instance <code>linux-lab-server</code> đang Running, SSH được bằng <code>ec2-user</code>.</li>
+    <li>Đã đọc chương <strong>Process &amp; Service trong Linux</strong>.</li>
+    <li>Source code: <code>sourcecode/section_6_linux_basic_operation/lab5_process/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Liệt kê process với ps</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">ps
+ps -e
+ps -ef
+ps aux
+ps -l
+ps -ef | head -5</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>ps</code></td><td>Process của user hiện tại trong terminal hiện tại (thường chỉ có <code>bash</code> và <code>ps</code>)</td></tr>
+            <tr><td><code>ps -e</code></td><td>Tất cả process, không quan tâm owner</td></tr>
+            <tr><td><code>ps -ef</code></td><td>Tất cả process, format đầy đủ: UID, PID, PPID, thời gian start, lệnh</td></tr>
+            <tr><td><code>ps aux</code></td><td>Tương tự <code>ps -ef</code> nhưng có thêm %CPU, %MEM, STAT (trạng thái)</td></tr>
+            <tr><td><code>ps -l</code></td><td>Format dài, có cột <code>S</code> (state) và độ ưu tiên</td></tr>
+          </tbody>
+        </table>
+        <p>Dòng đầu tiên của <code>ps -ef</code> là <code>/usr/lib/systemd/systemd</code> với PID <code>1</code>. Tìm process <code>bash</code> của bạn và để ý cột PPID trỏ tới PID của <code>sshd</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Theo dõi real-time với top</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">top</code></pre>
+        <ul class="feature-list">
+          <li>Phần đầu: uptime, load average, tổng số task, %CPU, RAM/Swap đã dùng.</li>
+          <li>Phần danh sách: PID, USER, %CPU, %MEM, TIME+, COMMAND.</li>
+          <li>Phím tắt: <code>P</code> sắp xếp theo CPU, <code>M</code> theo RAM, <code>1</code> hiện từng CPU core, <code>k</code> kill process, <code>q</code> thoát.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Chạy process ở background</strong>
+        <p>Lệnh <code>sleep</code> chỉ “ngủ” trong N giây — rất tiện để giả lập một process chạy lâu. Ký tự <code>&amp;</code> đưa process chạy nền, terminal được trả lại ngay:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="2,4,6-7"><code class="language-bash">sleep 1000 &amp;
+[1] 3101
+sleep 2000 &amp;
+[2] 3102
+jobs
+[1]-  Running                 sleep 1000 &amp;
+[2]+  Running                 sleep 2000 &amp;
+ps -ef | grep sleep
+pgrep -a sleep</code></pre>
+        <p><code>[1]</code> là số job trong terminal hiện tại, <code>3101</code> là PID (số PID trên máy bạn sẽ khác).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Chuyển đổi foreground / background</strong>
+        <p>Chạy một process ở foreground (terminal bị “chiếm”), sau đó nhấn <strong>Ctrl + Z</strong> để tạm dừng:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sleep 3000</code></pre>
+        <p>Sau khi nhấn <strong>Ctrl + Z</strong>, process chuyển sang trạng thái <code>Stopped</code>. Cho nó chạy tiếp ở background, rồi kéo về foreground:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">jobs
+bg %3
+jobs
+fg %3</code></pre>
+        <p>Process đang ở foreground, nhấn <strong>Ctrl + C</strong> để dừng hẳn (gửi SIGINT).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kết thúc process bằng kill</strong>
+        <p>Lấy PID của 2 process <code>sleep</code> còn lại, sau đó kill (thay <code>&lt;PID_sleep_1000&gt;</code>, <code>&lt;PID_sleep_2000&gt;</code> bằng PID thực tế):</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">pgrep -a sleep
+kill &lt;PID_sleep_1000&gt;
+kill -9 &lt;PID_sleep_2000&gt;
+pgrep -a sleep</code></pre>
+        <p><code>kill</code> gửi <strong>SIGTERM</strong> (yêu cầu dừng), <code>kill -9</code> gửi <strong>SIGKILL</strong> (buộc dừng ngay). Kill nhiều process theo tên với <code>pkill</code>:</p>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">sleep 4000 &amp;
+sleep 5000 &amp;
+pkill sleep
+pgrep -a sleep</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Process của user khác</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$" data-output="4"><code class="language-bash">ps -u root | head
+ps -u ec2-user
+kill $(pgrep -o sshd)
+-bash: kill: (1234) - Operation not permitted</code></pre>
+        <p>User thường chỉ kill được process của chính mình. Process <code>sshd</code> chính chạy bằng <code>root</code> nên bị từ chối — đây là cơ chế bảo vệ của Linux. (Không chạy lệnh trên với <code>sudo</code>, vì sẽ dừng SSH server!)</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Xem tài nguyên hệ thống</strong>
+        <pre class="command-line" data-prompt="[ec2-user ~]$"><code class="language-bash">free -h
+nproc
+uptime
+ps aux --sort=-%mem | head -5</code></pre>
+        <p><code>free -h</code>: RAM tổng/đã dùng/còn trống; <code>nproc</code>: số vCPU (t3.micro = 2); <code>uptime</code>: load average 1, 5, 15 phút; lệnh cuối hiển thị 4 process dùng nhiều RAM nhất.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Xác định được PID 1 là <code>systemd</code> và PPID của <code>bash</code> là <code>sshd</code>.</li>
+      <li>Tạo, tạm dừng, chuyển background/foreground được process <code>sleep</code>.</li>
+      <li>Sau bước 5, <code>pgrep -a sleep</code> không còn trả về process nào.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>-bash: kill: (xxxx) - No such process</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Gõ sai PID hoặc process đã kết thúc trước đó.<br/><strong>Giải pháp:</strong> Chạy lại <code>pgrep -a sleep</code> để lấy PID chính xác.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>ps -ef | grep sleep</code> luôn hiện thêm một dòng <code>grep --color=auto sleep</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Bản thân lệnh <code>grep</code> cũng là một process chứa chữ “sleep”.<br/><strong>Giải pháp:</strong> Bình thường, bỏ qua dòng đó; hoặc dùng <code>pgrep -a sleep</code> cho gọn.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>fg: %3: no such job</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Số job khác trên máy bạn, hoặc đang ở terminal/phiên SSH khác (job chỉ thuộc về terminal đã tạo ra nó).<br/><strong>Giải pháp:</strong> Chạy <code>jobs</code> để xem số job đúng rồi dùng <code>fg %&lt;số&gt;</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Process chạy nền bị dừng khi đóng phiên SSH</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Khi đăng xuất, các process con của phiên SSH bị gửi SIGHUP.<br/><strong>Giải pháp:</strong> Dùng <code>nohup &lt;lệnh&gt; &amp;</code> cho tác vụ tạm thời; với ứng dụng chạy lâu dài hãy tạo systemd service (Lab 6).</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab này không tạo thêm resource trên AWS. Đảm bảo không còn process <code>sleep</code> nào bằng lệnh <code>pkill sleep</code>. Giữ lại instance cho Lab 6.</div>
+
+</body>
+</html>

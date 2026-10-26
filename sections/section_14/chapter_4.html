@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Cài đặt Minikube &amp; chạy Pod đầu tiên – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Cài đặt Minikube &amp; chạy Pod đầu tiên</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Cài đặt <strong>kubectl</strong> và <strong>Minikube</strong> để có một Kubernetes cluster chạy ngay trên máy cá nhân, xác nhận kết nối bằng <code>kubectl get nodes</code>.</li>
+    <li>Biết cách kiểm tra và chuyển <strong>context</strong> khi máy kết nối nhiều cluster.</li>
+    <li>Chạy một Pod nginx bằng lệnh <code>kubectl run</code> (imperative), xem chi tiết bằng <code>kubectl get</code> / <code>kubectl describe</code>.</li>
+    <li>Hiểu cấu trúc file YAML định nghĩa Pod và triển khai bằng <code>kubectl apply -f</code> (declarative).</li>
+    <li>Xoá Pod theo cả hai cách và hiểu vòng đời "tạo – chạy – xoá" của Pod.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Laptop["<img src='../../assets/svg-icon/laptop.svg' style='width:34px;height:34px;'/><br/>Máy cá nhân"]
+      YAML["📄 nginx-pod.yaml"]
+      Kubectl["<img src='../../assets/svg-icon/kubernetes.svg' style='width:34px;height:34px;'/><br/>kubectl"]
+      subgraph Minikube["Minikube (cluster 1 node)"]
+          Node["<img src='../../assets/svg-icon/eks-node.svg' style='width:32px;height:32px;'/><br/>Minikube node"]
+          Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:32px;height:32px;'/><br/>nginx-pod<br/>(image: nginx)"]
+      end
+      Laptop --> Kubectl
+      YAML -->|"kubectl apply -f"| Kubectl
+      Kubectl -->|"kubectl get nodes<br/>kubectl run nginx-pod"| Node
+      Node --> Pod
+  </div>
+  <p class="arch-caption">Minikube tạo một cluster Kubernetes một node ngay trên máy bạn (dùng Docker/VirtualBox làm driver). kubectl là công cụ ra lệnh cho cluster: tạo Pod bằng lệnh trực tiếp (<code>kubectl run</code>) hoặc khai báo qua file YAML (<code>kubectl apply -f</code>).</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã cài <strong>Docker Desktop</strong> (bỏ qua nếu có sẵn – Section 8).</li>
+    <li>Kết nối internet để pull image <code>nginx</code> từ Docker Hub.</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/lab1_minikube_first_pod/</code> (<code>commands.sh</code> + <code>nginx-pod.yaml</code>).</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+
+  <h3 class="sub-heading">Phần 1: Cài đặt Minikube &amp; kubectl</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Cài đặt kubectl</strong>
+        <p>Tham khảo hướng dẫn chính thức theo hệ điều hành của bạn:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash"># macOS: https://kubernetes.io/docs/tasks/tools/install-kubectl-macos/
+# Windows / Linux: https://kubernetes.io/docs/tasks/tools/install-kubectl/</code></pre>
+        <p>Sau khi cài, kiểm tra phiên bản:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl version --client</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cài đặt Minikube</strong>
+        <p>Tham khảo hướng dẫn chính thức:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash"># https://minikube.sigs.k8s.io/docs/start/</code></pre>
+        <p>Bạn có thể cài Minikube trên máy cá nhân, máy ảo hoặc EC2. Kiểm tra phiên bản:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube version</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Khởi động cluster Minikube</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube start</code></pre>
+        <p>Lệnh này tạo một cluster Kubernetes một node. Kiểm tra các node của cluster:</p>
+        <pre class="command-line" data-prompt="$" data-output="2,3"><code class="language-bash">kubectl get nodes
+NAME       STATUS   ROLES           AGE   VERSION
+minikube   Ready    control-plane   84m   v1.27.4</code></pre>
+        <p class="code-note">💡 Thấy node <code>minikube</code> với STATUS <code>Ready</code> là thành công.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sub-heading">Phần 2: Chạy Pod đầu tiên bằng kubectl</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 4: Tạo một Pod bằng lệnh</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl run nginx-pod --image=nginx</code></pre>
+        <p>Cluster sẽ tạo Pod tên <code>nginx-pod</code> chạy image <code>nginx</code> (phiên bản latest từ Docker Hub).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Liệt kê Pod</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods
+kubectl get pods -o wide</code></pre>
+        <p><code>-o wide</code> hiển thị thêm cột <em>IP</em>, <em>NODE</em> – cho biết Pod đang nằm ở đâu.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Xem chi tiết Pod</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl describe pod nginx-pod</code></pre>
+        <p>Đọc các thông tin: Events (lịch sử pull image, khởi động container), IP, image, namespace...</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Xoá Pod</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete pod nginx-pod</code></pre>
+        <p>Kiểm tra lại để chắc chắn Pod đã bị xoá:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sub-heading">Phần 3: Triển khai Pod bằng file YAML</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 8: Tạo file YAML định nghĩa Pod</strong>
+        <p>Trong thực tế, ta khai báo resource qua file YAML rồi apply lên cluster, thay vì gõ từng lệnh cho mỗi resource. Tạo file <code>nginx-pod.yaml</code> với nội dung sau:</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-pod
+spec:
+  containers:
+    - name: nginx-container
+      image: nginx
+      ports:
+        - containerPort: 80</code></pre>
+        <ul class="feature-list">
+          <li><code>apiVersion</code> + <code>kind</code>: loại resource (v1 / Pod).</li>
+          <li><code>metadata.name</code>: tên Pod.</li>
+          <li><code>spec.containers</code>: danh sách container, mỗi container có <code>name</code>, <code>image</code>, <code>ports</code>.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Apply file cấu hình</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f nginx-pod.yaml</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 10: Kiểm tra Pod được tạo</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods
+kubectl get pods -o wide</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 11: Xoá Pod bằng file YAML</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f nginx-pod.yaml</code></pre>
+        <p>Kiểm tra lại:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl version --client</code> và <code>minikube version</code> trả về phiên bản hợp lệ.</li>
+      <li><code>kubectl get nodes</code> hiển thị node <code>minikube</code> ở trạng thái <strong>Ready</strong>.</li>
+      <li>Sau <code>kubectl run</code> và sau <code>kubectl apply -f nginx-pod.yaml</code>, <code>kubectl get pods</code> đều hiển thị <code>nginx-pod</code> với STATUS <strong>Running</strong>.</li>
+      <li><code>kubectl describe pod nginx-pod</code> cho thấy image <code>nginx</code> và các Events.</li>
+      <li>Sau <code>kubectl delete pod nginx-pod</code> / <code>kubectl delete -f nginx-pod.yaml</code>, <code>kubectl get pods</code> không còn Pod nào.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>kubectl get nodes</code> trả về node không phải <code>minikube</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> máy bạn đang kết nối tới một cluster khác (ví dụ Docker Desktop).<br/><strong>Giải pháp:</strong> xem danh sách context và chuyển về minikube:
+      <pre class="command-line" data-prompt="$" data-output="4-7"><code class="language-bash">kubectl config get-contexts
+CURRENT   NAME                   CLUSTER                AUTHINFO               NAMESPACE
+          docker-desktop         docker-desktop         docker-desktop
+*         minikube               minikube               minikube               default
+kubectl config use-context minikube</code></pre>
+      (Dấu <code>*</code> là context đang được trỏ đến; dùng <code>kubectl config use-context &lt;tên&gt;</code> để chuyển.)</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>minikube ip</code> trả về lỗi hoặc minikube không khởi động được</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Docker context/daemon bị lệch.<br/><strong>Giải pháp:</strong> kiểm tra và chuyển Docker về context mặc định:
+      <pre class="command-line" data-prompt="$"><code class="language-bash">docker info
+docker context ls
+docker context use default</code></pre>
+      Sau đó restart Docker: trên Windows restart Docker Desktop; trên Linux <code>systemctl restart docker</code>; trên macOS restart Docker Desktop.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unable to connect to the server</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Minikube chưa chạy hoặc sai context.<br/><strong>Giải pháp:</strong> chạy <code>minikube start</code> rồi <code>kubectl config use-context minikube</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>ContainerCreating</code> kéo dài hoặc <code>ImagePullBackOff</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> chưa pull được image (mạng chậm, sai tên image).<br/><strong>Giải pháp:</strong> chờ vài phút rồi <code>kubectl describe pod nginx-pod</code> xem Events; kiểm tra kết nối internet và tên image đúng chính tả.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>error: error parsing nginx-pod.yaml: ...</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> sai cú pháp YAML (sai thụt lề, thiếu dấu gạch ngang).<br/><strong>Giải pháp:</strong> kiểm tra lại số dấu cách (dùng 2 hoặc 4 dấu cách, không dùng tab); đối chiếu với file mẫu.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Error from server (AlreadyExists): pods "nginx-pod" already exists</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Pod tạo ở Phần 2 chưa được xoá trước khi apply file YAML ở Phần 3.<br/><strong>Giải pháp:</strong> chạy <code>kubectl delete pod nginx-pod</code> rồi apply lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Lab chạy trên Minikube local nên không tốn phí cloud. Giữ cluster để dùng cho các lab tiếp theo; khi không học thì tạm dừng để giải phóng RAM/CPU.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">minikube stop</code></pre>
+
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWS CodePipeline &amp; AWS CodeDeploy – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">AWS CodePipeline &amp; AWS CodeDeploy</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>AWS CodePipeline</strong> là dịch vụ điều phối luồng CI/CD: bạn định nghĩa một chuỗi bước gọi là <strong>pipeline</strong>, và mỗi khi có thay đổi code,
+    pipeline tự động chạy qua các bước build, test, phê duyệt và deploy. <strong>AWS CodeDeploy</strong> là dịch vụ chuyên thực hiện bước deploy lên
+    <strong>EC2/On-premises, AWS Lambda và Amazon ECS</strong>, hỗ trợ các chiến lược triển khai giảm downtime như Blue/Green, Canary và tự động rollback.
+    Hai dịch vụ này kết hợp với CodeBuild tạo thành một luồng CI/CD hoàn chỉnh trên AWS.
+  </p>
+
+  <h2 class="section-heading">AWS CodePipeline</h2>
+  <h3 class="section-subheading">Đặc điểm chính</h3>
+  <ul class="feature-list">
+    <li><strong>Tự động hoá end-to-end:</strong> trigger khi push code (webhook qua CodeConnections), khi có image mới trên ECR, file mới trên S3 hoặc theo lịch (EventBridge).</li>
+    <li><strong>Mô hình Stage – Action:</strong> mỗi stage chứa một hoặc nhiều action chạy tuần tự hoặc song song (Source, Build, Test, Approval, Deploy, Invoke Lambda...).</li>
+    <li><strong>Artifact store:</strong> output của action này (source code, file build) được lưu trên S3 và làm input cho action kế tiếp.</li>
+    <li><strong>Tích hợp rộng:</strong> GitHub, GitLab, Bitbucket, CodeCommit, ECR, S3, CodeBuild, Jenkins, CodeDeploy, ECS, Elastic Beanstalk, CloudFormation, Lambda...</li>
+    <li><strong>Pipeline type V2:</strong> hỗ trợ trigger theo branch/tag/file path, biến pipeline, execution mode <em>Queued / Superseded / Parallel</em>, rollback stage.</li>
+    <li><strong>Quan sát &amp; kiểm soát:</strong> lịch sử execution, <em>Release change</em> thủ công, <em>Stop execution</em>, Manual approval, notification qua SNS / Chatbot.</li>
+  </ul>
+
+  <h3 class="section-subheading">Các khái niệm</h3>
+  <div class="mermaid">
+  flowchart LR
+      subgraph P["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:26px;height:26px;'/> Pipeline: nodejs-ecs-pipeline (V2)"]
+          direction LR
+          subgraph ST1["Stage: Source"]
+              A1["Action: GitHub<br/>output: SourceArtifact"]
+          end
+          subgraph ST2["Stage: Build"]
+              A2["Action: CodeBuild<br/>input: SourceArtifact<br/>output: BuildArtifact"]
+          end
+          subgraph ST3["Stage: Approval"]
+              A3["Action: Manual approval"]
+          end
+          subgraph ST4["Stage: Deploy"]
+              A4["Action: Amazon ECS<br/>input: BuildArtifact"]
+          end
+          ST1 -->|"transition"| ST2 -->|"transition"| ST3 -->|"transition"| ST4
+      end
+      S3["<img src='../../assets/aws-svg/S3.svg' style='width:36px;height:36px;'/><br/>Artifact store (S3)"]
+      P <-.-> S3
+  </div>
+  <table class="compare-table">
+    <thead><tr><th>Khái niệm</th><th>Ý nghĩa</th></tr></thead>
+    <tbody>
+      <tr><td>Pipeline</td><td>Toàn bộ luồng CI/CD, gồm các stage theo thứ tự</td></tr>
+      <tr><td>Stage</td><td>Một giai đoạn (Source, Build, Deploy...). Mỗi stage chỉ xử lý <strong>một execution</strong> tại một thời điểm</td></tr>
+      <tr><td>Action</td><td>Một tác vụ cụ thể trong stage, có <em>provider</em> (GitHub, CodeBuild, ECS...), input/output artifact</td></tr>
+      <tr><td>Artifact</td><td>Tập file được truyền giữa các action, lưu dạng file zip trên S3 artifact bucket</td></tr>
+      <tr><td>Transition</td><td>Kết nối giữa 2 stage, có thể <em>disable</em> để tạm chặn release sang stage sau</td></tr>
+      <tr><td>Execution</td><td>Một lần chạy pipeline ứng với một thay đổi (commit) cụ thể</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="section-subheading">Các action deploy thường dùng</h3>
+  <table class="compare-table">
+    <thead><tr><th>Deploy provider</th><th>File đầu vào cần có trong artifact</th><th>Chiến lược</th><th>Lab</th></tr></thead>
+    <tbody>
+      <tr><td>AWS Elastic Beanstalk</td><td>Source bundle (file <code>.jar</code>, <code>.zip</code>...)</td><td>Theo cấu hình của environment (All at once, Rolling...)</td><td>Lab 5</td></tr>
+      <tr><td>Amazon ECS</td><td><code>imagedefinitions.json</code></td><td>Rolling update do ECS điều khiển</td><td>Lab 6</td></tr>
+      <tr><td>Amazon ECS (Blue/Green)</td><td><code>appspec.yaml</code>, <code>taskdef.json</code>, <code>imageDetail.json</code></td><td>Blue/Green, Canary, Linear qua CodeDeploy</td><td>Lab 7, Lab 8</td></tr>
+      <tr><td>AWS CodeDeploy</td><td><code>appspec.yml</code> + source bundle</td><td>In-place / Blue/Green cho EC2, On-premises</td><td>–</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">AWS CodeDeploy</h2>
+  <h3 class="section-subheading">Đặc điểm chính</h3>
+  <ul class="feature-list">
+    <li><strong>Triển khai tự động</strong> lên 3 loại compute platform: <strong>EC2/On-premises</strong>, <strong>AWS Lambda</strong>, <strong>Amazon ECS</strong>.</li>
+    <li><strong>Giảm downtime:</strong> hỗ trợ In-place (rolling), Blue/Green, Canary, Linear – chuyển traffic dần dần thông qua Load Balancer hoặc Lambda alias.</li>
+    <li><strong>Tự động rollback</strong> khi deployment thất bại hoặc khi CloudWatch Alarm chuyển sang trạng thái ALARM.</li>
+    <li><strong>Lifecycle hooks:</strong> chạy script/Lambda kiểm thử ở từng giai đoạn (ví dụ <code>BeforeAllowTraffic</code>, <code>AfterAllowTestTraffic</code>).</li>
+    <li><strong>Chi phí:</strong> miễn phí khi deploy lên EC2, Lambda, ECS; chỉ tính phí với máy On-premises.</li>
+  </ul>
+
+  <h3 class="section-subheading">Các thành phần</h3>
+  <div class="mermaid">
+  flowchart TB
+      APP["📦 <b>Application</b><br/>nodejs-ecs-app<br/>compute platform: Amazon ECS"]
+      subgraph DG["Deployment group: nodejs-ecs-dg"]
+          direction LR
+          T1["<img src='../../assets/aws-svg/Elastic-Container-Service.svg' style='width:30px;height:30px;'/><br/>ECS cluster + service"]
+          T2["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:30px;height:30px;'/><br/>ALB · listener 80/81<br/>TG Blue · TG Green"]
+          T3["⚙️ Deployment config<br/>ECSAllAtOnce / Canary / Linear"]
+          T4["<img src='../../assets/aws-svg/IAM.svg' style='width:30px;height:30px;'/><br/>Service role"]
+      end
+      REV["📄 <b>Revision</b><br/>appspec.yaml + task definition mới"]
+      DEP["🚀 <b>Deployment</b><br/>một lần triển khai revision lên deployment group"]
+      APP --> DG
+      REV --> DEP
+      DG --> DEP
+  </div>
+  <ul class="feature-list">
+    <li><strong>Application:</strong> tên logic nhóm các deployment group, gắn với một compute platform.</li>
+    <li><strong>Deployment group:</strong> tập target được deploy (nhóm EC2 theo tag/ASG, Lambda function, hoặc ECS service + ALB + Target Group) kèm deployment configuration, rollback, alarm.</li>
+    <li><strong>Deployment configuration:</strong> quy tắc chuyển traffic / số lượng instance mỗi đợt, ví dụ <code>CodeDeployDefault.ECSAllAtOnce</code>, <code>ECSCanary10Percent5Minutes</code>, <code>ECSLinear10PercentEvery1Minutes</code>.</li>
+    <li><strong>Revision:</strong> phiên bản cần deploy, mô tả bằng file <strong>AppSpec</strong> (<code>appspec.yml</code>/<code>appspec.yaml</code>).</li>
+    <li><strong>Service role:</strong> IAM role để CodeDeploy thao tác ECS, ELB, Auto Scaling... (managed policy <code>AWSCodeDeployRoleForECS</code> cho ECS).</li>
+  </ul>
+
+  <h3 class="section-subheading">File AppSpec cho Amazon ECS</h3>
+  <pre class="code-block"><code class="language-yaml">version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: &lt;TASK_DEFINITION&gt;      # CodePipeline tự điền ARN task definition mới
+        LoadBalancerInfo:
+          ContainerName: "nodejs-container"     # container nhận traffic từ ALB
+          ContainerPort: 3000
+# Hooks:                                       # (tuỳ chọn) Lambda kiểm thử ở từng giai đoạn
+#   - AfterAllowTestTraffic: "arn:aws:lambda:...:function:smoke-test"</code></pre>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="compare-table">
+    <thead><tr><th>Cách deploy lên ECS</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+    <tbody>
+      <tr><td>Action <strong>Amazon ECS</strong> (rolling update)</td><td>Cấu hình đơn giản, chỉ cần <code>imagedefinitions.json</code>; có circuit breaker rollback</td><td>Version cũ và mới cùng nhận traffic trong lúc deploy; không có bước test trước khi chuyển traffic</td></tr>
+      <tr><td>Action <strong>Amazon ECS (Blue/Green)</strong> qua CodeDeploy</td><td>Test version mới qua test listener, chuyển traffic tức thì / canary / linear, rollback nhanh</td><td>Cấu hình phức tạp hơn (2 Target Group, 2 listener, appspec, taskdef), tốn tài nguyên gấp đôi trong lúc deploy</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Web app Java trên Elastic Beanstalk</h4>
+      <p>Mỗi commit lên <code>main</code> được build thành <code>.jar</code> và deploy lên environment Elastic Beanstalk, không cần thao tác tay (Lab 5).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Microservice container trên ECS</h4>
+      <p>Pipeline build image, push ECR và cập nhật ECS service. Service quan trọng dùng Blue/Green để kiểm thử trước khi chuyển traffic (Lab 6, Lab 7).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Serverless với Lambda</h4>
+      <p>CodeDeploy dịch chuyển traffic của Lambda alias theo Canary 10% trong 5 phút, tự rollback khi alarm tỷ lệ lỗi kích hoạt (sẽ gặp lại ở section AWS SAM).</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Pipeline V1 vs V2:</strong> V1 tính phí theo pipeline active/tháng; V2 tính theo phút chạy action và có nhiều tính năng hơn – nên dùng V2 cho pipeline mới.</li>
+    <li><strong>Execution mode:</strong> <em>Superseded</em> (mặc định – execution mới thay thế execution cũ đang chờ), <em>Queued</em> (xử lý lần lượt), <em>Parallel</em> (chạy song song, chỉ V2).</li>
+    <li><strong>Artifact bucket:</strong> CodePipeline tự tạo bucket <code>codepipeline-&lt;region&gt;-...</code> nếu bạn không chỉ định. Nhớ dọn file cũ để tiết kiệm chi phí.</li>
+    <li><strong>ECS native Blue/Green:</strong> từ 2025, Amazon ECS hỗ trợ Blue/Green, Canary, Linear <em>ngay trong ECS</em> (deployment controller <code>ECS</code>) mà không cần CodeDeploy. Section này dùng CodeDeploy để bạn hiểu rõ cơ chế và phục vụ ôn thi; với dự án mới hãy cân nhắc tính năng native của ECS.</li>
+    <li><strong>Giới hạn:</strong> mỗi pipeline tối đa 50 stage, mỗi stage tối đa 50 action; artifact tối đa vài GB (xem trang <em>Quotas</em> của CodePipeline).</li>
+  </ul>
+
+</body>
+</html>

@@ -1,0 +1,83 @@
+// Section 11 – Job 3: Switch traffic giữa 2 môi trường Blue/Green trên ALB
+// Job: bluegreen-job3-switch-traffic | Pipeline definition: Pipeline script (dán nội dung file này)
+// Không có parameter: job tự đọc trạng thái hiện tại của ALB rồi hoán đổi Target Group của 2 listener
+//   - Listener :80 (production) -> Target Group đang ở listener :81 (môi trường đã kiểm thử)
+//   - Listener :81 (test)       -> Target Group production cũ (giữ lại để rollback)
+// Chạy lại job một lần nữa = ROLLBACK.
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        AWS_REGION = 'ap-southeast-1'
+        ALB_NAME   = 'bluegreen-lab-alb'
+    }
+
+    stages {
+        stage('Check current state') {
+            steps {
+                sh '''
+                    ALB_ARN=$(aws elbv2 describe-load-balancers --region ${AWS_REGION} --names ${ALB_NAME} --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+                    aws elbv2 describe-listeners --region ${AWS_REGION} --load-balancer-arn ${ALB_ARN} > listeners.json
+
+                    PROD_LISTENER_ARN=$(jq -r '.Listeners[] | select(.Port == 80) | .ListenerArn' listeners.json)
+                    TEST_LISTENER_ARN=$(jq -r '.Listeners[] | select(.Port == 81) | .ListenerArn' listeners.json)
+                    # Môi trường production = Target Group có weight lớn nhất trên listener :80 (kể cả khi đang chạy canary)
+                    CURRENT_PROD_TG=$(jq -r '.Listeners[] | select(.Port == 80) | .DefaultActions[0].ForwardConfig.TargetGroups | max_by(.Weight) | .TargetGroupArn' listeners.json)
+                    CURRENT_TEST_TG=$(jq -r '.Listeners[] | select(.Port == 81) | .DefaultActions[0].ForwardConfig.TargetGroups[0].TargetGroupArn' listeners.json)
+
+                    if [ "${CURRENT_PROD_TG}" = "${CURRENT_TEST_TG}" ]; then
+                        echo "ERROR: Listener :80 và :81 đang trỏ cùng một Target Group, không có gì để switch."
+                        exit 1
+                    fi
+
+                    # Không switch sang môi trường chưa có task healthy -> tránh downtime
+                    HEALTHY=$(aws elbv2 describe-target-health --region ${AWS_REGION} --target-group-arn ${CURRENT_TEST_TG} | jq '[.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy")] | length')
+                    if [ "${HEALTHY}" -eq 0 ]; then
+                        echo "ERROR: Môi trường test không có target healthy. Hãy deploy (bluegreen-job2-deploy) trước khi switch!"
+                        exit 1
+                    fi
+
+                    PROD_NAME=$(aws elbv2 describe-target-groups --region ${AWS_REGION} --target-group-arns ${CURRENT_PROD_TG} --query 'TargetGroups[0].TargetGroupName' --output text)
+                    TEST_NAME=$(aws elbv2 describe-target-groups --region ${AWS_REGION} --target-group-arns ${CURRENT_TEST_TG} --query 'TargetGroups[0].TargetGroupName' --output text)
+                    echo "Hiện tại: :80 (production) -> ${PROD_NAME} | :81 (test) -> ${TEST_NAME} (${HEALTHY} target healthy)"
+                    echo "Sau khi switch: :80 (production) -> ${TEST_NAME} | :81 (test) -> ${PROD_NAME}"
+
+                    # Lưu lại cho stage Switch traffic
+                    echo "${PROD_LISTENER_ARN}" > prod_listener.txt
+                    echo "${TEST_LISTENER_ARN}" > test_listener.txt
+                    echo "${CURRENT_PROD_TG}" > current_prod_tg.txt
+                    echo "${CURRENT_TEST_TG}" > current_test_tg.txt
+                '''
+            }
+        }
+
+        stage('Confirm') {
+            steps {
+                // Người release xác nhận lần cuối (đọc kết quả stage trước trong Console Output)
+                input message: 'Chuyển 100% traffic production sang môi trường đang ở listener :81?', ok: 'Switch'
+            }
+        }
+
+        stage('Switch traffic') {
+            steps {
+                sh '''
+                    PROD_LISTENER_ARN=$(cat prod_listener.txt)
+                    TEST_LISTENER_ARN=$(cat test_listener.txt)
+                    CURRENT_PROD_TG=$(cat current_prod_tg.txt)
+                    CURRENT_TEST_TG=$(cat current_test_tg.txt)
+
+                    aws elbv2 modify-listener --region ${AWS_REGION} --listener-arn ${PROD_LISTENER_ARN} --default-actions Type=forward,TargetGroupArn=${CURRENT_TEST_TG} > /dev/null
+                    aws elbv2 modify-listener --region ${AWS_REGION} --listener-arn ${TEST_LISTENER_ARN} --default-actions Type=forward,TargetGroupArn=${CURRENT_PROD_TG} > /dev/null
+
+                    NEW_PROD_NAME=$(aws elbv2 describe-target-groups --region ${AWS_REGION} --target-group-arns ${CURRENT_TEST_TG} --query 'TargetGroups[0].TargetGroupName' --output text)
+                    echo "Switch thành công! Production (:80) đang trỏ tới ${NEW_PROD_NAME}"
+                '''
+            }
+        }
+    }
+}

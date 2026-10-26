@@ -1,0 +1,5 @@
+# Thêm vào file ~/.ssh/config trên PC Local
+# Thay <SSH_KEY_ID> bằng SSH key ID hiển thị trên IAM (dạng APKAxxxxxxxxxxxxxxxx)
+Host git-codecommit.*.amazonaws.com
+    User <SSH_KEY_ID>
+    IdentityFile ~/.ssh/codecommit_rsa

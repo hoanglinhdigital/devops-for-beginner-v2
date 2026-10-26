@@ -1,0 +1,81 @@
+# Lab 2: Workflow deploy lên ECS Cluster đang không nhận traffic (môi trường idle).
+# Lấy task definition hiện tại, đổi image thành version mới, đăng ký revision mới
+# và cập nhật service. Copy file này thành .github/workflows/deploy-ecs.yml
+name: Deploy to ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      cluster_name:
+        description: 'ECS Cluster name'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+      cluster_name:
+        description: 'ECS Cluster name'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: nodejs-random-color
+  TASK_FAMILY: nodejs-task-definition
+  SERVICE_NAME: nodejs-service
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update ECS task definition and deploy
+      run: |
+        # Lấy Account ID từ IAM user đã cấu hình - không hard-code Account ID
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        FULL_IMAGE="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ inputs.version }}"
+
+        # Lấy task definition hiện tại (active)
+        TASK_DEFINITION=$(aws ecs describe-task-definition \
+          --task-definition ${{ env.TASK_FAMILY }} \
+          --region ${{ env.AWS_REGION }})
+
+        # Tạo task definition mới với image mới, bỏ các trường không cần thiết
+        NEW_TASK_DEFINITION=$(echo "$TASK_DEFINITION" | jq --arg IMAGE "$FULL_IMAGE" '
+          .taskDefinition |
+          .containerDefinitions[0].image = $IMAGE |
+          del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+              .compatibilities, .registeredAt, .registeredBy)')
+
+        # Đăng ký task definition mới
+        NEW_TASK_INFO=$(aws ecs register-task-definition \
+          --region ${{ env.AWS_REGION }} \
+          --cli-input-json "$NEW_TASK_DEFINITION")
+
+        NEW_REVISION=$(echo "$NEW_TASK_INFO" | jq -r '.taskDefinition.revision')
+
+        # Cập nhật service dùng revision mới và scale lên 2 task
+        aws ecs update-service \
+          --cluster ${{ inputs.cluster_name }} \
+          --service ${{ env.SERVICE_NAME }} \
+          --task-definition ${{ env.TASK_FAMILY }}:${NEW_REVISION} \
+          --region ${{ env.AWS_REGION }} \
+          --force-new-deployment \
+          --desired-count 2
+
+        echo "Deployed version ${{ inputs.version }} to cluster ${{ inputs.cluster_name }}"
+        echo "New task definition revision: ${NEW_REVISION}"

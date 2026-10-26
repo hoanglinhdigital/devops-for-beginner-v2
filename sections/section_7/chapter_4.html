@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: Tạo repository trên GitHub &amp; cấu hình SSH key – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: Tạo repository trên GitHub &amp; cấu hình SSH key</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo repository <code>demo-git</code> trên GitHub – repository dùng xuyên suốt các lab của section.</li>
+    <li>Sinh cặp SSH key trên PC Local và thêm public key vào tài khoản GitHub.</li>
+    <li>Hiểu khi nào cần <code>ssh-agent</code>.</li>
+    <li>Clone repository bằng SSH, không cần nhập username/password.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph PC["💻 PC Local"]
+          direction TB
+          PRIV["🔑 <b>~/.ssh/id_ed25519</b><br/>private key – giữ bí mật"]
+          PUB["📄 <b>~/.ssh/id_ed25519.pub</b><br/>public key"]
+          GIT["⌨️ <b>Git Bash</b><br/>git clone / push"]
+      end
+      subgraph GH["GitHub"]
+          direction TB
+          KEY["⚙️ <b>Settings → SSH and GPG keys</b><br/>public key của bạn"]
+          REPO["<img src='../../assets/svg-icon/github.svg' style='width:36px;height:36px;'/><br/><b>demo-git</b>"]
+      end
+      PUB -.->|"copy &amp; paste 1 lần"| KEY
+      GIT ==>|"SSH · git@github.com"| REPO
+      PRIV -.->|"dùng để xác thực"| GIT
+  </div>
+  <p class="arch-caption">Cơ chế giống hệt SSH vào EC2 ở Section 6: GitHub giữ public key, máy bạn giữ private key. Private key không bao giờ rời khỏi máy của bạn.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 1: đã cài Git, cấu hình <code>user.name</code>, <code>user.email</code>.</li>
+    <li>Có tài khoản GitHub và đã đăng nhập trên trình duyệt.</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab2_github_ssh_key/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo repository trên GitHub</strong>
+        <p>Trên GitHub, tạo repository mới (nút <strong>New repository</strong>) với các thông số:</p>
+        <ul class="feature-list">
+          <li>Repository name: <code>demo-git</code></li>
+          <li>Visibility: <strong>Public</strong></li>
+          <li>Add README: <strong>bật</strong> (để repository có sẵn branch <code>main</code> và commit đầu tiên)</li>
+          <li>.gitignore: None · License: None</li>
+        </ul>
+        <div class="alert alert-warning"><strong>Vì sao chọn Public?</strong> Với tài khoản GitHub Free, tính năng <strong>bảo vệ branch</strong> (Lab 4) chỉ áp dụng cho public repository. Repository này chỉ chứa code demo, không chứa thông tin nhạy cảm. Nếu dùng GitHub Pro/Team, có thể chọn Private.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Sinh SSH key trên PC Local</strong>
+        <p>Mở Git Bash (Windows) hoặc Terminal (Mac/Linux). Kiểm tra key đã có chưa, sau đó sinh key mới (thay email bằng email GitHub của bạn):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ls -la ~/.ssh
+ssh-keygen -t ed25519 -C "your_email@example.com"</code></pre>
+        <ul class="feature-list">
+          <li><em>Enter file in which to save the key</em>: nhấn <strong>Enter</strong> để dùng vị trí mặc định <code>~/.ssh/id_ed25519</code> (Windows: <code>C:\Users\&lt;tên-user&gt;\.ssh\id_ed25519</code>).</li>
+          <li><em>Enter passphrase</em>: nhấn <strong>Enter</strong> 2 lần để bỏ qua, hoặc đặt passphrase để bảo vệ key (xem bước 3).</li>
+        </ul>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ls -l ~/.ssh/id_ed25519 ~/.ssh/id_ed25519.pub</code></pre>
+        <p class="code-note">💡 Nếu đã có sẵn file <code>id_ed25519</code> (đã tạo trước đây), không cần tạo lại – trả lời <code>n</code> khi được hỏi <em>Overwrite?</em> để tránh mất key đang dùng.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3 (chỉ khi đặt passphrase): Thêm private key vào ssh-agent</strong>
+        <p><code>ssh-agent</code> giữ private key đã mở khoá trong bộ nhớ để không phải gõ passphrase mỗi lần push/pull. Nếu <strong>không</strong> đặt passphrase, bỏ qua bước này – SSH tự dùng key mặc định <code>~/.ssh/id_ed25519</code>.</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+ssh-add -l</code></pre>
+        <p>Nếu muốn ssh-agent tự khởi động cùng Windows, mở <strong>PowerShell (Run as administrator)</strong> và chạy:</p>
+        <pre class="command-line" data-prompt="PS>"><code class="language-powershell">Get-Service -Name ssh-agent | Set-Service -StartupType Manual
+Start-Service ssh-agent
+ssh-add "$env:USERPROFILE\.ssh\id_ed25519"
+ssh-add -L</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Thêm public key vào tài khoản GitHub</strong>
+        <p>Hiển thị (hoặc copy thẳng vào clipboard trên Windows) nội dung public key:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">cat ~/.ssh/id_ed25519.pub
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... your_email@example.com
+clip &lt; ~/.ssh/id_ed25519.pub</code></pre>
+        <p>Trên GitHub, vào <strong>Settings → SSH and GPG keys → New SSH key</strong> (menu từ avatar góc phải) với các thông số:</p>
+        <ul class="feature-list">
+          <li>Title: tên dễ nhận biết, ví dụ <code>laptop-ca-nhan</code></li>
+          <li>Key type: <strong>Authentication Key</strong></li>
+          <li>Key: dán toàn bộ nội dung file <code>id_ed25519.pub</code> (1 dòng, bắt đầu bằng <code>ssh-ed25519</code>)</li>
+        </ul>
+        <div class="alert alert-danger">Chỉ dán <strong>public key</strong> (file <code>.pub</code>). Không bao giờ chia sẻ nội dung file <code>id_ed25519</code> (private key) cho bất kỳ ai hay website nào.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra kết nối SSH tới GitHub</strong>
+        <p>Lần đầu kết nối, gõ <code>yes</code> để chấp nhận fingerprint của GitHub:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">ssh -T git@github.com
+Hi your-username! You've successfully authenticated, but GitHub does not provide shell access.</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Clone repository bằng SSH</strong>
+        <p>Trên trang repository <code>demo-git</code>, chọn <strong>Code → SSH</strong> để lấy URL. Clone về thư mục <code>~/git-labs</code> (thay <code>&lt;GITHUB_USERNAME&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$" data-output="5-6,8-10"><code class="language-bash">cd ~/git-labs
+git clone git@github.com:&lt;GITHUB_USERNAME&gt;/demo-git.git
+cd demo-git
+git remote -v
+origin  git@github.com:&lt;GITHUB_USERNAME&gt;/demo-git.git (fetch)
+origin  git@github.com:&lt;GITHUB_USERNAME&gt;/demo-git.git (push)
+git branch -a
+* main
+  remotes/origin/HEAD -&gt; origin/main
+  remotes/origin/main</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Kiểu URL</th><th>Ví dụ</th><th>Xác thực</th></tr></thead>
+          <tbody>
+            <tr><td>HTTPS</td><td><code>https://github.com/user/demo-git.git</code></td><td>Personal Access Token hoặc Git Credential Manager (đăng nhập qua trình duyệt)</td></tr>
+            <tr><td>SSH</td><td><code>git@github.com:user/demo-git.git</code></td><td>SSH key – cấu hình 1 lần, dùng cho mọi repo</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Repository <code>demo-git</code> có trên GitHub với file <code>README.md</code>.</li>
+      <li><code>ssh -T git@github.com</code> trả về <em>Hi &lt;username&gt;! You've successfully authenticated</em>.</li>
+      <li>Thư mục <code>~/git-labs/demo-git</code> đã được clone, <code>git remote -v</code> hiển thị URL dạng <code>git@github.com:...</code>.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>git@github.com: Permission denied (publickey).</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa thêm public key lên GitHub, dán thiếu ký tự, hoặc private key không nằm ở vị trí mặc định / có passphrase nhưng chưa <code>ssh-add</code>.<br/><strong>Giải pháp:</strong> Kiểm tra lại key trên GitHub Settings; chạy <code>ssh -vT git@github.com</code> để xem SSH đang thử key nào; nếu key đặt tên khác thì thêm vào <code>~/.ssh/config</code>: <code>Host github.com</code> / <code>IdentityFile ~/.ssh/&lt;tên-key&gt;</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>ssh: connect to host github.com port 22: Connection timed out</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Mạng công ty/trường chặn cổng 22.<br/><strong>Giải pháp:</strong> Dùng SSH qua cổng 443: thêm vào <code>~/.ssh/config</code> block <code>Host github.com</code> với <code>Hostname ssh.github.com</code> và <code>Port 443</code>, sau đó thử lại <code>ssh -T git@github.com</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>unable to start ssh-agent service, error :1058</code> (PowerShell)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service ssh-agent của Windows đang bị Disabled.<br/><strong>Giải pháp:</strong> Chạy PowerShell bằng quyền Administrator và chạy lại <code>Get-Service -Name ssh-agent | Set-Service -StartupType Manual</code> trước <code>Start-Service ssh-agent</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Giữ lại repository <code>demo-git</code> và SSH key – sẽ dùng tiếp ở Lab 3 → Lab 7. Hướng dẫn dọn dẹp toàn bộ ở chương cuối section. Repository GitHub không phát sinh chi phí.</div>
+
+</body>
+</html>

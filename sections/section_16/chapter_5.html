@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Monitoring for Kubernetes – Metrics and Alert – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">16. Monitoring for Kubernetes/EKS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Monitoring for Kubernetes – Metrics and Alert</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Làm quen với giám sát metrics trên Kubernetes bằng các giải pháp Open Source: <strong>Prometheus, Grafana, AlertManager</strong>.</li>
+    <li>Cài đặt các công cụ để thu thập metrics của Cluster và Pods, rồi visualize thành dashboard.</li>
+    <li>Cấu hình <strong>Alert</strong> và <strong>Notification</strong> bằng AlertManager (kèm tuỳ chọn gửi qua Slack).</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="figure-centered">
+    <img src="../../images/section15/lab1-metrics-alert.png" alt="Sơ đồ hệ thống Lab 1: Prometheus, Grafana, AlertManager giám sát app TODO trên Minikube" />
+    <div class="figure-title">Sơ đồ hệ thống của bài Lab 1</div>
+  </div>
+  <p class="body-text">
+    Ứng dụng TODO (frontend/backend/mongo, kèm <em>mongo-exporter</em>) chạy trên Minikube. Prometheus scrape metrics từ các pod,
+    Grafana đọc dữ liệu từ Prometheus để vẽ dashboard, AlertManager đánh giá các rule và gửi cảnh báo về Slack.
+  </p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Máy local đã cài <strong>Docker Desktop</strong>, <strong>Minikube</strong> và <strong>kubectl</strong>.</li>
+    <li>Ứng dụng TODO được clone từ <code>https://github.com/hoanglinhdigital/react-express-mongodb</code> (xem hướng dẫn ở Lab 1 của repository đó).</li>
+    <li>Source code bài lab nằm tại <code>sourcecode/section_15_monitoring_for_eks/lab1_metrics_alert/</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị Minikube và cài đặt ứng dụng TODO</strong>
+        <p>Kiểm tra và cập nhật Minikube nếu cần:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube update-check
+minikube stop
+minikube delete
+choco upgrade minikube
+minikube start</code></pre>
+        <p>Deploy ứng dụng TODO lên Minikube (chú ý dùng file có kèm <code>mongo-exporter</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f todo-app-minikube-local-with-mongo-exporter.yaml</code></pre>
+        <p>Kiểm tra pod và service đã chạy:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods
+kubectl get services</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Deploy Monitoring Stack (Prometheus + Grafana + AlertManager)</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f todo-app-monitoring-stack.yaml</code></pre>
+        <p>Kiểm tra kết quả deploy trong namespace <code>monitoring</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods -n monitoring
+kubectl get services -n monitoring
+kubectl get deployments -n monitoring</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Truy cập các service</strong>
+        <p>Mở Grafana (đăng nhập <code>admin/admin</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube service grafana -n monitoring</code></pre>
+        <p>Mở Prometheus UI:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube service prometheus -n monitoring</code></pre>
+        <p>Mở AlertManager UI:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">minikube service alertmanager -n monitoring</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Truy vấn dữ liệu trên Prometheus</strong>
+        <p>Tại Prometheus UI, chạy thử một số query (xem thêm <code>prometheus_query.md</code> trong thư mục source):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-promql">up{kubernetes_pod_name=~"backend.*"}
+up{kubernetes_pod_name=~"frontend.*"}
+rate(container_cpu_usage_seconds_total{pod=~"backend.*"}[5m])
+topk(5, container_memory_usage_bytes{namespace="default"})</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo Dashboard trên Grafana</strong>
+        <p>Vào <strong>Connections → Data sources</strong> xác nhận Prometheus đã được cấu hình (URL <code>http://prometheus:9090</code>, bấm <em>Save &amp; test</em> để kiểm tra).</p>
+        <p>Sau đó tạo các panel minh hoạ (xem chi tiết trong <code>grafana-dashboard.md</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-promql"># Panel "Pod Status - Default Namespace"
+up{kubernetes_namespace="default"}
+
+# Panel "Backend Pods Running"
+count(up{kubernetes_pod_name=~"backend-deployment.*"} == 1)
+
+# Panel "Memory Usage Over Time"
+container_memory_usage_bytes{pod=~"backend-deployment.*", container="backend"}
+
+# Panel "CPU Usage (5m rate)"
+rate(container_cpu_usage_seconds_total{pod=~"backend-deployment.*", container="backend"}[5m])</code></pre>
+        <p>Bạn cũng có thể import dashboard có sẵn của cộng đồng (ví dụ ID <code>7249</code>, <code>6417</code>) qua <strong>Dashboards → New → Import</strong>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Cấu hình Alert Rules</strong>
+        <p>Áp dụng ConfigMap chứa 5 alert rules (BackendPodDown, FrontendPodDown, MongoPodDown, HighCPUUsage, HighMemoryUsage):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f alert-rules.yaml</code></pre>
+        <p>Mở file <code>todo-app-monitoring-stack.yaml</code>, bỏ comment ở dòng <code>113</code> và <code>130</code> để Prometheus mount file <code>alert_rules.yml</code>, rồi apply lại:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f todo-app-monitoring-stack.yaml</code></pre>
+        <p>Vào Prometheus UI → tab <strong>Alerts</strong>, bạn sẽ thấy 5 alert ở trạng thái <code>Inactive</code> (xanh lá).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7 (Tuỳ chọn): Cấu hình Slack Notification</strong>
+        <p>Tạo <strong>Slack Incoming Webhook</strong> (Slack → Settings &amp; administration → Manage apps → Incoming WebHooks), copy Webhook URL.</p>
+        <p>Cập nhật Webhook URL và channel trong file <code>alert-manager-configmap-for-slack.yaml</code>, rồi thay block AlertManager ConfigMap trong <code>todo-app-monitoring-stack.yaml</code> bằng nội dung file đó:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f todo-app-monitoring-stack.yaml
+kubectl rollout restart deployment alertmanager -n monitoring</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Kiểm thử Alert</strong>
+        <p>Scale backend về 0 để kích hoạt alert <code>BackendPodDown</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl scale deployment backend-deployment --replicas=0 -n default</code></pre>
+        <p>Đợi khoảng 1 phút, quan sát alert chuyển sang <code>Firing</code> trong Prometheus → AlertManager → Slack (nếu đã cấu hình). Sau đó scale lại:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl scale deployment backend-deployment --replicas=2 -n default</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Prometheus, Grafana, AlertManager chạy trong namespace <code>monitoring</code>.</li>
+      <li>Prometheus scrape được metrics của các pod ứng dụng (query <code>up{...}</code> trả giá trị <code>1</code>).</li>
+      <li>Grafana hiển thị dashboard (CPU/Memory/pod status) từ data source Prometheus.</li>
+      <li>5 alert xuất hiện trong tab Alerts và chuyển <code>Firing</code> khi scale backend về 0.</li>
+      <li>(Nếu có) Slack nhận được notification khi alert firing.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Grafana không nhận dữ liệu từ Prometheus</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Data source URL sai (dùng <code>localhost</code> thay vì tên service).<br/><strong>Giải pháp:</strong> Đặt URL là <code>http://prometheus:9090</code> (tên service trong cùng namespace) và bấm <em>Save &amp; test</em>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Alert không xuất hiện trong tab Alerts</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa bỏ comment 2 dòng mount <code>alert_rules.yml</code> trong <code>todo-app-monitoring-stack.yaml</code>, hoặc chưa apply lại.<br/><strong>Giải pháp:</strong> Bỏ comment dòng 113 và 130, <code>kubectl apply -f todo-app-monitoring-stack.yaml</code> rồi đợi pod Prometheus khởi động lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không nhận được notification Slack</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Webhook URL sai/thiếu, channel sai, hoặc AlertManager chưa restart.<br/><strong>Giải pháp:</strong> Kiểm tra lại URL, channel; chạy <code>kubectl rollout restart deployment alertmanager -n monitoring</code>; xem log pod alertmanager.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Bài lab chạy trên Minikube local nên không phát sinh chi phí cloud, nhưng vẫn nên dọn dẹp để máy không bị chiếm RAM/CPU.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f todo-app-monitoring-stack.yaml
+kubectl delete -f todo-app-minikube-local-with-mongo-exporter.yaml</code></pre>
+
+</body>
+</html>

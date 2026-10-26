@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 1: Cài đặt Jenkins server trên EC2 (Ubuntu) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">10. CI/CD sử dụng Jenkins</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 1: Cài đặt Jenkins server trên EC2 (Ubuntu)</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo EC2 instance Ubuntu Server 24.04 LTS làm Jenkins server, gắn <strong>IAM Role</strong> để thao tác với S3, ECR, ECS ở các lab sau.</li>
+    <li>Cài <strong>Java 21</strong> và <strong>Jenkins LTS</strong> theo hướng dẫn chính thức, chạy Jenkins như một service <code>systemd</code>.</li>
+    <li>Truy cập Jenkins Dashboard qua port 8080: unlock, cài plugin theo gợi ý, tạo tài khoản admin.</li>
+    <li>Cài sẵn các tool CI/CD dùng chung: <strong>Git, jq, AWS CLI v2</strong>.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      PC["<img src='../../assets/aws-svg/laptop.svg' style='width:40px;height:40px;'/><br/><b>PC Local</b>"]
+      subgraph AWS["AWS Cloud – ap-southeast-1 · Default VPC"]
+          direction LR
+          subgraph SG["Security Group: jenkins-sg (22, 8080 từ My IP)"]
+              EC2["<img src='../../assets/aws-svg/EC2.svg' style='width:40px;height:40px;'/><br/><b>jenkins-server</b><br/>Ubuntu 24.04 · t3.medium<br/><img src='../../assets/svg-icon/jenkins-logo.png' style='width:30px;height:30px;'/> Jenkins :8080"]
+          end
+          IAM["<img src='../../assets/aws-svg/IAM.svg' style='width:34px;height:34px;'/><br/>jenkins-server-role"]
+      end
+      PC -->|"HTTP :8080 – Dashboard"| EC2
+      PC -->|"SSH :22 – cài đặt, debug"| EC2
+      IAM -.->|"instance profile"| EC2
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>AWS account, region <code>ap-southeast-1</code> (Singapore); biết tạo EC2, Security Group, key pair (Section 4, Section 6 – Lab 1).</li>
+    <li>Terminal có lệnh <code>ssh</code> (Git Bash trên Windows, Terminal trên macOS/Linux).</li>
+    <li>GitHub account (dùng từ Lab 4).</li>
+    <li>Source code: <code>sourcecode/section_10_cicd_with_jenkins/lab1_install_jenkins/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo IAM Role cho Jenkins server</strong>
+        <p>Vào <strong>IAM → Roles</strong>, tạo role với các thông số:</p>
+        <ul class="feature-list">
+          <li>Trusted entity: <strong>AWS service → EC2</strong></li>
+          <li>Permissions policies: <code>AmazonS3FullAccess</code>, <code>AmazonEC2ContainerRegistryPowerUser</code>, <code>AmazonECS_FullAccess</code></li>
+          <li>Role name: <code>jenkins-server-role</code></li>
+        </ul>
+        <p class="code-note">💡 Nhờ IAM Role, mọi lệnh <code>aws ...</code> chạy trong job Jenkins tự nhận credential tạm thời từ EC2 metadata – <strong>không cần tạo access key</strong> và lưu vào Jenkins. Các managed policy trên rộng hơn mức cần thiết để bài lab đơn giản; môi trường thật nên viết policy giới hạn đúng bucket, repository, cluster (least privilege).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo Security Group</strong>
+        <p>Vào <strong>EC2 → Security Groups</strong>, tạo SG trong Default VPC:</p>
+        <ul class="feature-list">
+          <li>Name: <code>jenkins-sg</code></li>
+          <li>Inbound: <strong>SSH (22)</strong> – Source <strong>My IP</strong>; <strong>Custom TCP 8080</strong> – Source <strong>My IP</strong></li>
+          <li>Outbound: giữ mặc định (All traffic)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo EC2 instance</strong>
+        <p>Vào <strong>EC2 → Launch instance</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Name: <code>jenkins-server</code></li>
+          <li>AMI: <strong>Ubuntu Server 24.04 LTS (HVM), SSD Volume Type</strong> – Architecture <strong>64-bit (x86)</strong></li>
+          <li>Instance type: <code>t3.medium</code> (2 vCPU, 4 GiB RAM)</li>
+          <li>Key pair: tạo mới <code>jenkins-key</code> (RSA, <code>.pem</code>) và lưu file về máy</li>
+          <li>Network: Default VPC, public subnet bất kỳ, <strong>Auto-assign public IP: Enable</strong>, Security Group <code>jenkins-sg</code></li>
+          <li>Storage: <strong>30 GiB gp3</strong></li>
+          <li>Advanced details → IAM instance profile: <code>jenkins-server-role</code></li>
+        </ul>
+        <p class="code-note">💡 Public IP thay đổi mỗi lần Stop/Start instance. Nếu muốn giữ cố định (cần cho webhook ở Lab 9), bạn có thể gắn một <strong>Elastic IP</strong> – nhớ release khi dọn dẹp.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: SSH vào Jenkins server</strong>
+        <p>Mở Git Bash / Terminal tại thư mục chứa file <code>jenkins-key.pem</code>, thay <code>&lt;jenkins-public-ip&gt;</code> bằng Public IPv4 của instance:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">chmod 400 jenkins-key.pem
+ssh -i jenkins-key.pem ubuntu@&lt;jenkins-public-ip&gt;</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Cài Java 21</strong>
+        <p>Jenkins là ứng dụng Java nên cần cài Java trước. Cài bản <strong>JDK</strong> (thay vì chỉ JRE) để dùng chung cho việc build Java ở Lab 4:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo apt update
+sudo apt install -y fontconfig openjdk-21-jdk
+java -version</code></pre>
+        <pre class="output-box"><code>openjdk version "21.0.x" ...
+OpenJDK Runtime Environment (build 21.0.x+...-Ubuntu-...)
+OpenJDK 64-Bit Server VM (build 21.0.x+..., mixed mode, sharing)</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Thêm Jenkins repository &amp; cài Jenkins LTS</strong>
+        <p>Các lệnh dưới đây lấy từ <a href="https://www.jenkins.io/doc/book/installing/linux/#debianubuntu" target="_blank" rel="noopener">hướng dẫn cài đặt chính thức</a> (bản LTS – <code>debian-stable</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list &gt; /dev/null
+sudo apt update
+sudo apt install -y jenkins</code></pre>
+        <div class="alert alert-info">Jenkins định kỳ thay đổi <strong>signing key</strong> của repository. Nếu <code>apt update</code> báo lỗi <code>NO_PUBKEY</code>, mở link hướng dẫn chính thức ở trên và copy lại URL key mới nhất.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Khởi động Jenkins</strong>
+        <pre class="command-line" data-prompt="$" data-output="3-6"><code class="language-bash">sudo systemctl enable --now jenkins
+sudo systemctl status jenkins --no-pager
+● jenkins.service - Jenkins Continuous Integration Server
+     Loaded: loaded (/usr/lib/systemd/system/jenkins.service; enabled; preset: enabled)
+     Active: active (running) since ...
+...
+sudo ss -tlnp | grep 8080</code></pre>
+        <p class="code-note">💡 Package <code>jenkins</code> tạo sẵn user hệ thống <code>jenkins</code> – <strong>mọi job đều chạy bằng user này</strong>, thư mục dữ liệu là <code>/var/lib/jenkins</code> (xem lại Section 6 về system user &amp; service).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Unlock Jenkins &amp; cài plugin theo gợi ý</strong>
+        <p>Lấy mật khẩu admin ban đầu:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo cat /var/lib/jenkins/secrets/initialAdminPassword</code></pre>
+        <p>Mở trình duyệt <code>http://&lt;jenkins-public-ip&gt;:8080</code> và hoàn tất màn hình setup:</p>
+        <ul class="feature-list">
+          <li><strong>Unlock Jenkins:</strong> dán mật khẩu vừa lấy.</li>
+          <li><strong>Customize Jenkins:</strong> chọn <strong>Install suggested plugins</strong> (Git, Pipeline, Credentials Binding, GitHub, JUnit...) – chờ vài phút.</li>
+          <li><strong>Create First Admin User:</strong> tạo user admin của bạn (username, password mạnh, email).</li>
+          <li><strong>Instance Configuration:</strong> Jenkins URL giữ <code>http://&lt;jenkins-public-ip&gt;:8080/</code>.</li>
+        </ul>
+        <p class="code-note">💡 Từ đây trở đi luôn đăng nhập bằng user admin vừa tạo. Nếu muốn đổi mật khẩu: click tên user ở góc phải → <strong>Security</strong> → Password.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Cài các tool CI/CD dùng chung</strong>
+        <p>Quay lại cửa sổ SSH, cài Git, unzip, jq và <strong>AWS CLI v2</strong> (Ubuntu 24.04 không còn package <code>awscli</code> trong apt):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">sudo apt install -y git unzip jq
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip
+sudo ./aws/install
+rm -rf aws awscliv2.zip
+git --version
+jq --version
+aws --version</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 10: Kiểm tra IAM Role</strong>
+        <p>Chạy với cả user <code>ubuntu</code> và user <code>jenkins</code> – kết quả phải có <code>assumed-role/jenkins-server-role/...</code>:</p>
+        <pre class="command-line" data-prompt="$" data-output="2-6"><code class="language-bash">sudo -u jenkins aws sts get-caller-identity
+{
+    "UserId": "AROAXXXXXXXXXXXXXXXXX:i-0abc123def4567890",
+    "Account": "123456789012",
+    "Arn": "arn:aws:sts::123456789012:assumed-role/jenkins-server-role/i-0abc123def4567890"
+}</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 11: Làm quen với Manage Jenkins</strong>
+        <p>Trên Dashboard, vào <strong>Manage Jenkins</strong> và tìm các mục sẽ dùng xuyên suốt section:</p>
+        <table class="compare-table">
+          <thead><tr><th>Mục</th><th>Dùng để</th><th>Lab</th></tr></thead>
+          <tbody>
+            <tr><td><strong>System</strong></td><td>Cấu hình chung: Jenkins URL, số executor, global environment variables, Slack...</td><td>3, 12</td></tr>
+            <tr><td><strong>Tools</strong></td><td>Khai báo JDK, Maven, Git... cho job sử dụng</td><td>4</td></tr>
+            <tr><td><strong>Plugins</strong></td><td>Cài, cập nhật, gỡ plugin</td><td>12</td></tr>
+            <tr><td><strong>Nodes</strong></td><td>Quản lý agent (built-in node), xem dung lượng đĩa còn trống</td><td>–</td></tr>
+            <tr><td><strong>Credentials</strong></td><td>Lưu password, SSH key, token</td><td>3, 8</td></tr>
+            <tr><td><strong>Security</strong></td><td>Quyền truy cập, Git Host Key Verification</td><td>8</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>systemctl status jenkins</code> báo <strong>active (running)</strong>, service ở trạng thái <strong>enabled</strong>.</li>
+      <li>Truy cập <code>http://&lt;jenkins-public-ip&gt;:8080</code> đăng nhập được bằng user admin, thấy Dashboard trống.</li>
+      <li><code>sudo -u jenkins aws sts get-caller-identity</code> trả về role <code>jenkins-server-role</code>.</li>
+      <li><code>git</code>, <code>jq</code>, <code>aws</code> đều in ra version.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Trình duyệt không mở được <code>http://&lt;jenkins-public-ip&gt;:8080</code> (timeout)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group chưa mở 8080, IP của bạn đã đổi (My IP), hoặc Jenkins chưa chạy.<br/><strong>Giải pháp:</strong> Kiểm tra inbound rule của <code>jenkins-sg</code> (cập nhật lại My IP), chạy <code>sudo ss -tlnp | grep 8080</code> trên server; dùng <code>http://</code> chứ không phải <code>https://</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>apt update</code> báo <code>NO_PUBKEY</code> / <code>The following signatures couldn't be verified</code> với <code>pkg.jenkins.io</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Jenkins đã đổi signing key của repository.<br/><strong>Giải pháp:</strong> Lấy URL key mới trong hướng dẫn chính thức, chạy lại lệnh <code>wget</code> ở Bước 6 rồi <code>sudo apt update</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Jenkins không khởi động được (<code>failed</code>) sau khi cài thêm một bản Java khác</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Java mặc định của hệ thống bị đổi sang version Jenkins không hỗ trợ.<br/><strong>Giải pháp:</strong> Xem log và chọn lại Java 21 bằng <code>update-alternatives</code> (gõ số tương ứng với <code>java-21-openjdk</code> rồi Enter):
+      <pre class="command-line" data-prompt="$"><code class="language-bash">sudo journalctl -u jenkins -n 100 --no-pager
+sudo update-alternatives --config java
+sudo systemctl restart jenkins</code></pre></div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>aws sts get-caller-identity</code> báo <code>Unable to locate credentials</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Instance chưa gắn IAM Role.<br/><strong>Giải pháp:</strong> EC2 → chọn instance → <strong>Actions → Security → Modify IAM role</strong> → chọn <code>jenkins-server-role</code>, chờ vài giây rồi chạy lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Jenkins rất chậm hoặc treo khi cài plugin / build</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Instance quá nhỏ (<code>t2.micro</code>, <code>t3.micro</code> chỉ 1 GiB RAM).<br/><strong>Giải pháp:</strong> Stop instance → <strong>Actions → Instance settings → Change instance type</strong> → <code>t3.medium</code> → Start.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Giữ lại Jenkins server cho các lab tiếp theo</strong>, nhưng hãy <strong>Stop instance</strong> mỗi khi nghỉ học – EC2 <code>t3.medium</code> và Public IPv4 tính phí theo giờ. Dữ liệu Jenkins nằm trên EBS volume nên không bị mất khi Stop. Việc terminate instance sẽ làm ở chương tổng kết.</div>
+
+</body>
+</html>

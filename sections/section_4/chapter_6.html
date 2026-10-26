@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ôn tập: S3, RDS &amp; CloudFront (CDN) – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">4. Giới thiệu &amp; ôn lại kiến thức AWS</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Ôn tập: S3, RDS &amp; CloudFront (CDN)</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Sau khi có network và quyền truy cập, hệ thống cần nơi lưu trữ dữ liệu và cách phân phối nội dung đến người dùng.
+    Chương này ôn lại 3 dịch vụ xuất hiện trong hầu hết mọi dự án: <strong>Amazon S3</strong> (lưu trữ object/file),
+    <strong>Amazon RDS</strong> (database quan hệ) và <strong>Amazon CloudFront</strong> (CDN). Trong khoá học, S3 còn đóng vai trò lưu artifact của CICD pipeline và Terraform state.
+  </p>
+
+  <!-- ───────────── S3 ───────────── -->
+  <h2 class="section-heading">1. Amazon S3 – Simple Storage Service</h2>
+  <ul class="feature-list">
+    <li><strong>Bucket &amp; Object:</strong> dữ liệu lưu dưới dạng object (file + metadata) trong bucket. Tên bucket là duy nhất toàn cầu, nhưng bucket thuộc về một Region.</li>
+    <li><strong>Độ bền 99.999999999% (11 số 9):</strong> dữ liệu tự động được nhân bản qua nhiều AZ.</li>
+    <li><strong>Storage class:</strong> Standard, Intelligent-Tiering, Standard-IA, One Zone-IA, Glacier (Instant/Flexible/Deep Archive) — đánh đổi giữa giá lưu trữ và tốc độ truy xuất.</li>
+    <li><strong>Lifecycle rule:</strong> tự động chuyển class hoặc xoá object theo thời gian.</li>
+    <li><strong>Versioning &amp; Replication:</strong> giữ nhiều phiên bản object, sao chép sang bucket/Region khác.</li>
+    <li><strong>Bảo mật:</strong> Block Public Access (bật mặc định), Bucket Policy, mã hoá (SSE-S3, SSE-KMS), Pre-signed URL.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section4/s3-overview.png" alt="S3 là trung tâm lưu trữ: lưu file, log, backup, static web hosting, nguồn dữ liệu cho Lambda/Glue" />
+    <div class="figure-title">S3 là trung tâm lưu trữ: lưu file, log, backup, static web hosting, nguồn dữ liệu cho Lambda/Glue</div>
+  </div>
+
+  <!-- ───────────── RDS ───────────── -->
+  <h2 class="section-heading">2. Amazon RDS – Relational Database Service</h2>
+  <ul class="feature-list">
+    <li><strong>Managed database:</strong> AWS lo việc cài đặt, patch, backup tự động, snapshot — bạn chỉ cần tập trung vào schema và query.</li>
+    <li><strong>Engine:</strong> MySQL, PostgreSQL, MariaDB, Oracle, SQL Server, Db2 và Amazon Aurora.</li>
+    <li><strong>Multi-AZ:</strong> có một bản <strong>standby</strong> đồng bộ ở AZ khác, tự động failover khi primary gặp sự cố — dùng cho <strong>High Availability</strong>.</li>
+    <li><strong>Read Replica:</strong> bản sao bất đồng bộ chỉ đọc — dùng để <strong>scale đọc</strong> (report, query nặng).</li>
+    <li><strong>Aurora Cluster Endpoint:</strong> Writer endpoint cho ghi, Reader endpoint tự cân bằng tải giữa các replica.</li>
+    <li><strong>RDS Proxy:</strong> connection pooling giữa ứng dụng và DB — đặc biệt hữu ích với Lambda (tạo nhiều connection ngắn).</li>
+  </ul>
+
+  <div class="figure-centered">
+    <img src="../../images/section4/rds-engine-options.png" alt="Các engine được hỗ trợ khi tạo RDS: Aurora, MySQL, MariaDB, PostgreSQL, Oracle, SQL Server" />
+    <div class="figure-title">Các engine được hỗ trợ khi tạo RDS: Aurora, MySQL, MariaDB, PostgreSQL, Oracle, SQL Server</div>
+  </div>
+
+  <h3 class="section-subheading">Các mô hình triển khai RDS</h3>
+  <table class="req-table">
+    <thead><tr><th>Mô hình</th><th>High Availability</th><th>Scale đọc</th><th>Chi phí</th><th>Phù hợp</th></tr></thead>
+    <tbody>
+      <tr><td>Single Instance</td><td>❌</td><td>❌</td><td>Thấp nhất</td><td>Dev/Test, lab</td></tr>
+      <tr><td>Single Instance + Multi-AZ</td><td>✅</td><td>❌</td><td>~x2</td><td>Production thông thường</td></tr>
+      <tr><td>Master – Read Replica</td><td>❌ (có thể promote thủ công)</td><td>✅</td><td>Theo số replica</td><td>Hệ thống đọc nhiều, chấp nhận downtime</td></tr>
+      <tr><td>Master – Read Replica + Multi-AZ</td><td>✅</td><td>✅</td><td>Cao</td><td>Production đọc nhiều</td></tr>
+      <tr><td>Master + Multi Read Replica + Multi-AZ</td><td>✅</td><td>✅✅</td><td>Cao nhất</td><td>Hệ thống lớn, nhiều tải đọc</td></tr>
+      <tr><td>Aurora Cluster (Writer/Reader endpoint)</td><td>✅</td><td>✅ (tối đa 15 replica)</td><td>Cao</td><td>Production cần hiệu năng cao, failover nhanh</td></tr>
+    </tbody>
+  </table>
+  <div class="figure-centered">
+    <img src="../../images/section4/rds-deployment-models.png" alt="Các mô hình triển khai RDS: Single Instance, Multi-AZ, Read replica, Cluster Endpoint" />
+    <div class="figure-title">Các mô hình triển khai RDS: Single Instance, Multi-AZ, Read replica, Cluster Endpoint</div>
+  </div>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section4/rds-proxy.png" alt="RDS Proxy: gom connection từ nhiều ứng dụng trước khi tới RDS" />
+    <div class="figure-title">RDS Proxy: gom connection từ nhiều ứng dụng trước khi tới RDS</div>
+  </div>
+
+  <!-- ───────────── CloudFront ───────────── -->
+  <h2 class="section-heading">3. Amazon CloudFront – Content Delivery Network</h2>
+  <ul class="feature-list">
+    <li>Tài nguyên của server (origin) được <strong>cache trên các Edge Location</strong>; request của user được chuyển tới Edge gần nhất.</li>
+    <li><strong>Origin</strong> có thể là S3 bucket, ALB, EC2, API Gateway hoặc bất kỳ HTTP server nào.</li>
+    <li><strong>Website tĩnh</strong> (HTML/CSS/JS) có thể deploy lên S3 kết hợp CloudFront. Hầu hết framework hiện nay (React, Angular, Vue, Next.js static export...) đều build được ra dạng static.</li>
+    <li><strong>Behavior:</strong> điều hướng request theo path pattern tới đúng origin mong muốn (ví dụ <code>/api/*</code> → ALB, còn lại → S3).</li>
+    <li><strong>Origin Access Control (OAC):</strong> chỉ cho phép CloudFront đọc S3, bucket không cần public.</li>
+    <li>Tích hợp <strong>ACM</strong> (HTTPS miễn phí) và <strong>WAF</strong> (chặn tấn công) ngay tại Edge.</li>
+  </ul>
+  <div class="figure-centered">
+    <img src="../../images/section4/cdn-edge-location.png" alt="Khi có CDN, nội dung từ server được phân phối và cache tại các Edge Location gần người dùng" />
+    <div class="figure-title">Khi có CDN, nội dung từ server được phân phối và cache tại các Edge Location gần người dùng</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/cdn-static-website-s3.png" alt="Website static (HTML/CSS/JS) build từ các framework được deploy lên S3 và phân phối qua CloudFront" />
+    <div class="figure-title">Website static (HTML/CSS/JS) build từ các framework được deploy lên S3 và phân phối qua CloudFront</div>
+  </div>
+  <div class="figure-centered">
+    <img src="../../images/section4/cdn-cloudfront-behaviors.png" alt="CloudFront behaviors điều hướng request theo path tới đúng origin (Backend API, Media bucket, Website bucket)" />
+    <div class="figure-title">CloudFront behaviors điều hướng request theo path tới đúng origin (Backend API, Media bucket, Website bucket)</div>
+  </div>
+  <div class="alert alert-warning">
+    <strong>Thứ tự behavior rất quan trọng:</strong> CloudFront đánh giá behavior theo thứ tự ưu tiên, khi đã match một path sẽ không đánh giá path tiếp theo.
+    Nếu đặt <code>/*</code> lên trên cùng, các behavior bên dưới sẽ không bao giờ được áp dụng.
+  </div>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <table class="req-table">
+    <thead><tr><th>Quyết định</th><th>Lợi ích</th><th>Đánh đổi</th></tr></thead>
+    <tbody>
+      <tr><td>RDS thay vì tự cài MySQL trên EC2</td><td>Backup, patch, Multi-AZ tự động</td><td>Không có quyền root/OS, chi phí cao hơn một chút</td></tr>
+      <tr><td>Bật Multi-AZ cho RDS</td><td>Tự động failover (~1–2 phút)</td><td>Chi phí gần gấp đôi</td></tr>
+      <tr><td>Thêm CloudFront phía trước</td><td>Giảm độ trễ, giảm tải cho origin, HTTPS + WAF tại Edge</td><td>Phải xử lý cache invalidation khi deploy phiên bản mới</td></tr>
+      <tr><td>Host frontend trên S3 + CloudFront</td><td>Rẻ, không cần server, scale gần như vô hạn</td><td>Chỉ phù hợp website tĩnh/SPA, không chạy được server-side rendering</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>Deploy frontend React lên S3 + CloudFront</h4>
+      <p>Pipeline build <code>npm run build</code>, sync thư mục build lên S3 rồi tạo CloudFront invalidation — một bài lab CICD kinh điển.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Database cho ứng dụng production</h4>
+      <p>RDS MySQL Multi-AZ trong private subnet, chỉ cho phép app-sg truy cập port 3306, password lưu trong Secrets Manager.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Lưu trữ log &amp; backup lâu dài</h4>
+      <p>Đẩy log, backup vào S3 kèm lifecycle rule chuyển sang Glacier sau 90 ngày để tiết kiệm chi phí.</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <div class="alert alert-warning">
+    <strong>Chi phí:</strong> RDS tính phí theo giờ kể cả khi không có query — với lab, hãy <strong>xoá</strong> (hoặc stop, nhưng RDS sẽ tự start lại sau 7 ngày). Snapshot thủ công cũng bị tính phí lưu trữ.
+  </div>
+  <div class="alert alert-tip">
+    <strong>Lưu ý:</strong> không bao giờ để S3 bucket chứa dữ liệu nhạy cảm ở chế độ public. Muốn chia sẻ file tạm thời, hãy dùng <strong>Pre-signed URL</strong>; muốn public website, hãy dùng CloudFront + OAC.
+  </div>
+
+</body>
+</html>

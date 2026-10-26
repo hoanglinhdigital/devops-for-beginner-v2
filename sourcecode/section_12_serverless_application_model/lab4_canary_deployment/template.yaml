@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  url-shorten-app - Lab 4: Canary deployment cho GetUrlFunction (AutoPublishAlias + DeploymentPreference)
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+    Timeout: 10
+    MemorySize: 128
+    LoggingConfig:
+      LogFormat: JSON
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref UrlShortenTable
+
+Resources:
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+
+  GenerateShortUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: generate_short_url/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref UrlShortenTable
+      Events:
+        GenerateShortUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /generate-short-url
+            Method: post
+
+  GetUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: get_url/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UrlShortenTable
+      # Mỗi lần code đổi, SAM publish 1 version mới và trỏ alias "live" tới version đó.
+      # API Gateway gọi function thông qua alias "live".
+      AutoPublishAlias: live
+      DeploymentPreference:
+        # 10% request tới version mới trong 5 phút, sau đó chuyển 100%
+        Type: Canary10Percent5Minutes
+        # Alarm báo lỗi -> CodeDeploy tự rollback về version cũ
+        Alarms:
+          - !Ref GetUrlCanaryErrorsAlarm
+      Events:
+        GetUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /link/{short_url}
+            Method: get
+
+  # Alarm chỉ theo dõi version MỚI (ExecutedVersion) đang nhận canary traffic
+  GetUrlCanaryErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lambda GetUrlFunction (version mới) có lỗi trong lúc canary
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: Resource
+          Value: !Sub "${GetUrlFunction}:live"
+        - Name: FunctionName
+          Value: !Ref GetUrlFunction
+        - Name: ExecutedVersion
+          Value: !GetAtt GetUrlFunction.Version.Version
+
+  UrlShortenTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: short_url
+          AttributeType: S
+      KeySchema:
+        - AttributeName: short_url
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+Outputs:
+  ApiUrl:
+    Description: Base URL của API (stage dev)
+    Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/dev"
+  TableName:
+    Description: Tên DynamoDB table lưu URL
+    Value: !Ref UrlShortenTable

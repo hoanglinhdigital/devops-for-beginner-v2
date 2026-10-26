@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 10: Triển khai Multi-environment, Multi-region – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">5. Infra as Code sử dụng Terraform</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 10: Triển khai Multi-environment, Multi-region</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Triển khai cùng một hệ thống lên 2 môi trường <strong>dev</strong> (Singapore – <code>ap-southeast-1</code>) và <strong>test</strong> (Tokyo – <code>ap-northeast-1</code>).</li>
+    <li>Chỉ sử dụng <strong>một bộ modules chung</strong>, không duplicate code hạ tầng; mỗi môi trường chỉ khác nhau ở file biến.</li>
+    <li>Mỗi môi trường có <strong>state riêng</strong> trên S3 để thao tác môi trường này không ảnh hưởng môi trường kia.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      Eng["<img src='../../assets/svg-icon/developer.svg' style='width:40px;height:40px;'/><br/><b>DevOps Engineer</b>"]
+      subgraph Code["📁 lab10_multi_env"]
+          direction TB
+          Mod["📦 <b>modules/</b><br/>networking · security · compute"]
+          Dev["⚙️ <b>dev-singapore/</b><br/>main.tf · terraform.tfvars"]
+          Test["⚙️ <b>test-tokyo/</b><br/>main.tf · terraform.tfvars"]
+          Dev --> Mod
+          Test --> Mod
+      end
+      Git["<img src='../../assets/svg-icon/github.svg' style='width:36px;height:36px;'/><br/><b>Git</b><br/>version control"]
+      S3["<img src='../../assets/aws-svg/S3.svg' style='width:40px;height:40px;'/><br/><b>State bucket</b> (Singapore)<br/>dev/terraform.tfstate<br/>test/terraform.tfstate"]
+      subgraph SG["☁️ Develop – Singapore ap-southeast-1"]
+          VPC1["🏠 VPC 10.0.0.0/16<br/><img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/> EC2 · NAT GW"]
+      end
+      subgraph TK["☁️ Test – Tokyo ap-northeast-1"]
+          VPC2["🏠 VPC 10.1.0.0/16<br/><img src='../../assets/aws-svg/EC2.svg' style='width:32px;height:32px;'/> EC2 · NAT GW"]
+      end
+      Eng --> Code
+      Code -->|"push"| Git
+      Dev -->|"deploy"| SG
+      Test -->|"deploy"| TK
+      Dev -.->|"state"| S3
+      Test -.->|"state"| S3
+  </div>
+  <div class="figure-centered figure-medium">
+    <img src="../../images/section5/lab10-multi-environment.png" alt="Sơ đồ đề bài Lab 10: DevOps Engineer deploy code và template lên 2 môi trường Develop (Singapore) và Test (Tokyo)" />
+    <div class="figure-title">Sơ đồ đề bài (slide gốc): mỗi môi trường có thể dùng state bucket riêng; trong lab này ta dùng chung 1 bucket với 2 key khác nhau cho đơn giản.</div>
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 9: đã có S3 bucket lưu state (ở Singapore) và đã destroy hạ tầng của Lab 9.</li>
+    <li>Code các module <code>networking</code>, <code>security</code>, <code>compute</code> từ Lab 6.</li>
+    <li>Keypair tại <code>~/terraform-labs/keypair/</code>.</li>
+  </ul>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> Lab tạo đồng thời 2 VPC, mỗi VPC có 1 NAT Gateway và 2 Elastic IP (NAT + EC2) — chi phí gấp đôi Lab 6. Destroy cả 2 môi trường ngay sau khi xong.</div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo cấu trúc thư mục</strong>
+        <p>Module dùng chung đặt ở thư mục <code>modules</code>; mỗi môi trường là một <strong>root module</strong> riêng gọi tới module chung qua đường dẫn <code>../modules/...</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">mkdir -p ~/terraform-labs/lab10_multi_env/dev-singapore ~/terraform-labs/lab10_multi_env/test-tokyo
+cd ~/terraform-labs/lab10_multi_env
+cp -r ../lab6_vpc_complete/modules .
+cp ../lab6_vpc_complete/variable.tf ../lab6_vpc_complete/output.tf ./dev-singapore/
+cp ../lab6_vpc_complete/variable.tf ../lab6_vpc_complete/output.tf ./test-tokyo/
+code .</code></pre>
+        <pre class="file-tree"><span class="dir">terraform-labs/</span>
+├── <span class="dir">keypair/</span>
+└── <span class="dir">lab10_multi_env/</span>
+    ├── <span class="dir">modules/</span>            <span class="desc"># DÙNG CHUNG – chỉ có 1 bản</span>
+    │   ├── <span class="dir">networking/</span>
+    │   ├── <span class="dir">security/</span>
+    │   └── <span class="dir">compute/</span>
+    ├── <span class="dir">dev-singapore/</span>      <span class="desc"># môi trường dev</span>
+    │   ├── <span class="file">main.tf</span>  <span class="file">variable.tf</span>  <span class="file">output.tf</span>  <span class="file">terraform.tfvars</span>
+    └── <span class="dir">test-tokyo/</span>         <span class="desc"># môi trường test</span>
+        ├── <span class="file">main.tf</span>  <span class="file">variable.tf</span>  <span class="file">output.tf</span>  <span class="file">terraform.tfvars</span></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Cấu hình môi trường dev (Singapore)</strong>
+        <p>Tạo <code>dev-singapore/main.tf</code>. Khác với Lab 9 ở 2 điểm: <code>source = "../modules/..."</code> và backend <code>key = "dev/terraform.tfstate"</code>. Nhớ <strong>đổi tên <code>bucket</code></strong> thành bucket của bạn:</p>
+        <p class="code-note">📄 <code>lab10_multi_env/dev-singapore/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+  # Mỗi môi trường dùng một key (file state) riêng trong cùng một bucket
+  backend "s3" {
+    bucket       = "udemy-terraform-state-change-me"
+    key          = "dev/terraform.tfstate"
+    region       = "ap-southeast-1"
+    encrypt      = true
+    use_lockfile = true # S3 native state locking (Terraform &gt;= 1.10), không cần DynamoDB
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+# PART 1: Create a complete VPC using module networking
+module "networking" {
+  source              = "../modules/networking"
+  name_prefix         = var.name_prefix
+  availability_zone_1 = var.availability_zone_1
+  availability_zone_2 = var.availability_zone_2
+  cidr_block          = var.cidr_block
+  public_subnet_ips   = var.public_subnet_ips
+  private_subnet_ips  = var.private_subnet_ips
+}
+
+# PART 2: Security + Compute deploy vào VPC vừa tạo
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+resource "aws_key_pair" "udemy_keypair" {
+  key_name   = "${var.name_prefix}-keypair"
+  public_key = file(var.keypair_path)
+}
+
+module "security" {
+  source = "../modules/security"
+  vpc_id = module.networking.vpc_id
+}
+
+module "compute" {
+  source                 = "../modules/compute"
+  image_id               = data.aws_ami.amazon_linux.id
+  instance_type          = var.instance_type
+  key_name               = aws_key_pair.udemy_keypair.key_name
+  subnet_id              = module.networking.public_subnet_ids[0]
+  ec2_security_group_ids = [module.security.public_security_group_id]
+}</code></pre>
+        <p>Tạo <code>dev-singapore/terraform.tfvars</code>. Chú ý đường dẫn keypair lúc này là <code>../../keypair/</code> vì thư mục môi trường nằm sâu hơn một cấp:</p>
+        <p class="code-note">📄 <code>lab10_multi_env/dev-singapore/terraform.tfvars</code></p>
+        <pre class="code-block"><code class="language-hcl">region              = "ap-southeast-1"
+name_prefix         = "udemy-dev"
+availability_zone_1 = "ap-southeast-1a"
+availability_zone_2 = "ap-southeast-1b"
+cidr_block          = "10.0.0.0/16"
+public_subnet_ips   = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_ips  = ["10.0.10.0/24", "10.0.20.0/24"]
+instance_type       = "t3.micro"
+keypair_path        = "../../keypair/udemy-key.pub"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Cấu hình môi trường test (Tokyo)</strong>
+        <p><code>test-tokyo/main.tf</code> giống hệt dev, chỉ khác backend <code>key = "test/terraform.tfstate"</code>. Backend vẫn ở region <code>ap-southeast-1</code> vì bucket nằm ở Singapore, còn resource được deploy sang Tokyo theo <code>var.region</code> của provider:</p>
+        <p class="code-note">📄 <code>lab10_multi_env/test-tokyo/main.tf</code></p>
+        <pre class="code-block"><code class="language-hcl">terraform {
+  required_version = "&gt;= 1.10.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 6.0"
+    }
+  }
+  # Mỗi môi trường dùng một key (file state) riêng trong cùng một bucket
+  backend "s3" {
+    bucket       = "udemy-terraform-state-change-me"
+    key          = "test/terraform.tfstate"
+    region       = "ap-southeast-1"
+    encrypt      = true
+    use_lockfile = true # S3 native state locking (Terraform &gt;= 1.10), không cần DynamoDB
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+# PART 1: Create a complete VPC using module networking
+module "networking" {
+  source              = "../modules/networking"
+  name_prefix         = var.name_prefix
+  availability_zone_1 = var.availability_zone_1
+  availability_zone_2 = var.availability_zone_2
+  cidr_block          = var.cidr_block
+  public_subnet_ips   = var.public_subnet_ips
+  private_subnet_ips  = var.private_subnet_ips
+}
+
+# PART 2: Security + Compute deploy vào VPC vừa tạo
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+resource "aws_key_pair" "udemy_keypair" {
+  key_name   = "${var.name_prefix}-keypair"
+  public_key = file(var.keypair_path)
+}
+
+module "security" {
+  source = "../modules/security"
+  vpc_id = module.networking.vpc_id
+}
+
+module "compute" {
+  source                 = "../modules/compute"
+  image_id               = data.aws_ami.amazon_linux.id
+  instance_type          = var.instance_type
+  key_name               = aws_key_pair.udemy_keypair.key_name
+  subnet_id              = module.networking.public_subnet_ids[0]
+  ec2_security_group_ids = [module.security.public_security_group_id]
+}</code></pre>
+        <p>File biến của môi trường test: region Tokyo, AZ Tokyo (<code>ap-northeast-1a</code>, <code>ap-northeast-1c</code> — Tokyo không có AZ <code>1b</code> cho tài khoản mới), CIDR khác dev (<code>10.1.0.0/16</code>) để sau này có thể peering hai VPC:</p>
+        <p class="code-note">📄 <code>lab10_multi_env/test-tokyo/terraform.tfvars</code></p>
+        <pre class="code-block"><code class="language-hcl">region              = "ap-northeast-1"
+name_prefix         = "udemy-test"
+availability_zone_1 = "ap-northeast-1a"
+availability_zone_2 = "ap-northeast-1c"
+cidr_block          = "10.1.0.0/16"
+public_subnet_ips   = ["10.1.1.0/24", "10.1.2.0/24"]
+private_subnet_ips  = ["10.1.10.0/24", "10.1.20.0/24"]
+instance_type       = "t3.micro"
+keypair_path        = "../../keypair/udemy-key.pub"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Deploy môi trường dev</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/terraform-labs/lab10_multi_env/dev-singapore
+terraform init
+terraform apply -auto-approve</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Deploy môi trường test</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/terraform-labs/lab10_multi_env/test-tokyo
+terraform init
+terraform apply -auto-approve</code></pre>
+        <p>Data source <code>aws_ami</code> tự tìm đúng AMI Amazon Linux 2023 của region Tokyo — đây là lý do ta không hard-code AMI ID ngay từ Lab 2.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Kiểm tra 2 môi trường</strong>
+        <ul class="feature-list">
+          <li>Trên Console, chuyển region sang <strong>Singapore</strong>: VPC <code>udemy-dev-vpc</code> (10.0.0.0/16) và EC2 <code>Udemy Demo</code>.</li>
+          <li>Chuyển region sang <strong>Tokyo</strong>: VPC <code>udemy-test-vpc</code> (10.1.0.0/16) và EC2 <code>Udemy Demo</code>.</li>
+          <li>Trên S3 bucket: có 2 file state <code>dev/terraform.tfstate</code> và <code>test/terraform.tfstate</code>.</li>
+        </ul>
+        <p>SSH vào EC2 của môi trường test (đang đứng ở thư mục <code>test-tokyo</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">ssh -i ../../keypair/udemy-key ec2-user@$(terraform output -raw instance_public_ip)</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Thay đổi một môi trường không ảnh hưởng môi trường kia</strong>
+        <p>Trong <code>test-tokyo/terraform.tfvars</code> đổi <code>instance_type = "t3.small"</code>, chạy plan ở thư mục test:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">terraform plan
+Plan: 0 to add, 1 to change, 0 to destroy.</code></pre>
+        <p>Plan chỉ thay đổi EC2 của Tokyo. Chuyển sang thư mục <code>dev-singapore</code> chạy <code>terraform plan</code> sẽ thấy <em>No changes</em> — hai môi trường hoàn toàn độc lập vì có state riêng.</p>
+        <div class="tip-box"><strong>Mở rộng:</strong> Khi cần sửa hạ tầng cho mọi môi trường (ví dụ thêm 1 rule vào Security Group), bạn chỉ sửa một lần trong <code>modules/</code>, rồi lần lượt apply ở từng môi trường: dev → test → prod. Đây chính là quy trình promote thay đổi qua các môi trường.</div>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Hai VPC và hai EC2 chạy ở 2 region Singapore và Tokyo, được tạo từ cùng một bộ module.</li>
+      <li>S3 bucket có 2 file state tách biệt cho dev và test.</li>
+      <li>Thay đổi biến ở môi trường test không làm plan của môi trường dev thay đổi.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Trade-off: các cách tổ chức multi-environment</h2>
+  <table class="compare-table">
+    <thead><tr><th>Cách tổ chức</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Thư mục riêng cho từng môi trường</strong> (lab này)</td><td>Rõ ràng, state tách biệt, mỗi môi trường có thể có backend/provider riêng</td><td>Lặp lại một ít code ở root module (main.tf, variable.tf)</td></tr>
+      <tr><td><strong>Terraform workspace</strong> (<code>terraform workspace new test</code>)</td><td>Dùng chung một thư mục code, đổi môi trường bằng một lệnh</td><td>Dễ nhầm workspace khi apply; các môi trường bắt buộc dùng chung backend</td></tr>
+      <tr><td><strong>Công cụ bổ trợ</strong> (Terragrunt)</td><td>Loại bỏ hoàn toàn code lặp, quản lý backend tự động</td><td>Thêm một công cụ phải học và bảo trì</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>Unreadable module directory</code> / <code>no file exists at "../../keypair/udemy-key.pub"</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Sai đường dẫn tương đối tới <code>modules</code> hoặc <code>keypair</code>.<br/><strong>Giải pháp:</strong> Từ thư mục môi trường, kiểm tra <code>ls ../modules</code> và <code>ls ../../keypair</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Apply ở test-tokyo nhưng plan muốn <strong>xoá</strong> resource của dev</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Hai môi trường dùng chung <code>key</code> trong backend → dùng chung state.<br/><strong>Giải pháp:</strong> Dừng lại, không apply. Sửa <code>key</code> của test thành <code>test/terraform.tfstate</code>, chạy <code>terraform init -reconfigure</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>InvalidParameterValue</code> với availability zone ở Tokyo</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> AZ <code>ap-northeast-1b</code> không khả dụng cho tài khoản.<br/><strong>Giải pháp:</strong> Dùng <code>ap-northeast-1a</code>, <code>ap-northeast-1c</code> hoặc <code>ap-northeast-1d</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Hai NAT Gateway và các Elastic IP ở 2 region đều tính phí theo giờ.</strong> Destroy cả 2 môi trường, sau đó chuyển region trên Console để kiểm tra lại cả Singapore và Tokyo.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/terraform-labs/lab10_multi_env/test-tokyo
+terraform destroy -auto-approve
+cd ~/terraform-labs/lab10_multi_env/dev-singapore
+terraform destroy -auto-approve</code></pre>
+  <p class="body-text">Cuối cùng, xoá S3 bucket chứa state trên Console: chọn bucket → <strong>Empty</strong> (xoá toàn bộ object, bao gồm mọi version) → <strong>Delete</strong>.</p>
+
+</body>
+</html>

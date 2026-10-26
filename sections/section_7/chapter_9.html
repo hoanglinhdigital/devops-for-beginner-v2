@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 6: Git log, show &amp; revert – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">7. Thao tác cơ bản với Git</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 6: Git log, show &amp; revert</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tra cứu lịch sử commit với <code>git log</code> (nhiều định dạng, lọc theo file, tác giả).</li>
+    <li>Xem chi tiết một commit với <code>git show &lt;commit-hash&gt;</code>.</li>
+    <li>Hiểu bản chất <code>git revert</code>: “undo” một commit bằng cách <strong>tạo thêm commit đảo ngược</strong>, không xoá lịch sử.</li>
+    <li>Thực hành commit một thay đổi lỗi, sau đó revert và push an toàn lên remote.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  gitGraph
+      commit id: "develop"
+      branch feature/F002
+      checkout feature/F002
+      commit id: "A: add lab 6 item"
+      commit id: "B: add sale banner" type: REVERSE
+      commit id: "B': Revert B" type: HIGHLIGHT
+      checkout main
+  </div>
+  <p class="arch-caption">Commit B (lỗi) vẫn nằm trong lịch sử. Commit B' có nội dung ngược lại với B, nên code sau B' giống hệt code sau A.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 5: repository <code>demo-git</code> có <code>develop</code> đã cập nhật.</li>
+    <li>Source code: <code>sourcecode/section_7_git_basic_operation/lab6_git_revert/commands.sh</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo nhánh feature/F002 từ develop</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/git-labs/demo-git
+git checkout develop
+git pull origin develop
+git checkout -b feature/F002</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo 2 commit (commit thứ 2 là thay đổi “lỗi”)</strong>
+        <p>Mở <code>index.html</code>, thêm 1 dòng vào danh sách <code>&lt;ul&gt;</code>:</p>
+        <pre class="code-block"><code class="language-html">    &lt;li&gt;Lab 6: Git revert&lt;/li&gt;</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add index.html
+git commit -m "feat(F002): add lab 6 item"</code></pre>
+        <p>Tiếp tục thêm 1 dòng ngay dưới thẻ <code>&lt;h1&gt;</code> – giả lập một thay đổi sai cần gỡ bỏ:</p>
+        <pre class="code-block"><code class="language-html">  &lt;p class="banner"&gt;SALE 90%!!!&lt;/p&gt;</code></pre>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add index.html
+git commit -m "feat(F002): add sale banner"
+git push -u origin feature/F002</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Xem lịch sử commit với git log</strong>
+        <pre class="command-line" data-prompt="$" data-output="3-6"><code class="language-bash">git log
+git log --oneline
+9c1e7f2 (HEAD -&gt; feature/F002, origin/feature/F002) feat(F002): add sale banner
+5b4d3a1 feat(F002): add lab 6 item
+e8f2c90 (origin/develop, develop) Merge pull request #3 from .../release/v0.1
+...</code></pre>
+        <p>Một số cách dùng <code>git log</code> hữu ích (nhấn <code>q</code> để thoát khi output dài):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git log --oneline --graph --all -15
+git log --oneline -- index.html
+git log --author="Your Name" --oneline
+git log --since="2 days ago" --oneline</code></pre>
+        <table class="compare-table">
+          <thead><tr><th>Lệnh</th><th>Ý nghĩa</th></tr></thead>
+          <tbody>
+            <tr><td><code>git log</code></td><td>Lịch sử đầy đủ: hash, tác giả, ngày, message</td></tr>
+            <tr><td><code>--oneline</code></td><td>Mỗi commit 1 dòng (hash rút gọn 7 ký tự + message)</td></tr>
+            <tr><td><code>--graph --all</code></td><td>Vẽ cây branch/merge của tất cả branch</td></tr>
+            <tr><td><code>-- &lt;file&gt;</code></td><td>Chỉ các commit có thay đổi file đó</td></tr>
+            <tr><td><code>-p</code></td><td>Kèm nội dung diff của từng commit</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Xem chi tiết commit với git show</strong>
+        <p>Copy hash của commit <em>add sale banner</em> ở bước 3 và thay vào <code>&lt;COMMIT_HASH&gt;</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git show &lt;COMMIT_HASH&gt;
+git show --stat &lt;COMMIT_HASH&gt;
+git show HEAD</code></pre>
+        <p><code>git show</code> hiển thị thông tin commit và diff (dòng <code>+  &lt;p class="banner"&gt;SALE 90%!!!&lt;/p&gt;</code>). <code>HEAD</code> là commit mới nhất của branch hiện tại.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Revert commit lỗi</strong>
+        <p>Cú pháp: <code>git revert &lt;commit-hash&gt;</code>. Git tạo commit mới có nội dung ngược lại và mở editor (VS Code đã cấu hình ở Lab 1) để sửa message – giữ nguyên message mặc định, lưu và đóng tab để hoàn tất:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git revert &lt;COMMIT_HASH&gt;</code></pre>
+        <p class="code-note">💡 Bỏ qua bước mở editor: <code>git revert --no-edit &lt;COMMIT_HASH&gt;</code>.</p>
+        <pre class="command-line" data-prompt="$" data-output="2-4"><code class="language-bash">git log --oneline -3
+4a7d9e3 (HEAD -&gt; feature/F002) Revert "feat(F002): add sale banner"
+9c1e7f2 (origin/feature/F002) feat(F002): add sale banner
+5b4d3a1 feat(F002): add lab 6 item
+cat index.html
+git push</code></pre>
+        <p>Dòng banner đã biến mất khỏi <code>index.html</code>, nhưng cả commit gốc lẫn commit revert đều còn trong lịch sử. Vì chỉ <strong>thêm</strong> commit mới, <code>git push</code> thành công bình thường – không cần <code>--force</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Revert lại commit revert (khôi phục thay đổi)</strong>
+        <p>Giả sử sau đó team quyết định vẫn cần banner: revert chính commit <em>Revert "..."</em> (thay <code>&lt;REVERT_COMMIT_HASH&gt;</code>):</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git revert --no-edit &lt;REVERT_COMMIT_HASH&gt;
+git log --oneline -5
+cat index.html</code></pre>
+        <p>Banner xuất hiện trở lại. Để giữ trạng thái không có banner cho các lab sau, revert thêm 1 lần nữa commit vừa tạo (<code>git revert --no-edit HEAD</code>) rồi push:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git revert --no-edit HEAD
+git push</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7: Merge feature/F002 vào develop</strong>
+        <p>Tạo Pull Request <code>develop</code> ← <code>feature/F002</code>, merge và xoá branch trên GitHub. Sau đó cập nhật local:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git checkout develop
+git pull origin develop
+git branch -d feature/F002</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="section-subheading">So sánh nhanh: revert vs reset</h3>
+  <table class="compare-table">
+    <thead><tr><th></th><th><code>git revert</code></th><th><code>git reset</code></th></tr></thead>
+    <tbody>
+      <tr><td>Cách hoạt động</td><td>Tạo commit mới đảo ngược thay đổi</td><td>Di chuyển branch về commit cũ, các commit sau “biến mất” khỏi branch</td></tr>
+      <tr><td>Lịch sử</td><td>Giữ nguyên, có thêm commit</td><td>Bị viết lại</td></tr>
+      <tr><td>Dùng với branch đã push/chia sẻ</td><td>✅ An toàn</td><td>❌ Phải <code>push --force</code>, ảnh hưởng người khác</td></tr>
+      <tr><td>Khi nào dùng</td><td>Gỡ thay đổi đã lên <code>develop</code>/<code>main</code>/production</td><td>Dọn commit ở local, chưa push</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Trên GitHub, mục Commits của <code>feature/F002</code> (hoặc <code>develop</code> sau khi merge) có các commit <em>Revert "feat(F002): add sale banner"</em>.</li>
+      <li><code>index.html</code> trên <code>develop</code> có dòng <em>Lab 6: Git revert</em> và <strong>không</strong> có banner SALE.</li>
+      <li>Không phải dùng <code>git push --force</code> ở bất kỳ bước nào.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Terminal “đứng” sau khi chạy <code>git revert</code> / <code>git log</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>git revert</code> đang chờ bạn đóng editor; <code>git log</code> đang mở trình xem trang (pager).<br/><strong>Giải pháp:</strong> Với revert: lưu và đóng tab commit message trong VS Code (nếu editor là Vim: gõ <code>:wq</code>). Với log: nhấn <code>q</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>CONFLICT (content): Merge conflict in index.html</code> khi revert</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Commit muốn revert đã bị các commit sau sửa tiếp cùng dòng.<br/><strong>Giải pháp:</strong> Sửa conflict như Lab 7 rồi <code>git add index.html</code> và <code>git revert --continue</code>; hoặc huỷ bằng <code>git revert --abort</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>error: commit ... is a merge but no -m option was given.</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Revert một merge commit cần chỉ rõ giữ lại nhánh cha nào.<br/><strong>Giải pháp:</strong> <code>git revert -m 1 &lt;MERGE_COMMIT_HASH&gt;</code> (giữ nhánh cha thứ nhất – thường là nhánh được merge vào). Trên GitHub có thể dùng nút <strong>Revert</strong> trong Pull Request đã merge.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-info">Không cần dọn dẹp, giữ repository cho Lab 7. Lab không phát sinh chi phí.</div>
+
+</body>
+</html>

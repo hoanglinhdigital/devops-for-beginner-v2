@@ -1,0 +1,48 @@
+// Lab 6 – Build Docker image & push lên Amazon ECR
+// Job: lab06-docker-ecr | Pipeline definition: Pipeline script (dán nội dung file này)
+pipeline {
+    agent any
+
+    environment {
+        // Thay <your-github-username> bằng GitHub username của bạn
+        GIT_REPO   = 'https://github.com/<your-github-username>/nodejs-random-color.git'
+        AWS_REGION = 'ap-southeast-1'
+        ECR_REPO   = 'nodejs-random-color'
+        IMAGE_TAG  = "ver-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: "${GIT_REPO}"
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                sh 'docker build -t ${ECR_REPO}:${IMAGE_TAG} .'
+            }
+        }
+
+        stage('Push image to ECR') {
+            steps {
+                // Lấy Account ID từ IAM Role của Jenkins server -> không hard-code Account ID
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    echo "Pushed image: ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            // Xoá image không còn dùng để tránh đầy ổ đĩa Jenkins server
+            sh 'docker image prune -f'
+        }
+    }
+}

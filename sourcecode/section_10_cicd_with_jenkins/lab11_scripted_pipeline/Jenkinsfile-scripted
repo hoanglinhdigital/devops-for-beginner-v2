@@ -1,0 +1,56 @@
+// Lab 11 – Viết lại job Lab 6 (Build Docker image & push ECR) bằng Scripted Pipeline
+// Job: lab11-scripted-pipeline | Pipeline definition: Pipeline script (dán nội dung file này)
+// Scripted Pipeline: bắt đầu bằng node { }, viết bằng Groovy, tự xử lý lỗi bằng try / catch / finally.
+
+// Thay <your-github-username>; credential github-ssh-key đã tạo ở Lab 8 (repository đang ở chế độ Private)
+def gitRepo       = 'git@github.com:<your-github-username>/nodejs-random-color.git'
+def gitCredential = 'github-ssh-key'
+def awsRegion     = 'ap-southeast-1'
+def ecrRepo       = 'nodejs-random-color'
+
+node {
+    // Logic Groovy tuỳ ý: build từ nhánh master thì gắn thêm tag "stable"
+    def gitBranch = 'master'
+    def imageTags = ["scripted-${env.BUILD_NUMBER}"]
+    if (gitBranch == 'master') {
+        imageTags << 'stable'
+    }
+    echo "Image tags sẽ được push: ${imageTags}"
+
+    try {
+        stage('Checkout') {
+            git branch: gitBranch, url: gitRepo, credentialsId: gitCredential
+        }
+
+        stage('Build image') {
+            sh "docker build -t ${ecrRepo}:${imageTags[0]} ."
+        }
+
+        stage('Push image to ECR') {
+            // withEnv: đưa biến Groovy thành biến môi trường cho shell
+            withEnv(["AWS_REGION=${awsRegion}", "ECR_REPO=${ecrRepo}", "BUILD_TAG_MAIN=${imageTags[0]}"]) {
+                sh '''
+                    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                    echo "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" > ecr_registry.txt
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin $(cat ecr_registry.txt)
+                '''
+                def ecrRegistry = readFile('ecr_registry.txt').trim()
+                // Vòng lặp Groovy: tag & push từng tag trong danh sách
+                for (tag in imageTags) {
+                    sh "docker tag ${ecrRepo}:${imageTags[0]} ${ecrRegistry}/${ecrRepo}:${tag}"
+                    sh "docker push ${ecrRegistry}/${ecrRepo}:${tag}"
+                }
+            }
+        }
+
+        currentBuild.result = 'SUCCESS'
+    } catch (err) {
+        currentBuild.result = 'FAILURE'
+        echo "Build lỗi: ${err}"
+        throw err
+    } finally {
+        // Luôn chạy, tương đương post { always { } } của Declarative
+        sh 'docker image prune -f'
+        echo "Kết quả: ${currentBuild.currentResult}"
+    }
+}

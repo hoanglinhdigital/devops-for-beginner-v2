@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 9: Manual approval &amp; notification trong CodePipeline – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">9. CI/CD với AWS CodePipeline</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 9: Manual approval &amp; notification trong CodePipeline</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Tạo <strong>notification rule</strong> gửi email khi pipeline bắt đầu, thành công, thất bại và khi cần phê duyệt.</li>
+    <li>Tạo notification rule cho các event của <strong>CodeDeploy</strong> (deployment started / succeeded / failed).</li>
+    <li>Thêm stage <strong>Approval</strong> (Manual approval) trước stage Deploy – mô phỏng quy trình Team Lead duyệt trước khi release production.</li>
+    <li>Push code, chờ đến bước phê duyệt, Approve / Reject và quan sát kết quả.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:38px;height:38px;'/><br/>GitHub"]
+      subgraph AWS["AWS Cloud – ap-southeast-1"]
+          direction LR
+          subgraph CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:26px;height:26px;'/> nodejs-ecs-bluegreen-pipeline"]
+              direction LR
+              SRC["① Source"] --> BLD["② Build"] --> APR["✋ ③ Approval<br/>ManualApproval"] --> DPL["④ Deploy<br/>ECS (Blue/Green)"]
+          end
+          CD["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:36px;height:36px;'/><br/>CodeDeploy<br/>nodejs-ecs-app"]
+          NR["🔔 Notification rules<br/>pipeline · CodeDeploy"]
+          SNS["<img src='../../assets/aws-svg/SNS.svg' style='width:38px;height:38px;'/><br/><b>SNS topic</b><br/>codestar-notifications-pipeline-topic"]
+      end
+      Lead["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Team Lead<br/>📧 email"]
+      GH -->|"trigger"| SRC
+      DPL --> CD
+      CP -.->|"events"| NR
+      CD -.->|"events"| NR
+      APR -.->|"approval needed"| SNS
+      NR --> SNS --> Lead
+      Lead -->|"Approve / Reject"| APR
+  </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Hoàn thành Lab 7 (hoặc Lab 8): pipeline <code>nodejs-ecs-bluegreen-pipeline</code> chạy thành công, Terraform stack đang chạy.</li>
+    <li>Một địa chỉ email có thể nhận thư để xác nhận subscription của SNS.</li>
+    <li>Lab thao tác hoàn toàn trên AWS Console, không có source code riêng.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo notification rule cho pipeline &amp; SNS topic</strong>
+        <p>Mở pipeline <code>nodejs-ecs-bluegreen-pipeline</code> → <strong>Notify → Create notification rule</strong> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Notification name: <code>nodejs-pipeline-notify</code>; Detail type: <strong>Full</strong></li>
+          <li>Events: <strong>Pipeline execution</strong> – Started, Succeeded, Failed; <strong>Manual approval</strong> – Needed</li>
+          <li>Targets: <strong>Create target</strong> → Target type <strong>SNS topic</strong>, Topic name <code>pipeline-topic</code> (Console tạo topic <code>codestar-notifications-pipeline-topic</code> với access policy cho phép dịch vụ notification publish)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Đăng ký email vào SNS topic</strong>
+        <p>Vào <strong>Amazon SNS → Topics → codestar-notifications-pipeline-topic</strong>, tạo subscription:</p>
+        <ul class="feature-list">
+          <li>Protocol: <strong>Email</strong>; Endpoint: email của bạn</li>
+        </ul>
+        <p>Mở hộp thư, bấm <strong>Confirm subscription</strong> trong email từ AWS Notifications. Subscription chuyển sang trạng thái <span class="badge badge-green">Confirmed</span>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Tạo notification rule cho CodeDeploy</strong>
+        <p>Mở CodeDeploy application <code>nodejs-ecs-app</code> → <strong>Notify → Create notification rule</strong>:</p>
+        <ul class="feature-list">
+          <li>Notification name: <code>nodejs-codedeploy-notify</code>; Detail type: <strong>Basic</strong></li>
+          <li>Events: <strong>Deployment</strong> – Started, Succeeded, Failed</li>
+          <li>Targets: SNS topic <code>codestar-notifications-pipeline-topic</code> (dùng lại topic ở Bước 1)</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Thêm stage Approval vào pipeline</strong>
+        <p>Edit pipeline, thêm stage mới <strong>giữa Build và Deploy</strong>:</p>
+        <ul class="feature-list">
+          <li>Stage name: <code>Approval</code></li>
+          <li>Action name: <code>ManualApproval</code>; Action provider: <strong>Manual approval</strong></li>
+          <li>SNS topic ARN: <code>codestar-notifications-pipeline-topic</code> (tuỳ chọn – đã có notification rule ở Bước 1)</li>
+          <li>URL for review: link commit trên GitHub, ví dụ <code>https://github.com/&lt;your-github-username&gt;/nodejs-random-color/commits/master</code></li>
+          <li>Comments: <code>Review thay đổi trước khi deploy lên production</code></li>
+        </ul>
+        <p>Lưu pipeline (<strong>Save</strong>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Push code &amp; chờ phê duyệt</strong>
+        <p>Sửa text thẻ <code>&lt;h1&gt;</code> trong <code>public/index.html</code> thành <code>Welcome to My Website – v5 Approved</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd ~/codepipeline-labs/nodejs-random-color
+git add public/index.html
+git commit -m "feat: update welcome message v5 approved"
+git push origin master</code></pre>
+        <p>Pipeline chạy Source → Build rồi dừng ở stage <strong>Approval</strong> với trạng thái <em>Waiting for approval</em>. Bạn nhận được các email: <em>pipeline execution started</em> và <em>manual approval needed</em>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Approve</strong>
+        <p>Trên stage Approval bấm <strong>Review</strong>, mở URL review để xem commit, nhập comment (ví dụ <code>LGTM – approved by Team Lead</code>) và chọn <strong>Approve</strong>. Stage Deploy chạy tiếp, bạn nhận thêm email <em>deployment started / succeeded</em> từ CodeDeploy và <em>pipeline execution succeeded</em>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 7 (tuỳ chọn): Reject</strong>
+        <p>Sửa code thêm một lần nữa và push. Ở bước phê duyệt chọn <strong>Reject</strong> kèm lý do: stage Approval chuyển <span class="badge badge-red">Failed</span>, pipeline dừng, version mới <strong>không</strong> được deploy – website giữ nguyên v5. Bạn nhận email <em>pipeline execution failed</em>.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Pipeline có 4 stage: Source → Build → Approval → Deploy.</li>
+      <li>Nhận được email khi pipeline bắt đầu, khi cần phê duyệt, khi CodeDeploy deploy và khi pipeline kết thúc.</li>
+      <li>Sau khi Approve, website hiển thị v5; khi Reject, version mới không được deploy.</li>
+      <li>Lịch sử execution lưu lại người phê duyệt và comment.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Không nhận được email nào</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Chưa confirm subscription, email rơi vào Spam, hoặc topic không cho phép <code>codestar-notifications.amazonaws.com</code> publish.<br/><strong>Giải pháp:</strong> Kiểm tra trạng thái subscription; tạo topic bằng nút <strong>Create target</strong> trong notification rule như Bước 1 (nếu tự tạo topic, phải thêm access policy cho service principal <code>codestar-notifications.amazonaws.com</code>).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Stage Approval lỗi <code>The provided role does not have sufficient permissions ... sns:Publish</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Service role của pipeline không có quyền publish lên SNS topic đã chọn trong action.<br/><strong>Giải pháp:</strong> Thêm quyền <code>sns:Publish</code> trên ARN của topic vào role của pipeline, hoặc bỏ trống SNS topic ARN trong action (đã có notification rule gửi email).</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Email nhận được là chuỗi JSON khó đọc</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Notification gửi nội dung event dạng JSON tới SNS Email.<br/><strong>Giải pháp:</strong> Chọn Detail type <strong>Basic</strong> để gọn hơn; trong thực tế nên dùng target <strong>Amazon Q Developer in chat applications</strong> (tên cũ: AWS Chatbot) để gửi thông báo dạng dễ đọc vào Slack / Microsoft Teams.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning">Đây là lab cuối cùng dùng Terraform stack – <strong>xoá ALB và ECS ngay</strong> để tránh phát sinh chi phí theo giờ. Xem checklist đầy đủ ở chương <em>Tổng kết &amp; dọn dẹp resource</em>.</div>
+  <ol class="step-list">
+    <li><div><p>Xoá 2 notification rule <code>nodejs-pipeline-notify</code>, <code>nodejs-codedeploy-notify</code> và SNS topic <code>codestar-notifications-pipeline-topic</code>.</p></div></li>
+    <li><div><p>Xoá pipeline <code>nodejs-ecs-bluegreen-pipeline</code>, CodeDeploy application <code>nodejs-ecs-app</code> (xoá kèm deployment group).</p></div></li>
+    <li><div><p>Xoá Terraform stack:</p>
+      <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_9_code_pipeline/terraform_ecs_stack
+terraform destroy</code></pre></div></li>
+  </ol>
+
+</body>
+</html>

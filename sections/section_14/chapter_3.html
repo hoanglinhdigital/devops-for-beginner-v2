@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Các khái niệm cơ bản &amp; Pod – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Các khái niệm cơ bản &amp; Pod</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Trước khi thực hành, bạn cần nắm bản đồ các khái niệm cơ bản của Kubernetes. Trong đó <strong>Pod</strong> là khái niệm nền tảng nhất:
+    đơn vị nhỏ nhất mà Kubernetes triển khai và quản lý, chứa một hoặc nhiều container.
+    Tất cả khái niệm khác (ReplicaSet, Deployment, Service...) đều xoay quanh việc quản lý Pod.
+  </p>
+
+  <h2 class="section-heading">Bản đồ các khái niệm cần nắm</h2>
+  <table class="compare-table">
+    <thead><tr><th>Khái niệm</th><th>Vai trò ngắn gọn</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Pod</strong></td><td>Đơn vị nhỏ nhất, bọc 1+ container chạy cùng nhau.</td></tr>
+      <tr><td><strong>ReplicaSet / ReplicationController</strong></td><td>Đảm bảo số lượng bản sao Pod luôn đúng.</td></tr>
+      <tr><td><strong>Deployment</strong></td><td>Quản lý ReplicaSet, hỗ trợ update &amp; rollback version.</td></tr>
+      <tr><td><strong>Service</strong> (ClusterIP, NodePort, LoadBalancer)</td><td>Cung cấp điểm truy cập ổn định đến nhóm Pod.</td></tr>
+      <tr><td><strong>Ingress</strong></td><td>Định tuyến HTTP/HTTPS theo host/path vào các Service.</td></tr>
+      <tr><td><strong>Namespace</strong></td><td>Phân chia logic cluster thành các nhóm tài nguyên.</td></tr>
+      <tr><td><strong>ConfigMap / Secret</strong></td><td>Lưu cấu hình (không nhạy cảm / nhạy cảm) tách khỏi code.</td></tr>
+      <tr><td><strong>PersistentVolume / PVC / StorageClass</strong></td><td>Cung cấp lưu trữ bền vững cho Pod.</td></tr>
+      <tr><td><strong>StatefulSet / DaemonSet</strong></td><td>Quản lý Pod có state / Pod chạy một bản trên mỗi node.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Pod là gì?</h2>
+  <ul class="feature-list">
+    <li><strong>Đơn vị nhỏ nhất:</strong> Kubernetes chỉ có thể chạy các ứng dụng đã build thành Docker image. Pod là đơn vị quản lý nhỏ nhất, chứa <strong>1 hoặc nhiều container</strong>.</li>
+    <li><strong>Image phải có sẵn:</strong> image cần được chuẩn bị trước trên Container Registry như ECR, Docker Hub trước khi Pod chạy.</li>
+    <li><strong>Chia sẻ tài nguyên:</strong> các container trong cùng Pod <strong>share storage, network</strong> và có <strong>chung life cycle</strong> (cùng sống, cùng chết, cùng được lên lịch).</li>
+    <li><strong>IP riêng:</strong> mỗi Pod có một IP riêng trong cluster; các container trong Pod giao tiếp qua <code>localhost</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc Pod</h2>
+  <div class="mermaid">
+  flowchart TB
+      subgraph Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:34px;height:34px;'/><br/>Pod"]
+          MC["<img src='../../assets/svg-icon/container.svg' style='width:30px;height:30px;'/><br/>Container chính<br/>(ứng dụng Java)"]
+          SC["<img src='../../assets/svg-icon/container.svg' style='width:30px;height:30px;'/><br/>Container phụ (sidecar)<br/>(Logstash collect log)"]
+      end
+      NET["🌐 Network namespace<br/>(IP dùng chung)"]
+      VOL["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:30px;height:30px;'/><br/>Volume dùng chung"]
+      Pod --- NET
+      Pod --- VOL
+      MC -.-|"localhost"| SC
+  </div>
+  <p class="arch-caption">Một Pod có thể chạy nhiều hơn một container: container chính chạy ứng dụng và container phụ (sidecar) làm nhiệm vụ hỗ trợ như thu thập log, đồng bộ file... Các container dùng chung network và volume.</p>
+
+  <h2 class="section-heading">Một số lưu ý khi dùng Pod</h2>
+  <ul class="feature-list">
+    <li><strong>Scaling:</strong> khi scale ứng dụng, bạn scale <em>thêm Pod</em> (chứ không thêm container trong Pod). Mỗi Pod là một bản sao độc lập, có thể nằm trên các node khác nhau.</li>
+    <li><strong>Không nhồi nhét:</strong> không triển khai 2 container <em>cùng loại</em> (2 app độc lập) trong 1 Pod; sidecar chỉ nên là thành phần hỗ trợ gắn chặt với app chính.</li>
+    <li><strong>Ephemeral:</strong> Pod là tạm thời. Khi Pod chết, nó không tự "sống lại" – một Pod mới (có IP mới) được tạo thay thế. Vì vậy ta cần ReplicaSet/Deployment để duy trì số lượng và Service để có điểm truy cập ổn định.</li>
+    <li><strong>Thực tế:</strong> hiếm khi tạo Pod "trần" (bare Pod); thường tạo Pod gián tiếp qua Deployment.</li>
+  </ul>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Multi-container pattern phổ biến:</strong> sidecar (log, proxy), ambassador (đại diện kết nối), adapter (biến đổi định dạng).</li>
+    <li><strong>Lệnh xem Pod:</strong> <code>kubectl get pods</code> (danh sách), <code>kubectl describe pod &lt;tên&gt;</code> (chi tiết), <code>kubectl logs &lt;tên&gt;</code> (xem log).</li>
+    <li><strong>Pod ≠ container:</strong> một container là một tiến trình Docker; một Pod là một "hộp" Kubernetes chứa container cùng chia sẻ network/volume.</li>
+  </ul>
+
+</body>
+</html>

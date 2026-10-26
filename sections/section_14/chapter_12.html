@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Persistent Volume &amp; Storage Class – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">13. Kubernetes (k8s) cơ bản</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Persistent Volume &amp; Storage Class</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    Pod là tạm thời, và dữ liệu trong container cũng mất khi Pod bị xoá.
+    Với các ứng dụng cần lưu trữ lâu dài (database, service đọc/ghi file), ta cần <strong>Persistent Volume (PV)</strong> – một phần lưu trữ độc lập với vòng đời của Pod.
+    PV có thể nằm trên ổ cứng của node, trên NFS hoặc trên cloud (EBS, EFS).
+    <strong>Lưu ý quan trọng:</strong> Kubernetes không chịu trách nhiệm quản lý các disk – việc cấp phát và bảo trì disk do bạn (hoặc cloud provider) đảm nhiệm.
+  </p>
+
+  <h2 class="section-heading">Đặc điểm chính</h2>
+  <ul class="feature-list">
+    <li><strong>Độc lập với Pod:</strong> dữ liệu tồn tại cả khi Pod chết và được tạo lại.</li>
+    <li><strong>Nằm ngoài namespace:</strong> PV là resource toàn cluster, Pod ở namespace nào cũng có thể claim.</li>
+    <li><strong>Dùng qua PVC:</strong> Pod cần tạo <strong>Persistent Volume Claim (PVC)</strong> để định nghĩa mapping giữa Pod và volume thực tế.</li>
+    <li><strong>Kubernetes không quản lý disk:</strong> bạn phải tự cấp ổ đĩa (EBS, NFS...) và khai báo cho Kubernetes.</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <div class="mermaid">
+  flowchart TB
+      Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:32px;height:32px;'/><br/>Pod<br/>(mount vào /var/lib/mysql)"]
+      PVC["PVC<br/>(Persistent Volume Claim)<br/>request 1Gi"]
+      PV["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:32px;height:32px;'/><br/>PV (Persistent Volume)<br/>1Gi"]
+      Disk["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:32px;height:32px;'/><br/>Disk thực tế<br/>(hostPath / EBS / NFS)"]
+      Pod -->|"claim"| PVC -->|"bind"| PV -->|"ánh xạ"| Disk
+  </div>
+  <p class="arch-caption">Pod dùng PVC để yêu cầu storage; PVC được bind với một PV; PV ánh xạ tới ổ đĩa thực tế. Dữ liệu nằm trên ổ đĩa nên vẫn còn khi Pod bị xoá.</p>
+
+  <h2 class="section-heading">Các loại Persistent Volume</h2>
+  <table class="compare-table">
+    <thead><tr><th>Loại</th><th>Đặc điểm</th><th>Rủi ro</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Local volume</strong></td><td>Gắn trực tiếp vào 1 node trong cluster</td><td>Mất dữ liệu nếu node đó crash</td></tr>
+      <tr><td><strong>Remote volume</strong></td><td>Không nằm trên node của cluster (EBS, EFS, NFS...)</td><td>An toàn hơn khi node lỗi</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Storage Class</h2>
+  <p class="body-text">
+    <strong>Storage Class</strong> cung cấp cơ chế <strong>tạo và quản lý volume tự động</strong>: thay vì tự tạo PV thủ công, bạn định nghĩa một Storage Class (ví dụ tự tạo EBS khi cần), rồi PVC chỉ cần trỏ tới Storage Class đó để được cấp volume phù hợp.
+  </p>
+  <div class="mermaid">
+  flowchart LR
+      Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:30px;height:30px;'/><br/>Pod"]
+      PVC["PVC"]
+      SC["Storage Class"]
+      Vol["<img src='../../assets/aws-svg/Elastic-Block-Store.svg' style='width:30px;height:30px;'/><br/>Volume (EBS)"]
+      Pod -->|"request"| PVC -->|"request qua"| SC -->|"tự tạo"| Vol
+  </div>
+  <p class="arch-caption">Pod request volume qua PVC; PVC request volume qua Storage Class; Storage Class tự tạo các volume đáp ứng yêu cầu (dynamic provisioning).</p>
+
+  <h2 class="section-heading">Thực hành: Tạo Persistent Volume gắn vào Pod</h2>
+  <p class="body-text">Tạo <strong>PersistentVolume</strong> + <strong>PersistentVolumeClaim</strong> và gắn vào Deployment MySQL (NodePort), sau đó xoá Pod để chứng minh dữ liệu <strong>không bị mất</strong> khi Pod được tạo lại.</p>
+  <div class="mermaid">
+  flowchart LR
+      Client["<img src='../../assets/svg-icon/mysql-workbench.svg' style='width:32px;height:32px;'/><br/>MySQL Workbench"]
+      SVC["Service<br/>mysql-service<br/>NodePort 30088"]
+      Pod["<img src='../../assets/svg-icon/eks-pod.svg' style='width:30px;height:30px;'/><br/>mysql Pod<br/>mount /var/lib/mysql"]
+      PVC["PVC<br/>my-pvc"]
+      PV["<img src='../../assets/svg-icon/eks-persistent-volume.svg' style='width:30px;height:30px;'/><br/>PV my-pv<br/>hostPath /data/mysql"]
+      Client --> SVC --> Pod --> PVC --> PV
+  </div>
+  <p class="arch-caption">MySQL Pod ghi dữ liệu vào PV (hostPath <code>/data/mysql</code>). Khi xoá Pod, Deployment tạo Pod mới gắn lại đúng PV cũ nên dữ liệu vẫn còn.</p>
+
+  <h3 class="sub-heading">Yêu cầu trước khi bắt đầu</h3>
+  <ul class="feature-list">
+    <li>Hoàn thành <strong>Lab 1</strong> (Minikube chạy), có <strong>MySQL Workbench</strong>.</li>
+    <li>Source code: <code>sourcecode/section_13_kubernetes_k8s_basic/persistent_volume/</code>.</li>
+  </ul>
+
+  <h3 class="sub-heading">Các bước thực hành</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Tạo file cấu hình PV + PVC + Service + Deployment</strong>
+        <p>Tạo file <code>persistent-volume.yaml</code>:</p>
+        <pre class="code-block"><code class="language-yaml">apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: my-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /data/mysql
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+spec:
+  type: NodePort
+  ports:
+    - port: 3306
+      targetPort: 3306
+      nodePort: 30088
+  selector:
+    app: mysql
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: password123
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: mysql-persistent-storage
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: mysql-persistent-storage
+          persistentVolumeClaim:
+            claimName: my-pvc</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Deploy và kiểm tra</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl create -f persistent-volume.yaml
+kubectl get all
+kubectl get pv
+kubectl get pvc
+kubectl get pvc --all-namespaces</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kết nối MySQL và insert dữ liệu</strong>
+        <p>Tạo tunnel tới Service:</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">minikube service mysql-service --url
+http://127.0.0.1:&lt;port&gt;</code></pre>
+        <p>Mở MySQL Workbench, kết nối với <code>host = localhost</code>, <code>port</code> từ lệnh trên, <code>username = root</code>, <code>password = password123</code>. Chạy script <code>script.sql</code>:</p>
+        <pre class="code-block"><code class="language-sql">CREATE DATABASE mydb;
+USE mydb;
+CREATE TABLE employee (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(50),
+  age INT,
+  salary DECIMAL(10,2)
+);
+INSERT INTO employee (name, age, salary) VALUES
+  ('John Doe', 30, 5000),
+  ('Jane Smith', 25, 4000),
+  ('Mike Johnson', 35, 6000);
+SELECT * FROM employee;</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Xoá Pod và quan sát tự phục hồi</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get pods -o wide
+kubectl delete pod mysql-deployment-&lt;xxxxxx&gt;</code></pre>
+        <p>Thay <code>&lt;xxxxxx&gt;</code> bằng đuôi ngẫu nhiên của Pod. Chờ Pod mới được tạo (Deployment tự phục hồi).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Kiểm tra dữ liệu vẫn còn</strong>
+        <p>Truy cập lại MySQL Workbench và chạy:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">SELECT * FROM mydb.employee;</code></pre>
+        <p>Bạn sẽ thấy 3 bản ghi vẫn còn nguyên – dữ liệu được lưu trong PV, không mất khi Pod chết.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Xoá resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f persistent-volume.yaml</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sub-heading">Kiểm tra kết quả</h3>
+  <div class="verify-box">
+    <h4>✅ Thực hành thành công khi</h4>
+    <ul class="feature-list">
+      <li><code>kubectl get pv</code> và <code>kubectl get pvc</code> hiển thị trạng thái <strong>Bound</strong>.</li>
+      <li>Sau khi xoá Pod, Pod mới tự tạo và dữ liệu <code>employee</code> vẫn còn.</li>
+    </ul>
+  </div>
+
+  <h3 class="sub-heading">Troubleshoot</h3>
+  <div class="troubleshoot-item">
+    <div class="err">PVC báo <code>Pending</code> không Bound được</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> không có PV nào khớp (capacity/accessMode khác với yêu cầu).<br/><strong>Giải pháp:</strong> kiểm tra <code>kubectl get pv</code>; đảm bảo PV có đủ <code>capacity: 1Gi</code> và <code>accessModes: ReadWriteOnce</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pod báo <code>CrashLoopBackOff</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> thư mục <code>/data/mysql</code> trong minikube chưa tồn tại hoặc không ghi được.<br/><strong>Giải pháp:</strong> vào trong node tạo thư mục: <code>minikube ssh -- sudo mkdir -p /data/mysql</code> rồi apply lại.</div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Access mode:</strong> <code>ReadWriteOnce</code> (một node ghi), <code>ReadOnlyMany</code>, <code>ReadWriteMany</code> – tuỳ loại storage hỗ trợ.</li>
+    <li><strong>On Minikube:</strong> thường dùng <code>hostPath</code> (Local volume) để demo; trên cluster thật dùng StorageClass + EBS/EFS.</li>
+    <li><strong>Mối quan hệ:</strong> PV là "ổ đĩa", PVC là "đơn xin dùng ổ đĩa", Storage Class là "nhà máy tự sản xuất ổ đĩa theo đơn".</li>
+    <li><strong>Liên hệ Section 6:</strong> EBS volume đã học ở phần Linux cũng chính là storage backend phổ biến cho Kubernetes trên AWS.</li>
+  </ul>
+
+</body>
+</html>

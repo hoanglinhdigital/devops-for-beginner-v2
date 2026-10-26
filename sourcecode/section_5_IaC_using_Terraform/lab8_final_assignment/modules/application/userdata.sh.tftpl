@@ -1,0 +1,38 @@
+#!/bin/bash
+# File template: Terraform thay ${alb_dns} và ${mongodb_ip} bằng giá trị thật thông qua hàm templatefile()
+apt-get -y update
+apt-get -y install nginx jq
+
+ALB_DNS=${alb_dns}
+MONGODB_PRIVATEIP=${mongodb_ip}
+
+mkdir -p /tmp/cloudacademy-app
+cd /tmp/cloudacademy-app
+
+echo ===========================
+echo FRONTEND - download latest release and install...
+mkdir -p ./voteapp-frontend-react-2023
+pushd ./voteapp-frontend-react-2023
+curl -sL https://api.github.com/repos/cloudacademy/voteapp-frontend-react-2023/releases/latest | jq -r '.assets[0].browser_download_url' | xargs curl -OL
+INSTALL_FILENAME=$(curl -sL https://api.github.com/repos/cloudacademy/voteapp-frontend-react-2023/releases/latest | jq -r '.assets[0].name')
+tar -xvzf $INSTALL_FILENAME
+rm -rf /var/www/html
+cp -R build /var/www/html
+cat > /var/www/html/env-config.js << EOFF
+window._env_ = {REACT_APP_APIHOSTPORT: "$ALB_DNS"}
+EOFF
+popd
+
+echo ===========================
+echo API - download latest release, install, and start...
+mkdir -p ./voteapp-api-go
+pushd ./voteapp-api-go
+curl -sL https://api.github.com/repos/cloudacademy/voteapp-api-go/releases/latest | jq -r '.assets[] | select(.name | contains("linux-amd64")) | .browser_download_url' | xargs curl -OL
+INSTALL_FILENAME=$(curl -sL https://api.github.com/repos/cloudacademy/voteapp-api-go/releases/latest | jq -r '.assets[] | select(.name | contains("linux-amd64")) | .name')
+tar -xvzf $INSTALL_FILENAME
+# Start the API (port 8080) ở background
+MONGO_CONN_STR=mongodb://$MONGODB_PRIVATEIP:27017/langdb nohup ./api > /var/log/voteapp-api.log 2>&1 &
+popd
+
+systemctl restart nginx
+echo fin v1.00!

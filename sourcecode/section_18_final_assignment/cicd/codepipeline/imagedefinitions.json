@@ -1,0 +1,6 @@
+[
+  {
+    "name": "frontend",
+    "imageUri": "REPLACE_WITH_ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/final-assignment-frontend:latest"
+  }
+]

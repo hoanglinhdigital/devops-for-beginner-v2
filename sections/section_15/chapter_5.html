@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 2: LoadBalancer trong EKS – Part 2 – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">15. Elastic Kubernetes Service (EKS)</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">Lab 2: LoadBalancer trong EKS – Part 2</span>
+  </div>
+
+  <h2 class="section-heading">Mục tiêu</h2>
+  <ul class="feature-list">
+    <li>Sử dụng <strong>ALB</strong> làm LoadBalancer cho một ứng dụng nhiều service.</li>
+    <li>Dùng <strong>Ingress</strong> định tuyến <code>/api</code> → backend và <code>/</code> → frontend.</li>
+    <li>Truy cập ứng dụng qua DNS của ALB.</li>
+  </ul>
+
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
+  <div class="mermaid">
+  flowchart LR
+      User["<img src='../../assets/svg-icon/user.svg' style='width:30px;height:30px;'/><br/>User"]
+      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>ALB"]
+      ING["Ingress<br/>demo-ingress"]
+      subgraph Cluster["EKS Cluster"]
+          FE["frontend<br/>NodePort 30088<br/>3 Pod"]
+          BE["backend<br/>NodePort 30099<br/>3 Pod"]
+          MO["mongo<br/>ClusterIP 27017"]
+      end
+      User --> ALB
+      ALB --> ING
+      ING -->|"/"| FE
+      ING -->|"/api"| BE
+      BE --> MO
+  </div>
+  <p class="arch-caption">ALB nhận traffic rồi chuyển tới Ingress; Ingress định tuyến <code>/</code> → frontend, <code>/api</code> → backend; backend gọi MongoDB qua ClusterIP.</p>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã cài <strong>AWS Load Balancer Controller</strong> (Lab 2 Part 1).</li>
+    <li>Có image frontend/backend trên ECR (đã build ở Section 13: <code>devops-lab13-frontend</code>, <code>devops-lab13-backend</code>).</li>
+    <li>Source code: <code>sourcecode/section_14_eks_basic/lab2_loadbalancer/demo-app.yaml</code>.</li>
+  </ul>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Chuẩn bị file config <code>demo-app.yaml</code></strong>
+        <p>File gồm các hạng mục: Deployment + Service cho Frontend, Backend, Mongo và Ingress ALB. Tham khảo cấu trúc (thay <code>&lt;AWS_ACCOUNT_ID&gt;</code>):</p>
+        <pre class="code-block"><code class="language-yaml"># Mongo (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  type: ClusterIP
+  selector:
+    app: mongo
+  ports:
+    - protocol: TCP
+      port: 27017
+      targetPort: 27017
+---
+# Backend (Deployment + NodePort 30099) - image ECR
+# Frontend (Deployment + NodePort 30088) - image ECR
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-ingress
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: alb
+  rules:
+  - host:
+    http:
+      paths:
+      - pathType: Prefix
+        path: /api
+        backend:
+          service:
+            name: backend
+            port:
+              number: 3000
+      - pathType: Prefix
+        path: /
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 3000</code></pre>
+        <p class="code-note">💡 File đầy đủ tại <code>lab2_loadbalancer/demo-app.yaml</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Apply file config</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl apply -f demo-app.yaml</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Kiểm tra các resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl get deployment
+kubectl get service
+kubectl get ingress</code></pre>
+        <p>Đợi Ingress có địa chỉ ALB (cột <code>ADDRESS</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Truy cập ứng dụng qua DNS của ALB</strong>
+        <p>Lấy DNS name của ALB và truy cập:</p>
+        <ul class="feature-list">
+          <li><code>http://&lt;alb-dns&gt;/</code> → giao diện frontend.</li>
+          <li><code>http://&lt;alb-dns&gt;/api</code> → dữ liệu từ backend.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Xoá resource</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f demo-app.yaml</code></pre>
+        <p>Giữ lại cluster nếu muốn thực hành lab tiếp theo, ngược lại xoá cluster:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Các Deployment frontend, backend, mongo có Pod <strong>Running</strong>.</li>
+      <li>Truy cập <code>/</code> thấy frontend, <code>/api</code> nhận dữ liệu từ backend.</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err"><code>/api</code> trả lỗi 404 hoặc frontend không gọi được backend</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> thứ tự path trong Ingress sai (path <code>/</code> khớp trước <code>/api</code>) hoặc sai tên service.<br/><strong>Giải pháp:</strong> kiểm tra định nghĩa paths trong Ingress, đảm bảo service name/port khớp.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Pod backend/frontend không kéo được image từ ECR</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> node không có quyền pull ECR hoặc image tag sai.<br/><strong>Giải pháp:</strong> kiểm tra image URI (Account ID, repo name, tag); đảm bảo node group có IAM role cho phép pull ECR.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Mongo không nhận kết nối từ backend</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> sai service name/port trong backend config.<br/><strong>Giải pháp:</strong> backend phải gọi đúng DNS <code>mongo</code> trên port <code>27017</code>.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>Chi phí:</strong> ALB + node EC2 tính phí theo giờ. Xoá resource và cluster khi không dùng.</div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">kubectl delete -f demo-app.yaml
+eksctl delete cluster --name devops-test-cluster --region ap-southeast-1</code></pre>
+
+</body>
+</html>

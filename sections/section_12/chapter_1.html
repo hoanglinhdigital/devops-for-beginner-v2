@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GitHub Actions là gì? – DevOps on AWS for Beginner</title>
+  <link rel="stylesheet" href="../../styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script src="../../mermaid-config.js"></script>
+  <link rel="stylesheet" href="../../prism.css" />
+  <script src="../../prism.js"></script>
+  <script src="../../script.js"></script>
+</head>
+<body class="chapter-body">
+
+  <div class="chapter-breadcrumb">
+    <span class="section-part">17. CI/CD sử dụng GitHub Actions</span>
+    <span class="sep">/</span>
+    <span class="chapter-part">GitHub Actions là gì?</span>
+  </div>
+
+  <h2 class="section-heading">Giới thiệu</h2>
+  <p class="body-text">
+    <strong>GitHub Actions</strong> là nền tảng <strong>CI/CD và tự động hoá</strong> được tích hợp sẵn ngay trong GitHub.
+    Thay vì phải dựng một server Jenkins riêng (như Section 10) hay cấu hình CodePipeline (Section 9), với GitHub Actions bạn chỉ cần
+    viết một file YAML trong repository để <strong>build, test và deploy</strong> ứng dụng mỗi khi có sự kiện xảy ra: push code, tạo pull request,
+    tạo tag, hay chạy thủ công. Toàn bộ pipeline chạy trên máy ảo do GitHub quản lý, không cần máy chủ riêng.
+  </p>
+  <div class="figure-centered figure-narrow">
+    <img src="../../images/section17/github-actions.png" alt="GitHub Actions" />
+    <div class="figure-title">GitHub Actions – CI/CD được tích hợp ngay trong GitHub</div>
+  </div>
+
+  <h2 class="section-heading">Các khái niệm cơ bản</h2>
+  <p class="body-text">Để làm việc với GitHub Actions, bạn cần nắm 6 khái niệm sau — chúng là "từ vựng" xuất hiện trong mọi file workflow:</p>
+  <table class="compare-table">
+    <thead><tr><th>Khái niệm</th><th>Ý nghĩa</th><th>Ví dụ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Workflow</strong></td><td>Quy trình tự động hoá, định nghĩa trong một file <code>.yml</code> ở <code>.github/workflows/</code>. Một repository có thể có nhiều workflow.</td><td><code>build-docker.yml</code>, <code>blue-green-deployment.yml</code></td></tr>
+      <tr><td><strong>Event</strong></td><td>Thứ kích hoạt workflow chạy.</td><td><code>push</code>, <code>pull_request</code>, <code>workflow_dispatch</code> (chạy tay), <code>schedule</code></td></tr>
+      <tr><td><strong>Job</strong></td><td>Một nhóm các bước chạy trên cùng một runner. Các job chạy <strong>song song</strong> theo mặc định, có thể ràng buộc thứ tự bằng <code>needs</code>.</td><td>job <code>build-and-push</code>, job <code>deploy</code></td></tr>
+      <tr><td><strong>Step</strong></td><td>Đơn vị nhỏ nhất trong một job. Mỗi step là một <strong>Action</strong> hoặc một câu lệnh shell (<code>run</code>).</td><td>step <code>Checkout code</code>, step <code>docker build</code></td></tr>
+      <tr><td><strong>Action</strong></td><td>Thành phần có thể tái sử dụng (giống thư viện/plugin), đóng gói sẵn một tác vụ.</td><td><code>actions/checkout@v4</code>, <code>aws-actions/amazon-ecr-login@v2</code></td></tr>
+      <tr><td><strong>Runner</strong></td><td>Máy chạy job: <code>ubuntu-latest</code>, <code>windows-latest</code>, <code>macos-latest</code> hoặc máy tự quản lý (self-hosted).</td><td><code>runs-on: ubuntu-latest</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section-heading">Cấu trúc file workflow</h2>
+  <p class="body-text">Một workflow tối giản trông như sau. Hãy đối chiếu từng phần với bảng khái niệm bên trên:</p>
+  <pre class="code-block"><code class="language-yaml">name: Build and Push Docker Image     # Tên workflow (hiển thị trên tab Actions)
+
+on:                                   # Event kích hoạt workflow
+  push:
+    branches:
+      - master
+  workflow_dispatch: {}                # Cho phép chạy thủ công từ giao diện
+
+jobs:                                 # Danh sách các job
+  build-and-push:                     # Tên job
+    runs-on: ubuntu-latest            # Runner chạy job
+    steps:                            # Các step trong job
+    - name: Checkout code
+      uses: actions/checkout@v4       # Dùng action checkout
+
+    - name: Build image
+      run: docker build -t my-app .   # Chạy lệnh shell</code></pre>
+
+  <h2 class="section-heading">Đặc điểm / tính năng chính</h2>
+  <ul class="feature-list">
+    <li><strong>Tự động hoá toàn bộ quy trình:</strong> test, build và deploy đều có thể tự động hoá theo event của GitHub.</li>
+    <li><strong>Tích hợp sâu với GitHub:</strong> dùng chính các event của repository (push, PR, tag, issue...) để kích hoạt action, không cần webhook cấu hình thủ công.</li>
+    <li><strong>Hỗ trợ nhiều ngôn ngữ &amp; hệ điều hành:</strong> runner có sẵn cho Linux, Windows, macOS; dễ dàng cài Node.js, Java, Python, Go...</li>
+    <li><strong>Cộng đồng mạnh mẽ:</strong> hàng nghìn action chia sẻ công khai trên <em>GitHub Marketplace</em>, dùng lại được ngay (checkout, setup-node, các action của AWS...).</li>
+    <li><strong>Hiệu quả về chi phí:</strong> GitHub cung cấp một lượng phút chạy <strong>miễn phí</strong> mỗi tháng cho repository public (và một phần cho private repo theo gói).</li>
+    <li><strong>Reusable workflow &amp; Environment:</strong> gọi workflow từ workflow khác (<code>workflow_call</code>) và kiểm soát release bằng <code>environment</code> kèm người duyệt (approval).</li>
+  </ul>
+
+  <h2 class="section-heading">Mô hình hoạt động</h2>
+  <div class="mermaid">
+  flowchart LR
+      subgraph GH["GitHub"]
+          E["⚡ Event<br/>push · PR · tag<br/>workflow_dispatch"]
+          W["📄 Workflow<br/>.github/workflows/*.yml"]
+          subgraph J1["Job 1"]
+              S1["Step"] --> S2["Step"]
+          end
+          subgraph J2["Job 2"]
+              S3["Step"] --> S4["Step"]
+          end
+      end
+      R["🖥️ Runner<br/>ubuntu-latest"]
+      A["📦 Actions<br/>checkout · aws · docker"]
+      E -->|"kích hoạt"| W
+      W --> J1
+      W --> J2
+      J1 --> R
+      J2 --> R
+      S1 -.->|"uses"| A
+      R -->|"thao tác AWS"| AWS["☁️ AWS<br/>ECR · ECS · ALB"]
+  </div>
+  <p class="arch-caption">Event kích hoạt workflow; workflow gồm nhiều job chạy song song trên runner; mỗi step có thể dùng một Action hoặc chạy lệnh shell, ví dụ thao tác trực tiếp với AWS.</p>
+
+  <h2 class="section-heading">Pricing</h2>
+  <div class="figure-centered">
+    <img src="../../images/section17/github-actions-pricing.png" alt="Bảng giá GitHub Actions" />
+    <div class="figure-title">Bảng giá GitHub Actions (có thể thay đổi theo thời gian)</div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Public repository:</strong> runner do GitHub cung cấp là <strong>miễn phí không giới hạn</strong>.</li>
+    <li><strong>Private repository:</strong> có một lượng phút + dung lượng lưu trữ miễn phí mỗi tháng theo gói (Free/Team/Enterprise), dùng quá sẽ tính phí.</li>
+    <li>Chi phí thực tế phụ thuộc <strong>hệ điều hành runner</strong> (Linux rẻ nhất, macOS đắt hơn) và gói GitHub đang dùng. Kiểm tra trang <em>Billing</em> của tài khoản để biết số dư chính xác.</li>
+  </ul>
+
+  <h2 class="section-heading">Trade-off</h2>
+  <div class="compare-grid">
+    <div class="compare-card">
+      <h4>✅ Ưu điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Không cần dựng và bảo trì máy chủ CI riêng (so với Jenkins).</li>
+        <li>Tích hợp sẵn với GitHub, thiết lập nhanh bằng vài dòng YAML.</li>
+        <li>Kho action phong phú, đặc biệt có các action chính thức của AWS (<code>aws-actions/*</code>).</li>
+        <li>Cú pháp YAML dễ đọc, dễ review cùng code (pipeline as code).</li>
+        <li>Public repo chạy miễn phí; dễ dàng kích hoạt bằng push/PR/tag.</li>
+      </ul>
+    </div>
+    <div class="compare-card">
+      <h4>⚠️ Nhược điểm</h4>
+      <ul class="feature-list-sm">
+        <li>Phụ thuộc vào GitHub — khó tái sử dụng nếu dùng GitLab/Bitbucket.</li>
+        <li>Private repo có giới hạn phút miễn phí; chạy nhiều sẽ tốn phí.</li>
+        <li>Debug local kém tiện hơn một số công cụ chạy được ngay trên máy.</li>
+        <li>Workflow phức tạp (nhiều điều kiện, tái sử dụng) có thể khó đọc nếu không tổ chức tốt.</li>
+        <li>Self-hosted runner cần tự lo bảo mật và bảo trì.</li>
+      </ul>
+    </div>
+  </div>
+  <ul class="feature-list">
+    <li><strong>Nên dùng</strong> khi source code đã nằm trên GitHub và muốn một pipeline đơn giản, nhanh gọn, không muốn vận hành thêm hạ tầng CI.</li>
+    <li><strong>Không nên dùng</strong> khi tổ chức chuẩn hoá trên một công cụ CI khác (Jenkins, GitLab CI...), hoặc cần kiểm soát tuyệt đối môi trường build (dùng self-hosted runner).</li>
+  </ul>
+
+  <h2 class="section-heading">Use Cases</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h4>CI cho mọi pull request</h4>
+      <p>Mỗi khi có PR, workflow tự chạy lint, unit test và build để bảo vệ chất lượng trước khi merge vào nhánh chính.</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Build &amp; push Docker image lên ECR</h4>
+      <p>Push code (hoặc tạo tag) → GitHub Actions build image và đẩy lên Amazon ECR, sẵn sàng cho ECS kéo về chạy (nội dung Lab của chương này).</p>
+    </div>
+    <div class="usecase-card">
+      <h4>Deploy lên AWS</h4>
+      <p>Dùng các action của AWS (<code>configure-aws-credentials</code>, <code>amazon-ecr-login</code>...) kết hợp AWS CLI để triển khai lên ECS, S3, Lambda...</p>
+    </div>
+  </div>
+
+  <h2 class="section-heading">Thông tin bổ sung</h2>
+  <ul class="feature-list">
+    <li><strong>Bảo mật credential:</strong> Access Key không được commit vào repo. Lưu trong <strong>Settings → Secrets and variables → Actions</strong> của repository, rồi tham chiếu bằng <code>${{ secrets.TÊN }}</code>.</li>
+    <li><strong>Least privilege:</strong> IAM User dùng cho GitHub Actions chỉ nên có đúng quyền cần thiết (vd <code>PowerUserAccess</code> cho bài lab, thực tế nên viết policy hẹp hơn).</li>
+    <li><strong>Giới hạn:</strong> mỗi workflow tối đa ~ 6 giờ; một job có tối đa 255 steps; số job chạy đồng thời phụ thuộc gói GitHub.</li>
+    <li><strong>So với CodePipeline / Jenkins:</strong> Section 9 dùng dịch vụ AWS, Section 10 dùng Jenkins server tự quản — GitHub Actions là lựa chọn thứ ba, gắn liền với hệ sinh thái GitHub.</li>
+    <li><strong>Tiết kiệm chi phí:</strong> hạn chế chạy job trên macOS/windows khi không cần, dùng <code>workflow_dispatch</code> cho tác vụ build thủ công thay vì kích hoạt liên tục.</li>
+  </ul>
+
+</body>
+</html>

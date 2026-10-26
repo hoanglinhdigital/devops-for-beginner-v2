@@ -1,0 +1,12 @@
+region             = "ap-southeast-1"
+availability_zones = ["ap-southeast-1a", "ap-southeast-1b"]
+cidr_block         = "10.20.0.0/16"
+public_subnet_ips  = ["10.20.1.0/24", "10.20.2.0/24"]
+
+# Thay 123456789012 bằng AWS Account ID của bạn – image đã push lên ECR ở Lab 4
+ecr_image_uri = "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/nodejs-random-color:latest"
+
+desired_count = 2
+
+# Lab 6: ECS (rolling update) | Lab 7, Lab 8: CODE_DEPLOY (Blue/Green, Canary)
+deployment_controller_type = "ECS"
