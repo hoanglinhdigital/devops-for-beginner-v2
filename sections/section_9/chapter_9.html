@@ -16,15 +16,68 @@
   <div class="chapter-breadcrumb">
     <span class="section-part">9. CI/CD với AWS CodePipeline</span>
     <span class="sep">/</span>
-    <span class="chapter-part">Các chiến lược deployment</span>
+    <span class="chapter-part">Các chiến lược deployment Phổ biến (không chỉ riêng ECS)</span>
   </div>
 
   <h2 class="section-heading">Giới thiệu</h2>
   <p class="body-text">
-    <strong>Chiến lược deployment</strong> (deployment strategy) là cách bạn thay thế version cũ của ứng dụng bằng version mới trên môi trường đang phục vụ người dùng.
+    Ở các chương trước, bạn đã tự động hoá được việc <strong>build</strong> và <strong>deploy</strong> bằng CodeBuild và CodePipeline. Nhưng “deploy được” chưa đủ:
+    khi hệ thống đang phục vụ người dùng thật, câu hỏi quan trọng là <em>thay version cũ bằng version mới như thế nào</em> để người dùng
+    không bị gián đoạn, lỗi (nếu có) chỉ ảnh hưởng ít người nhất, và có thể quay lại version cũ thật nhanh.
+  </p>
+  <p class="body-text">
+    <strong>Chiến lược deployment</strong> (deployment strategy) chính là câu trả lời cho câu hỏi đó – một phần của
+    <strong>yêu cầu phi chức năng</strong> (non-functional requirement) mà DevOps Engineer cần thiết kế ngay từ đầu.
     Chiến lược quyết định hệ thống có bị <strong>downtime</strong> hay không, bao nhiêu người dùng bị ảnh hưởng nếu version mới có lỗi, rollback nhanh hay chậm,
     và tốn thêm bao nhiêu tài nguyên trong lúc deploy. Không có chiến lược nào tốt nhất cho mọi trường hợp – cần cân bằng giữa <em>rủi ro, tốc độ và chi phí</em>.
   </p>
+
+  <h2 class="section-heading">Tại sao cần chiến lược deployment?</h2>
+  <h3 class="section-subheading">Các yếu tố cần cân nhắc khi deployment</h3>
+  <ul class="feature-list">
+    <li><strong>Hiệu quả thông qua tự động hoá:</strong> mỗi lần release là một quy trình lặp lại được, chạy bằng pipeline thay vì thao tác tay.</li>
+    <li><strong>Chính xác &amp; tin cậy:</strong> đúng version, đúng môi trường, đúng cấu hình; cùng một artifact (image tag) đi từ Test lên Production.</li>
+    <li><strong>Có chiến lược testing phù hợp:</strong> kiểm thử version mới trên hạ tầng giống production trước (hoặc trong khi) mở cho người dùng.</li>
+    <li><strong>Giảm thiểu ảnh hưởng tới end-user:</strong> không downtime, hoặc nếu lỗi thì chỉ một phần nhỏ người dùng gặp phải.</li>
+    <li><strong>Khả năng khôi phục (rollback):</strong> khi version mới không hoạt động như mong đợi, quay về version cũ trong vài giây – vài phút.</li>
+    <li><strong>Chi phí &amp; độ phức tạp:</strong> chiến lược càng an toàn thường càng tốn tài nguyên và cần nhiều công cụ hơn (routing, monitoring, automation).</li>
+  </ul>
+
+  <h3 class="section-subheading">Vị trí của chiến lược deployment trong pipeline CI/CD</h3>
+  <p class="body-text">Chiến lược deployment nằm ở bước cuối của pipeline – quyết định cách artifact mới được đưa tới người dùng:</p>
+  <div class="mermaid">
+  flowchart LR
+      Dev["<img src='../../assets/aws-svg/developer.svg' style='width:36px;height:36px;'/><br/>Developer<br/>git push"]
+      CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:36px;height:36px;'/><br/>CodePipeline"]
+      CB["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:36px;height:36px;'/><br/>CodeBuild<br/>Build &amp; Test"]
+      ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR<br/>image mới"]
+      subgraph CD["🚀 Deployment strategy"]
+          direction TB
+          S1["🟥 All at once"]
+          S2["🟧 Rolling update"]
+          S3["🟦🟩 Blue/Green"]
+          S4["🐤 Canary / Linear"]
+      end
+      Users["<img src='../../assets/aws-svg/user.svg' style='width:36px;height:36px;'/><br/>End-users"]
+      Mon["<img src='../../assets/aws-svg/CloudWatch.svg' style='width:36px;height:36px;'/><br/>Monitoring<br/>OK? / Rollback?"]
+      Dev --> CP --> CB --> ECR --> CD --> Users
+      Users -.-> Mon
+      Mon -.->|"lỗi → rollback"| CD
+  </div>
+  <p class="arch-caption">Cùng một image, chiến lược khác nhau cho kết quả rất khác nhau về downtime, rủi ro và chi phí.</p>
+
+  <h3 class="section-subheading">Tiêu chí đánh giá một chiến lược</h3>
+  <table class="compare-table">
+    <thead><tr><th>Tiêu chí</th><th>Câu hỏi cần trả lời</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Downtime</strong></td><td>Trong lúc deploy, người dùng có bị gián đoạn (lỗi 5xx, trang không truy cập được) không?</td></tr>
+      <tr><td><strong>Blast radius</strong> (phạm vi ảnh hưởng)</td><td>Nếu version mới có bug, bao nhiêu % người dùng gặp phải?</td></tr>
+      <tr><td><strong>Tốc độ rollback</strong></td><td>Mất bao lâu để quay về version cũ? Có cần build/deploy lại không?</td></tr>
+      <tr><td><strong>Chi phí tài nguyên</strong></td><td>Có phải chạy thêm (thậm chí gấp đôi) server/task trong lúc deploy không?</td></tr>
+      <tr><td><strong>Độ phức tạp</strong></td><td>Cần thêm công cụ routing (ALB, Route 53), monitoring, automation đến mức nào?</td></tr>
+      <tr><td><strong>Tính nhất quán</strong></td><td>Có thời điểm 2 version cùng phục vụ người dùng không? API và database có tương thích ngược không?</td></tr>
+    </tbody>
+  </table>
 
   <h2 class="section-heading">Các chiến lược phổ biến</h2>
   <ul class="feature-list">
@@ -36,7 +89,7 @@
     <li><strong>Linear:</strong> chuyển traffic theo từng nấc đều nhau (ví dụ 10% mỗi phút) cho đến 100%.</li>
   </ul>
 
-  <h2 class="section-heading">Mô hình kiến trúc</h2>
+  <h2 class="section-heading">Mô hình kiến trúc trên ECS</h2>
   <h3 class="section-subheading">Rolling update trên ECS (Lab 6)</h3>
   <div class="mermaid">
   flowchart LR
@@ -94,6 +147,7 @@
   </div>
 
   <h2 class="section-heading">Trade-off</h2>
+  <p class="body-text">Không có chiến lược “tốt nhất”, chỉ có chiến lược <strong>phù hợp nhất</strong> với yêu cầu và ngân sách:</p>
   <table class="compare-table">
     <thead><tr><th>Chiến lược</th><th>Downtime</th><th>Ảnh hưởng khi lỗi</th><th>Tốc độ rollback</th><th>Tài nguyên thêm</th><th>Độ phức tạp</th></tr></thead>
     <tbody>
@@ -106,10 +160,13 @@
     </tbody>
   </table>
   <ul class="feature-list">
+    <li><strong>An toàn hơn = tốn kém hơn:</strong> Blue/Green, Canary cần gấp đôi tài nguyên trong lúc deploy và cần công cụ chuyển traffic.</li>
+    <li><strong>Không downtime = 2 version cùng tồn tại:</strong> Rolling, Blue/Green, Canary đều yêu cầu ứng dụng và database <strong>tương thích ngược</strong>.</li>
     <li><strong>Nên dùng All at once / Rolling</strong> cho môi trường Dev/Test, ứng dụng nội bộ, khi chi phí quan trọng hơn rủi ro.</li>
     <li><strong>Nên dùng Blue/Green</strong> khi cần kiểm thử version mới trên hạ tầng thật trước khi mở cho người dùng và cần rollback tức thì.</li>
     <li><strong>Nên dùng Canary / Linear</strong> cho hệ thống lớn, nhiều người dùng, đã có <strong>monitoring &amp; alarm</strong> để tự động rollback khi chỉ số lỗi tăng.</li>
     <li><strong>Không nên dùng Canary/Blue-Green</strong> khi version mới thay đổi database không tương thích ngược (breaking schema change) – 2 version không thể cùng chạy trên một database.</li>
+    <li><strong>Mỗi môi trường một chiến lược:</strong> Dev/Test có thể dùng All at once cho nhanh; Production dùng Blue/Green hoặc Canary.</li>
   </ul>
 
   <h3 class="section-subheading">Hỗ trợ trên các dịch vụ AWS</h3>
@@ -127,6 +184,10 @@
   <h2 class="section-heading">Use Cases</h2>
   <div class="usecase-grid">
     <div class="usecase-card">
+      <h4>Hệ thống nội bộ, ít người dùng</h4>
+      <p>Tool quản lý nội bộ của công ty 50 người hoặc môi trường Dev/Test: deploy All at once / Rolling ngoài giờ hành chính, chấp nhận 1–2 phút gián đoạn để tiết kiệm chi phí.</p>
+    </div>
+    <div class="usecase-card">
       <h4>Website thương mại điện tử mùa sale</h4>
       <p>Không được phép downtime, cần rollback trong vài giây: Blue/Green, kiểm thử qua test listener trước khi reroute traffic.</p>
     </div>
@@ -134,14 +195,11 @@
       <h4>Ứng dụng có hàng triệu người dùng</h4>
       <p>Thay đổi thuật toán gợi ý: Canary 5–10% người dùng trong 30 phút, theo dõi tỷ lệ lỗi và độ trễ, alarm kích hoạt thì tự rollback.</p>
     </div>
-    <div class="usecase-card">
-      <h4>Môi trường Dev/Test của team</h4>
-      <p>Ưu tiên nhanh và rẻ: Rolling update hoặc All at once, chấp nhận vài giây gián đoạn.</p>
-    </div>
   </div>
 
   <h2 class="section-heading">Thông tin bổ sung</h2>
   <ul class="feature-list">
+    <li><strong>Deploy ≠ Release:</strong> <em>deploy</em> là đưa code lên hạ tầng; <em>release</em> là cho người dùng thấy tính năng. Blue/Green và Canary tách 2 việc này ra – deploy trước, release sau khi kiểm thử.</li>
     <li><strong>Backward compatibility:</strong> với mọi chiến lược không downtime, version cũ và mới chạy cùng lúc – API và database schema cần tương thích ngược (thêm cột trước, xoá cột sau).</li>
     <li><strong>Session &amp; sticky:</strong> ứng dụng nên stateless (session lưu ở Redis/DynamoDB) để người dùng không bị mất phiên khi bị chuyển giữa 2 version.</li>
     <li><strong>Chi phí:</strong> Blue/Green, Canary chạy gấp đôi số task trong lúc deploy – nên giới hạn thời gian chờ và terminate task set cũ ngay khi ổn định.</li>

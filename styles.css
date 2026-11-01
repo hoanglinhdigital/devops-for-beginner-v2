@@ -551,6 +551,10 @@ pre.command-line:hover .copy-btn {
     list-style: none;
     padding: 0;
 }
+/* Nối tiếp số thứ tự từ .step-list liền trước (khi chia bước lab thành nhiều phần có heading) */
+.step-list.step-list-continue {
+    counter-reset: none;
+}
 .step-list > li {
     counter-increment: step;
     display: flex;

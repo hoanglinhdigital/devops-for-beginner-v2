@@ -1,0 +1,73 @@
+# Copy file nay thanh terraform.tfvars va dien gia tri that.
+# terraform.tfvars (file that) DA duoc gitignore - KHONG commit len Git.
+
+project_name = "expense-mgmt"
+environment  = "dev"
+region       = "ap-southeast-1"
+
+vpc_cidr            = "10.0.0.0/16"
+az_count            = 2
+public_subnet_cidrs = ["10.0.0.0/24", "10.0.1.0/24"]
+app_subnet_cidrs    = ["10.0.10.0/24", "10.0.11.0/24"]
+data_subnet_cidrs   = ["10.0.20.0/24", "10.0.21.0/24"]
+nat_gateway_count   = 1 # dev trade-off: 1 NAT dung chung 2 AZ
+
+container_port      = 3000
+image_tag           = "latest"
+ecs_task_cpu        = 256
+ecs_task_memory     = 512
+ecs_desired_count   = 1 # dev trade-off: prod toi thieu 2
+cpu_alarm_threshold = 80
+
+# ---------------------------------------------------------------------------
+# RDS - Lab Blue/Green
+# TRUOC switchover: db_engine_version = "8.0", db_instance_class = "db.t3.small",
+#                   db_active_parameter_group = "mysql80"
+# SAU switchover  : doi 3 dong duoi thanh gia tri cua GREEN
+#                   ("8.4", "db.t4g.small", "mysql84") - xem buoc dong bo Terraform.
+# ---------------------------------------------------------------------------
+db_engine_version         = "8.0"
+db_instance_class         = "db.t3.small"
+db_active_parameter_group = "mysql80"
+db_allocated_storage      = 20
+db_name                   = "expense_db"
+db_username               = "expense_admin"
+# KHONG con db_password: Terraform tu sinh password (random_password) va luu
+# username/password/DATABASE_URL vao Secrets Manager (output db_secret_name).
+rds_multi_az              = false # dev trade-off: Single-AZ
+
+# Lab: mo RDS ra Internet CHI cho IP cua ban de ket noi MySQL Workbench
+# toi ca BLUE va GREEN. Tat lai (false) sau khi hoan thanh lab.
+rds_public_access_enabled = true
+allowed_ip_cidrs          = ["203.0.113.10/32"] # THAY bang IP cua ban - KHONG dung 0.0.0.0/0
+
+# Container tu chay migrate deploy + seed (idempotent) khi khoi dong
+run_db_seed = true
+
+# dev trade-off: tat TLS ECS<->RDS (Amazon RDS CA khong nam trong CA store
+# mac dinh Node.js). prod phai true + cau hinh RDS CA bundle.
+database_ssl_enabled = false
+
+# dev trade-off: ALB dev chua co HTTPS listener. prod phai true.
+cookie_secure_enabled = false
+
+alert_email = "" # BAT BUOC dien, nho bam Confirm subscription trong email
+
+# CodeDeploy Blue/Green - ALB test listener :8080 chi mo cho IP cua ban.
+test_listener_port = 8080
+allowed_test_cidrs = ["203.0.113.10/32"] # THAY bang IP cua ban - KHONG dung 0.0.0.0/0
+
+# CI/CD - CodePipeline + CodeBuild + CodeDeploy Blue/Green
+github_owner            = "" # BAT BUOC dien - GitHub username chua repo da fork
+github_repo             = "lab-expense-management"
+github_branch           = "master"
+codestar_connection_arn = "" # BAT BUOC dien - ARN connection GitHub da AVAILABLE
+
+# Lab: CodeDeploy DUNG lai sau khi Green task set san sang, cho ban kiem tra
+# qua test listener :8080 roi tu bam "Reroute traffic" (toi da 60 phut).
+deployment_ready_wait_minutes      = 60
+deployment_ready_action_on_timeout = "STOP_DEPLOYMENT"
+
+# Lab: cho phep terraform destroy xoa ECR con image, S3 bucket con artifact,
+# va xoa ngay secret DB (khong cho 7 ngay recovery window).
+lab_force_destroy = true

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>In-place (All at once) &amp; Rolling update – DevOps on AWS for Beginner</title>
+  <title>Lab: RDS Blue/Green Deployment kết hợp ECS Blue/Green – DevOps on AWS for Beginner</title>
   <link rel="stylesheet" href="../../styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
   <script src="../../mermaid-config.js"></script>
@@ -14,163 +14,500 @@
 <body class="chapter-body">
 
   <div class="chapter-breadcrumb">
-    <span class="section-part">11. Chiến lược deployment</span>
+    <span class="section-part">11. Chiến lược deployment cho Database</span>
     <span class="sep">/</span>
-    <span class="chapter-part">In-place (All at once) &amp; Rolling update</span>
+    <span class="chapter-part">Lab: RDS Blue/Green Deployment kết hợp ECS Blue/Green</span>
   </div>
 
-  <h2 class="section-heading">Giới thiệu</h2>
+  <h2 class="section-heading">Mục tiêu</h2>
   <p class="body-text">
-    <strong>In-place</strong> (còn gọi là <em>All at once</em>) là hình thức triển khai <strong>thay thế ngay lập tức</strong> version cũ bằng version mới
-    trên toàn bộ server, không quan tâm tới downtime. <strong>Rolling update</strong> cải tiến hơn: thay thế <strong>dần dần</strong> từng nhóm (batch)
-    server/task cho tới khi toàn bộ chạy version mới – hệ thống luôn còn server phục vụ nên không có downtime.
-    Đây là 2 chiến lược đơn giản, rẻ nhất và cũng là mặc định của nhiều dịch vụ (Elastic Beanstalk, ECS).
+    Tình huống thực tế: ứng dụng <strong>Expense Management</strong> (Next.js + Prisma) đang chạy production trên ECS Fargate với database
+    <strong>RDS MySQL 8.0</strong>. MySQL 8.0 trên RDS đã hết <em>standard support</em> từ <strong>31/07/2026</strong>, nên AWS tự động tính phí
+    <em>Extended Support</em>. Nhiệm vụ của bạn là nâng cấp database lên <strong>MySQL 8.4 (LTS)</strong>, sau đó release phiên bản ứng dụng mới,
+    và cả hai việc đều phải gần như không có downtime.
   </p>
-
-  <h2 class="section-heading">Đặc điểm chính</h2>
   <ul class="feature-list">
-    <li><strong>In-place – dừng rồi chạy:</strong> dừng ứng dụng cũ → cài version mới lên <em>chính server đó</em> → khởi động lại. Tất cả server làm cùng lúc.</li>
-    <li><strong>In-place – không cần thêm tài nguyên:</strong> dùng lại hạ tầng hiện có, phù hợp server vật lý hoặc ngân sách hạn chế.</li>
-    <li><strong>Rolling – theo batch:</strong> mỗi lần chỉ thay một nhóm (vd 1 server, 25%, 50%); batch mới healthy thì mới tiếp tục batch sau.</li>
-    <li><strong>Rolling – 2 version song song:</strong> trong lúc deploy, Load Balancer gửi request tới cả version cũ và mới (trải nghiệm không đồng nhất).</li>
-    <li><strong>Rolling – dừng khi lỗi:</strong> nếu task/server mới không qua health check, quá trình deploy dừng lại, phần còn lại vẫn chạy version cũ.</li>
-    <li><strong>Mặc định trên ECS:</strong> deployment controller <code>ECS</code> dùng rolling update – chính là cách job Jenkins ở Section 10 – Lab 7 đã deploy.</li>
+    <li>Dựng toàn bộ hạ tầng của ứng dụng bằng Terraform: VPC 3 tầng, ALB, ECS Fargate, RDS MySQL, ECR, CodePipeline, CodeBuild, CodeDeploy.</li>
+    <li>Quản lý username/password database bằng <strong>AWS Secrets Manager</strong>: Terraform tự sinh password, ECS Task Definition đọc <code>DATABASE_URL</code> từ secret thay vì để giá trị thật trong biến môi trường.</li>
+    <li>Tạo <strong>RDS Blue/Green Deployment</strong>: Green chạy MySQL 8.4, dùng parameter group mới và instance class Graviton <code>db.t4g.small</code>.</li>
+    <li>Kiểm chứng Green được <strong>đồng bộ dữ liệu</strong> liên tục từ Blue và ở chế độ <strong>read-only</strong>.</li>
+    <li>Thực hiện <strong>switchover</strong> và đo thời gian gián đoạn bằng script gọi API liên tục. Ứng dụng không cần đổi endpoint.</li>
+    <li>Release ứng dụng v2 bằng <strong>ECS Blue/Green với CodeDeploy</strong>: kiểm thử qua test listener <code>:8080</code>, rồi <em>Reroute traffic</em> (có thể rollback).</li>
+    <li>Đồng bộ lại Terraform state sau khi thao tác trên Console, rồi dọn dẹp toàn bộ resource.</li>
   </ul>
 
-  <h2 class="section-heading">Mô hình kiến trúc</h2>
-  <h3 class="section-subheading">In-place (All at once)</h3>
+  <h2 class="section-heading">Kiến trúc tổng quan</h2>
   <div class="mermaid">
   flowchart LR
-      User["<img src='../../assets/aws-svg/user.svg' style='width:34px;height:34px;'/><br/>Users"]
-      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>Load Balancer"]
-      subgraph Before["① Trước: v1"]
+      User["<img src='../../assets/aws-svg/user.svg' style='width:44px;height:44px;'/><br/><b>Users</b><br/>Browser :80"]
+      Dev["<img src='../../assets/svg-icon/laptop.svg' style='width:44px;height:44px;'/><br/><b>PC Local</b><br/>Terraform · Workbench<br/>test :8080"]
+      GH["<img src='../../assets/aws-svg/github.svg' style='width:40px;height:40px;'/><br/><b>GitHub</b><br/>repo fork"]
+      subgraph CICD["CI/CD"]
           direction TB
-          A1["🟦 Server 1 · v1"]
-          A2["🟦 Server 2 · v1"]
-          A3["🟦 Server 3 · v1"]
+          CP["<img src='../../assets/aws-svg/CodePipeline.svg' style='width:36px;height:36px;'/><br/>CodePipeline"]
+          CB["<img src='../../assets/aws-svg/CodeBuild.svg' style='width:36px;height:36px;'/><br/>CodeBuild"]
+          ECR["<img src='../../assets/aws-svg/Elastic-Container-Registry.svg' style='width:36px;height:36px;'/><br/>ECR"]
+          CD["<img src='../../assets/aws-svg/CodeDeploy.svg' style='width:36px;height:36px;'/><br/>CodeDeploy<br/>ECS Blue/Green"]
+          CP --> CB --> ECR
+          CP --> CD
       end
-      subgraph During["② Đang deploy"]
-          direction TB
-          B1["⛔ Server 1 · stopped"]
-          B2["⛔ Server 2 · stopped"]
-          B3["⛔ Server 3 · stopped"]
+      subgraph VPC["VPC 10.0.0.0/16"]
+          direction LR
+          ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:44px;height:44px;'/><br/><b>ALB</b><br/>:80 prod · :8080 test"]
+          subgraph ECS["ECS Service (Fargate) · App subnet"]
+              direction TB
+              TS1["<img src='../../assets/aws-svg/Fargate.svg' style='width:32px;height:32px;'/><br/>🟦 Task set v1<br/>TG tg-app-01"]
+              TS2["<img src='../../assets/aws-svg/Fargate.svg' style='width:32px;height:32px;'/><br/>🟩 Task set v2<br/>TG tg-app-02"]
+          end
+          subgraph RDSBG["RDS Blue/Green Deployment · Data subnet"]
+              direction TB
+              Blue["<img src='../../assets/aws-svg/RDS.svg' style='width:38px;height:38px;'/><br/>🟦 BLUE · MySQL 8.0<br/>rds-mysql-01 · db.t3.small"]
+              Green["<img src='../../assets/aws-svg/RDS.svg' style='width:38px;height:38px;'/><br/>🟩 GREEN · MySQL 8.4<br/>rds-mysql-01-green-xxxx<br/>db.t4g.small · read-only"]
+              Blue -->|"binlog replication"| Green
+          end
+          ALB --> TS1
+          ALB -.->|"test :8080"| TS2
+          TS1 -->|"endpoint không đổi"| Blue
+          TS2 --> Blue
       end
-      subgraph After["③ Sau: v2"]
-          direction TB
-          C1["🟩 Server 1 · v2"]
-          C2["🟩 Server 2 · v2"]
-          C3["🟩 Server 3 · v2"]
-      end
-      User --> ALB --> Before
-      Before -->|"stop all"| During
-      During -->|"start all"| After
+      SM["<img src='../../assets/aws-svg/Secrets-Manager.svg' style='width:36px;height:36px;'/><br/><b>Secrets Manager</b><br/>expense-mgmt/dev/rds-mysql-01<br/>username · password · DATABASE_URL"]
+      SM -.->|"inject DATABASE_URL<br/>khi task start"| ECS
+      User --> ALB
+      Dev -.-> ALB
+      Dev -.->|"MySQL :3306<br/>chỉ IP của bạn"| RDSBG
+      GH --> CP
+      CD -.-> ECS
   </div>
-  <p class="arch-caption">Ở bước ②, không còn server nào phục vụ → người dùng nhận lỗi 502/503 (downtime).</p>
+  <p class="arch-caption">App (ECS) và database (RDS) có hai cơ chế Blue/Green độc lập. ECS dùng 2 Target Group và CodeDeploy để chuyển traffic. RDS dùng logical replication và switchover đổi tên instance, nên endpoint giữ nguyên, và secret chứa <code>DATABASE_URL</code> cũng không phải sửa.</p>
 
-  <h3 class="section-subheading">Rolling update trên ECS</h3>
-  <div class="mermaid">
-  flowchart LR
-      ALB["<img src='../../assets/aws-svg/Elastic-Load-Balancing.svg' style='width:36px;height:36px;'/><br/>ALB<br/>1 Target Group"]
-      subgraph R1["Batch 1"]
-          direction TB
-          T1["🟦 Task v1"]
-          T2["🟦 Task v1"]
-          N1["🟩 Task v2 (mới)"]
-          N2["🟩 Task v2 (mới)"]
-      end
-      subgraph R2["Batch 2"]
-          direction TB
-          M1["🟩 Task v2"]
-          M2["🟩 Task v2"]
-      end
-      ALB --> R1
-      R1 -->|"v2 healthy → stop 2 task v1"| R2
-  </div>
-  <p class="arch-caption">ECS khởi động task mới, chờ healthy trên Target Group, sau đó mới dừng task cũ (với <code>minimumHealthyPercent = 100</code>, <code>maximumPercent = 200</code>).</p>
-
-  <h3 class="section-subheading">Tham số điều khiển rolling update của ECS</h3>
+  <h3 class="section-subheading">Kịch bản release trong bài lab</h3>
   <table class="compare-table">
-    <thead><tr><th>Cấu hình (desired = 4)</th><th>Hành vi</th><th>Nhận xét</th></tr></thead>
+    <thead><tr><th>Phần</th><th>Việc thực hiện</th><th>Kết quả</th></tr></thead>
     <tbody>
-      <tr><td><code>min 100%</code> · <code>max 200%</code></td><td>Chạy thêm tối đa 4 task v2, healthy rồi mới dừng 4 task v1</td><td>Nhanh, không giảm năng lực phục vụ, tạm thời gấp đôi task</td></tr>
-      <tr><td><code>min 50%</code> · <code>max 100%</code></td><td>Dừng 2 task v1 trước, chạy 2 task v2, rồi lặp lại</td><td>Không tốn thêm tài nguyên nhưng năng lực giảm còn 50% trong lúc deploy</td></tr>
-      <tr><td><code>min 100%</code> · <code>max 125%</code></td><td>Mỗi lần chỉ thêm 1 task v2, dừng 1 task v1</td><td>Chậm nhưng an toàn, ít tốn thêm tài nguyên</td></tr>
+      <tr><td>1. Chuẩn bị</td><td>Fork repo, tạo GitHub connection, <code>terraform apply</code>, pipeline deploy app v1</td><td>App v1 chạy trên RDS MySQL 8.0</td></tr>
+      <tr><td>2. Database</td><td>Create Blue/Green → kiểm thử Green → Switchover</td><td>App v1 chạy trên MySQL 8.4, không đổi config</td></tr>
+      <tr><td>3. Ứng dụng</td><td>Push code v2 → CodeDeploy tạo task set mới → test <code>:8080</code> → Reroute traffic</td><td>App v2 chạy trên MySQL 8.4</td></tr>
+      <tr><td>4. Đồng bộ &amp; dọn dẹp</td><td>Xoá Blue/Green deployment, xoá instance <code>-old1</code>, đồng bộ Terraform state, <code>terraform destroy</code></td><td>Không còn resource tính phí</td></tr>
     </tbody>
   </table>
-  <p class="body-text">Kết hợp với <strong>deployment circuit breaker</strong> (<code>enable = true</code>, <code>rollback = true</code>): nếu task mới liên tục fail, ECS tự rollback về task definition cũ – đã cấu hình sẵn trong Terraform stack của Section 10.</p>
-
-  <h2 class="section-heading">Trade-off</h2>
-  <table class="compare-table">
-    <thead><tr><th></th><th>In-place (All at once)</th><th>Rolling update</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Ưu điểm</strong></td>
-        <td>
-          <ul class="feature-list-sm">
-            <li>Đơn giản, dễ triển khai, deploy nhanh</li>
-            <li>Tiết kiệm tài nguyên, không cần thêm server</li>
-            <li>Chỉ 1 version tại mọi thời điểm</li>
-          </ul>
-        </td>
-        <td>
-          <ul class="feature-list-sm">
-            <li>Không downtime, giảm thiểu rủi ro</li>
-            <li>Tốn ít (hoặc không tốn) tài nguyên thêm</li>
-            <li>Dừng deploy khi batch đầu bị lỗi; dễ rollback (deploy lại bản cũ)</li>
-          </ul>
-        </td>
-      </tr>
-      <tr><td><strong>Nhược điểm</strong></td>
-        <td>
-          <ul class="feature-list-sm">
-            <li>Có downtime, ảnh hưởng người dùng cuối</li>
-            <li>Rủi ro cao: không kiểm tra được version mới trước khi chạy thật</li>
-            <li>Phải lên lịch deploy (ban đêm, cuối tuần); rollback = deploy lại → lại downtime</li>
-          </ul>
-        </td>
-        <td>
-          <ul class="feature-list-sm">
-            <li>Thời gian triển khai kéo dài (nhiều batch)</li>
-            <li>Phức tạp hơn khi quản lý, theo dõi từng batch</li>
-            <li>2 version cùng phục vụ → trải nghiệm không đồng nhất; rollback cũng phải “roll” ngược</li>
-          </ul>
-        </td>
-      </tr>
-      <tr><td><strong>Nên dùng</strong></td><td>Môi trường Dev/Test, hệ thống nội bộ, khi có maintenance window</td><td>Phần lớn ứng dụng web stateless, mặc định cho ECS/Beanstalk</td></tr>
-      <tr><td><strong>Không nên dùng</strong></td><td>Hệ thống yêu cầu 24/7, SLA cao</td><td>Thay đổi không tương thích ngược (API, schema) – 2 version không thể cùng chạy</td></tr>
-    </tbody>
-  </table>
-
-  <h2 class="section-heading">Use Cases</h2>
-  <div class="usecase-grid">
-    <div class="usecase-card">
-      <h4>Môi trường Dev tự động deploy</h4>
-      <p>Mỗi commit vào nhánh <code>develop</code> deploy ngay lên môi trường Dev (Section 10 – Lab 9). Vài giây gián đoạn không ảnh hưởng ai – In-place hoặc Rolling đều được.</p>
-    </div>
-    <div class="usecase-card">
-      <h4>API stateless trên ECS Fargate</h4>
-      <p>Service 6 task sau ALB: rolling update <code>min 100% / max 200%</code> + circuit breaker, deploy nhiều lần mỗi ngày không downtime.</p>
-    </div>
-    <div class="usecase-card">
-      <h4>Ứng dụng legacy trên 1 EC2</h4>
-      <p>Chỉ có 1 server, không có Load Balancer: In-place vào khung giờ bảo trì đã thông báo trước cho người dùng.</p>
-    </div>
+  <div class="alert alert-info">
+    <strong>Vì sao nâng cấp database trước, release app sau?</strong> Mỗi lần chỉ thay đổi <b>một thành phần</b>. Khi có lỗi, bạn biết ngay nguyên nhân nằm ở đâu.
+    App v1 chạy được trên cả MySQL 8.0 và 8.4, nên nâng cấp database không bắt buộc phải sửa app. Nguyên tắc chung: các thay đổi database phải
+    <b>tương thích ngược</b> (expand) và đi trước, app mới đi sau, còn việc dọn dẹp phần cũ (contract) làm cuối cùng.
   </div>
+
+  <h2 class="section-heading">Yêu cầu trước khi bắt đầu</h2>
+  <ul class="feature-list">
+    <li>Đã học chương <strong>Blue/Green cho database: Amazon RDS Blue/Green Deployments</strong> (chapter 1 của section này) và lab ECS Blue/Green với CodeDeploy ở Section 9.</li>
+    <li>Tài khoản AWS có quyền Administrator. Region dùng trong lab: <code>ap-southeast-1</code> (Singapore).</li>
+    <li>Terraform <code>&gt;= 1.5</code>, AWS CLI v2 đã cấu hình profile (<code>aws sts get-caller-identity</code> chạy được).</li>
+    <li>Tài khoản GitHub, Git, VS Code, <strong>Git Bash</strong> (Windows) để chạy script <code>.sh</code>.</li>
+    <li><strong>MySQL Workbench</strong> để kết nối và kiểm tra database Blue và Green.</li>
+    <li>Source code lab: <code>sourcecode/section_11_deployment_strategy/lab-rds-blue-green/</code>.</li>
+  </ul>
+  <pre class="file-tree"><span class="dir">lab-rds-blue-green/</span>
+├── <span class="dir">terraform/</span>
+│   ├── <span class="dir">environments/dev/</span>       <span class="desc"># main.tf, variable.tf, output.tf, terraform.tfvars.example</span>
+│   └── <span class="dir">modules/</span>                <span class="desc"># network, security, storage, database, compute, cicd</span>
+└── <span class="dir">scripts/</span>
+    ├── <span class="file">check_downtime.sh</span>       <span class="desc"># gọi API login mỗi giây để đo downtime</span>
+    └── <span class="file">verify_queries.sql</span>      <span class="desc"># các câu SQL kiểm tra Blue/Green trong Workbench</span></pre>
+  <p class="body-text">
+    Terraform được lấy từ thư mục <code>infra/terraform</code> của repository
+    <a href="https://github.com/hoanglinhdigital/lab-expense-management" target="_blank" rel="noopener">hoanglinhdigital/lab-expense-management</a> và bổ sung thêm cho bài lab:
+    2 parameter group <code>pg-mysql80-01</code> (Blue) / <code>pg-mysql84-01</code> (Green, bật <code>slow_query_log</code>), biến
+    <code>db_active_parameter_group</code>, secret <b>Secrets Manager</b> chứa thông tin kết nối database (password do <code>random_password</code> sinh ra),
+    <code>force_delete</code> cho ECR và S3 artifact để dễ dọn dẹp.
+  </p>
+
+  <div class="alert alert-warning">
+    <strong>Chi phí:</strong> bài lab dùng các resource tính phí theo giờ: <b>NAT Gateway</b>, <b>ALB</b>, <b>ECS Fargate</b>, <b>RDS</b>. Trong lúc Blue/Green tồn tại, bạn trả tiền cho
+    <b>2 RDS instance</b>. Instance MySQL 8.0 còn bị tính thêm phí <b>RDS Extended Support</b> (theo vCPU-giờ). Hãy làm liên tục trong một buổi (khoảng 3 giờ) và dọn dẹp ngay khi xong.
+  </div>
+
+  <h2 class="section-heading">Các bước thực hành</h2>
+
+  <h3 class="section-subheading">Phần 1 – Chuẩn bị hạ tầng &amp; deploy app v1</h3>
+  <ol class="step-list">
+    <li>
+      <div>
+        <strong>Bước 1: Fork repository ứng dụng</strong>
+        <p>Truy cập <a href="https://github.com/hoanglinhdigital/lab-expense-management" target="_blank" rel="noopener">github.com/hoanglinhdigital/lab-expense-management</a> và <b>Fork</b> về tài khoản GitHub của bạn với các thông số:</p>
+        <ul class="feature-list">
+          <li>Repository name: <code>lab-expense-management</code></li>
+          <li>Copy the <code>master</code> branch only: <b>bật</b></li>
+        </ul>
+        <p>Trong repo vừa fork, vào <b>Settings → Actions → General</b> và chọn <b>Disable actions</b>. Workflow <code>deploy.yml</code> có sẵn trong repo dành cho Vercel, không dùng trong lab này.</p>
+        <p>Các file quan trọng của repo mà pipeline sẽ dùng:</p>
+        <ul class="feature-list">
+          <li><code>Dockerfile</code> + <code>docker/entrypoint.sh</code>: khi container khởi động sẽ tự chạy <code>prisma migrate deploy</code> + <code>prisma db seed</code> (tạo user mẫu <code>demo@example.com</code> / <code>password123</code>).</li>
+          <li><code>buildspec.yml</code>: CodeBuild build image, push lên ECR, sinh <code>taskdef.json</code> và <code>appspec.yaml</code>.</li>
+          <li><code>appspec.yaml</code>: CodeDeploy dùng file này để biết container nào cần gắn vào Target Group.</li>
+        </ul>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 2: Tạo connection tới GitHub</strong>
+        <p>Vào <b>Developer Tools → Settings → Connections</b> (region <code>ap-southeast-1</code>) và tạo connection với các thông số:</p>
+        <ul class="feature-list">
+          <li>Provider: <b>GitHub</b></li>
+          <li>Connection name: <code>expense-mgmt-github</code></li>
+          <li>GitHub App: cài AWS Connector for GitHub vào tài khoản của bạn, cho phép truy cập repo <code>lab-expense-management</code></li>
+        </ul>
+        <p>Đợi trạng thái connection là <b>Available</b>, sau đó copy <b>ARN</b> (dạng <code>arn:aws:codeconnections:ap-southeast-1:&lt;account-id&gt;:connection/...</code>).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 3: Lấy địa chỉ IP public của máy bạn</strong>
+        <p>IP này dùng để chỉ cho phép <b>máy của bạn</b> kết nối RDS (port <code>3306</code>) và ALB test listener (port <code>8080</code>).</p>
+        <pre class="command-line" data-prompt="$" data-output="2"><code class="language-bash">curl -s https://checkip.amazonaws.com
+203.0.113.10</code></pre>
+        <p>Ghi lại IP theo dạng CIDR <code>/32</code>, ví dụ <code>203.0.113.10/32</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 4: Cấu hình Terraform</strong>
+        <p>Mở thư mục <code>sourcecode/section_11_deployment_strategy/lab-rds-blue-green/terraform/environments/dev</code> bằng terminal và tạo file <code>terraform.tfvars</code> từ file mẫu:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">cd sourcecode/section_11_deployment_strategy/lab-rds-blue-green/terraform/environments/dev
+cp terraform.tfvars.example terraform.tfvars</code></pre>
+        <p>Mở <code>terraform.tfvars</code> bằng VS Code và điền các giá trị bắt buộc:</p>
+        <table class="compare-table">
+          <thead><tr><th>Biến</th><th>Giá trị</th></tr></thead>
+          <tbody>
+            <tr><td><code>allowed_ip_cidrs</code>, <code>allowed_test_cidrs</code></td><td>IP ở Bước 3, vd <code>["203.0.113.10/32"]</code></td></tr>
+            <tr><td><code>alert_email</code></td><td>Email của bạn</td></tr>
+            <tr><td><code>github_owner</code></td><td>GitHub username của bạn</td></tr>
+            <tr><td><code>codestar_connection_arn</code></td><td>ARN connection ở Bước 2</td></tr>
+          </tbody>
+        </table>
+        <p>Các giá trị quan trọng cho bài lab đã được đặt sẵn trong file mẫu:</p>
+        <ul class="feature-list">
+          <li><code>db_engine_version = "8.0"</code>, <code>db_instance_class = "db.t3.small"</code>, <code>db_active_parameter_group = "mysql80"</code>: đây là môi trường <b>Blue</b>.</li>
+          <li><code>rds_public_access_enabled = true</code>: chỉ dành cho lab, để MySQL Workbench trên máy bạn kết nối được tới Blue và Green.</li>
+          <li><code>deployment_ready_action_on_timeout = "STOP_DEPLOYMENT"</code>, <code>deployment_ready_wait_minutes = 60</code>: CodeDeploy dừng lại để bạn kiểm thử, rồi tự bấm <b>Reroute traffic</b>.</li>
+        </ul>
+        <div class="alert alert-info">Bạn <b>không cần</b> khai báo password database. Terraform tự sinh password 24 ký tự (resource <code>random_password</code>), dùng nó để tạo RDS, rồi lưu vào Secrets Manager cùng username (mặc định <code>expense_admin</code>). <code>terraform.tfvars</code> vẫn nằm trong <code>.gitignore</code>, không commit file này lên Git.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 5: Tạo hạ tầng bằng Terraform</strong>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform init
+terraform plan
+terraform apply -auto-approve</code></pre>
+        <p>Quá trình tạo mất khoảng <b>15–20 phút</b>, chủ yếu là thời gian chờ RDS. Khi hoàn tất, xem output:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform output</code></pre>
+        <p>Ghi lại <code>alb_dns_name</code>, <code>alb_test_url</code>, <code>rds_identifier</code>, <code>rds_parameter_group_green</code>, <code>db_secret_name</code>, <code>codepipeline_name</code>. Kiểm tra hộp thư và bấm <b>Confirm subscription</b> cho 2 email SNS (alert và CI/CD).</p>
+        <p>Kiểm tra cách Terraform quản lý credential database:</p>
+        <ul class="feature-list">
+          <li><b>Secrets Manager → Secrets</b> → <code>expense-mgmt/dev/rds-mysql-01</code> → <b>Retrieve secret value</b>: secret chứa các key <code>username</code>, <code>password</code>, <code>host</code>, <code>port</code>, <code>dbname</code>, <code>DATABASE_URL</code>.</li>
+          <li><b>ECS → Task definitions</b> → <code>expense-mgmt-dev-task-app-01</code> (revision mới nhất) → container → <b>Environment variables</b>: <code>DATABASE_URL</code> có kiểu <b>ValueFrom</b>, giá trị là ARN của secret kèm key (<code>...:DATABASE_URL::</code>), <b>không</b> hiển thị password.</li>
+          <li><b>IAM → Roles</b> → <code>expense-mgmt-dev-role-ecs-execution-01</code>: inline policy chỉ cho phép <code>secretsmanager:GetSecretValue</code> trên đúng secret này. ECS agent dùng execution role để đọc secret và inject vào container lúc task khởi động.</li>
+        </ul>
+        <div class="alert alert-tip">Ngay sau khi apply, tab <b>Events</b> của ECS Service có thể báo lỗi <code>CannotPullContainerError</code> cho image <code>:latest</code>. Đây là chuyện bình thường, vì ECR chưa có image nào. Image thật sẽ do pipeline build ở bước sau.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 6: Chờ pipeline deploy app v1 &amp; Reroute traffic lần đầu</strong>
+        <p>Vào <b>CodePipeline</b> → pipeline <code>expense-mgmt-dev-codepipeline-app-01</code>. Pipeline tự chạy lần đầu ngay sau khi được tạo: <b>Source → Build</b> (khoảng 5–10 phút, build Next.js) <b>→ Deploy</b>.</p>
+        <p>Khi stage Deploy ở trạng thái <b>In progress</b>, bấm <b>Details</b> để mở deployment trên CodeDeploy. Đợi tới khi <b>Step 1</b> (deploy replacement task set) và <b>Step 2</b> (route test traffic) hoàn tất, rồi bấm <b>Reroute traffic</b>.</p>
+        <p>Đợi deployment chuyển sang <b>Succeeded</b> rồi truy cập <code>http://&lt;alb_dns_name&gt;</code>. Đăng nhập bằng <code>demo@example.com</code> / <code>password123</code>, sau đó tạo vài khoản chi tiêu (menu <b>Ghi chép</b>) để database có dữ liệu.</p>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="section-subheading">Phần 2 – RDS Blue/Green: nâng cấp MySQL 8.0 → 8.4</h3>
+  <ol class="step-list step-list-continue">
+    <li>
+      <div>
+        <strong>Bước 7: Kết nối MySQL Workbench tới database Blue</strong>
+        <p>Vào <b>RDS → Databases</b> → <code>expense-mgmt-dev-rds-mysql-01</code>, copy <b>Endpoint</b> trong tab Connectivity &amp; security. Tạo connection trong MySQL Workbench:</p>
+        <ul class="feature-list">
+          <li>Connection Name: <code>BLUE - expense-db</code></li>
+          <li>Hostname: endpoint vừa copy, Port: <code>3306</code></li>
+          <li>Username / Password: giá trị <code>username</code> / <code>password</code> trong secret <code>expense-mgmt/dev/rds-mysql-01</code> (Retrieve secret value ở Bước 5), chọn <b>Store in Vault</b> để nhập password</li>
+        </ul>
+        <p>Hoặc lấy username/password bằng AWS CLI:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">aws secretsmanager get-secret-value --secret-id expense-mgmt/dev/rds-mysql-01 --query SecretString --output text --region ap-southeast-1</code></pre>
+        <p>Mở file <code>scripts/verify_queries.sql</code> trong Workbench và chạy lần lượt câu <b>1, 2, 3</b>. Ghi lại kết quả:</p>
+        <pre class="code-block"><code class="language-sql">SELECT @@version AS mysql_version, @@read_only AS read_only;   -- 8.0.x | 0
+SHOW VARIABLES LIKE 'slow_query_log';                          -- OFF</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 8: Tạo Blue/Green Deployment</strong>
+        <p>Trong <b>RDS → Databases</b>, chọn <code>expense-mgmt-dev-rds-mysql-01</code>, vào <b>Actions → Create Blue/Green Deployment</b> và nhập các thông số:</p>
+        <ul class="feature-list">
+          <li>Blue/Green Deployment identifier: <code>expense-db-upgrade-84</code></li>
+          <li>Engine version for green: <b>MySQL 8.4.x</b> (chọn bản 8.4 mới nhất)</li>
+          <li>DB parameter group for green: <code>expense-mgmt-dev-pg-mysql84-01</code> (output <code>rds_parameter_group_green</code>)</li>
+          <li>DB instance class for green: <code>db.t4g.small</code> (Graviton, rẻ hơn <code>db.t3.small</code>)</li>
+          <li>Các thông số còn lại: giữ mặc định</li>
+        </ul>
+        <p>RDS sẽ chạy <b>pre-check nâng cấp</b>, tạo Green từ snapshot của Blue, nâng cấp Green lên 8.4, rồi thiết lập replication. Quá trình này mất khoảng <b>20–40 phút</b>. Đợi Blue/Green deployment chuyển sang trạng thái <b>Available</b>.</p>
+        <p>Trong danh sách Databases bạn sẽ thấy một nhóm gồm 3 dòng: Blue/Green deployment <code>expense-db-upgrade-84</code>, instance <b>Source</b> <code>expense-mgmt-dev-rds-mysql-01</code>, và instance <b>Target</b> <code>expense-mgmt-dev-rds-mysql-01-green-xxxxxx</code>.</p>
+        <div class="alert alert-info">Green dùng cùng subnet group, Security Group và cấu hình public access với Blue, nên Workbench trên máy bạn kết nối được tới Green mà không phải cấu hình thêm.</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 9: Kiểm tra database Green</strong>
+        <p>Copy endpoint của instance Green và tạo connection Workbench thứ hai tên <code>GREEN - expense-db</code> (cùng username/password trong secret, vì Green được tạo từ Blue nên giữ nguyên master user). Chạy câu <b>1, 2, 3, 5</b> trong <code>verify_queries.sql</code>:</p>
+        <pre class="code-block"><code class="language-sql">SELECT @@version AS mysql_version, @@read_only AS read_only;   -- 8.4.x | 1
+SHOW VARIABLES LIKE 'slow_query_log';                          -- ON  (parameter group mysql84)
+SELECT COUNT(*) FROM expense_db.`transaction`;                 -- bằng với BLUE
+SHOW REPLICA STATUS;                                           -- Replica_IO_Running = Yes, Replica_SQL_Running = Yes</code></pre>
+        <p>So sánh với kết quả trên Blue ở Bước 7: Green đã ở version mới, dùng parameter group mới, nhưng dữ liệu vẫn giống hệt Blue.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 10: Kiểm chứng đồng bộ dữ liệu Blue → Green</strong>
+        <p>Trên app (<code>http://&lt;alb_dns_name&gt;</code>), tạo một khoản chi mới với ghi chú <code>Test Blue/Green</code>. App vẫn ghi vào Blue như bình thường.</p>
+        <p>Trên connection <b>GREEN</b>, chạy câu <b>4</b>:</p>
+        <pre class="code-block"><code class="language-sql">SELECT id, type, amount, note, createdAt
+FROM expense_db.`transaction`
+ORDER BY createdAt DESC
+LIMIT 5;</code></pre>
+        <p>Chỉ sau vài giây, giao dịch <code>Test Blue/Green</code> đã xuất hiện trên Green. Bạn cũng có thể xem metric <b>ReplicaLag</b> của instance Green trong tab Monitoring.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 11: Kiểm chứng Green là read-only</strong>
+        <p>Trên connection <b>GREEN</b>, chạy câu <b>6</b>:</p>
+        <pre class="code-block"><code class="language-sql">UPDATE expense_db.`user` SET name = 'test-write-green' WHERE email = 'demo@example.com';
+-- Error Code: 1290. The MySQL server is running with the --read-only option so it cannot execute this statement</code></pre>
+        <p>Đây là cơ chế bảo vệ: nếu có ai ghi nhầm vào Green, dữ liệu Green sẽ lệch với Blue và replication có thể bị lỗi. Green chỉ dùng để <b>đọc và kiểm thử</b> (chạy query của app, đo hiệu năng, kiểm tra tương thích với 8.4).</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 12: Chạy script đo downtime</strong>
+        <p>Tạo file <code>check_downtime.sh</code> trên máy (hoặc dùng file trong <code>scripts/</code>), copy nội dung từ <code>sourcecode/section_11_deployment_strategy/lab-rds-blue-green/scripts/check_downtime.sh</code>. Mỗi giây, script gọi API <code>POST /api/auth/login</code>. Request này vừa <b>đọc</b> bảng <code>user</code> vừa <b>ghi</b> vào bảng <code>session</code>, nên phản ánh đúng trạng thái đọc/ghi của database.</p>
+        <p>Mở một cửa sổ <b>Git Bash</b> riêng và chạy (thay bằng <code>alb_dns_name</code> của bạn):</p>
+        <pre class="command-line" data-prompt="$" data-output="2-4"><code class="language-bash">bash check_downtime.sh expense-mgmt-dev-alb-01-123456789.ap-southeast-1.elb.amazonaws.com
+10:15:01  HTTP 200  OK
+10:15:02  HTTP 200  OK
+10:15:03  HTTP 200  OK</code></pre>
+        <p>Giữ script chạy trong suốt Bước 13.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 13: Switchover</strong>
+        <p>Trong <b>RDS → Databases</b>, chọn Blue/Green deployment <code>expense-db-upgrade-84</code>, vào <b>Actions → Switch over</b> với các thông số:</p>
+        <ul class="feature-list">
+          <li>Switchover timeout: <code>300</code> giây (mặc định)</li>
+        </ul>
+        <p>Trước khi switch, RDS kiểm tra các <b>guardrail</b>: replication lag, transaction đang chạy lâu, trạng thái hai môi trường... Trong lúc switchover, RDS chặn ghi trên Blue, đợi Green bắt kịp, rồi <b>đổi tên</b> instance:</p>
+        <ul class="feature-list">
+          <li>Green → <code>expense-mgmt-dev-rds-mysql-01</code> (nhận endpoint cũ, trở thành production)</li>
+          <li>Blue cũ → <code>expense-mgmt-dev-rds-mysql-01-old1</code></li>
+        </ul>
+        <p>Quan sát cửa sổ script: thường chỉ có vài dòng <code>FAIL</code> (HTTP <code>500</code> hoặc <code>000</code>) trong khoảng dưới 1 phút. Sau đó app tự kết nối lại tới endpoint cũ, lúc này đã trỏ sang instance MySQL 8.4. Nhấn <code>Ctrl + C</code> để xem tổng số request OK/FAIL.</p>
+        <div class="alert alert-warning">Nếu switchover vượt timeout hoặc guardrail không đạt, RDS <b>huỷ switchover</b> và Blue tiếp tục chạy như cũ. Đây là điểm khác biệt quan trọng so với nâng cấp trực tiếp (modify instance).</div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 14: Kiểm tra sau switchover</strong>
+        <p>Trong RDS Console, mở <code>expense-mgmt-dev-rds-mysql-01</code> và xác nhận: Engine version <b>8.4.x</b>, Class <b>db.t4g.small</b>, tab Configuration hiển thị parameter group <code>expense-mgmt-dev-pg-mysql84-01</code>.</p>
+        <p>Trên connection <b>BLUE</b> của Workbench (endpoint cũ, không sửa gì), bấm <b>Reconnect</b> rồi chạy lại câu <b>1, 2, 7</b>:</p>
+        <pre class="code-block"><code class="language-sql">SELECT @@version AS mysql_version, @@read_only AS read_only;   -- 8.4.x | 0  (đã ghi được)
+SHOW VARIABLES LIKE 'slow_query_log';                          -- ON
+SELECT user, host, plugin FROM mysql.user WHERE user NOT LIKE 'rds%' AND user NOT LIKE 'mysql.%';
+-- user tạo từ 8.0 vẫn dùng mysql_native_password -> app không phải đổi gì</code></pre>
+        <p>Trên app, tạo thêm một khoản chi mới để xác nhận ghi dữ liệu bình thường. Nhờ endpoint không đổi, ECS task <b>không cần restart</b>, và secret <code>DATABASE_URL</code> trong Secrets Manager <b>không phải sửa</b> (host vẫn là endpoint cũ, password vẫn giữ nguyên).</p>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="section-subheading">Phần 3 – ECS Blue/Green: release app v2 với CodeDeploy</h3>
+  <ol class="step-list step-list-continue">
+    <li>
+      <div>
+        <strong>Bước 15: Thay đổi code app v2 và push</strong>
+        <p>Trên repo fork của bạn (VS Code sau khi clone, hoặc sửa trực tiếp trên GitHub), mở file <code>src/app/components/AuthBrandHeader.tsx</code> và đổi dòng:</p>
+        <pre class="code-block"><code class="language-markup">&lt;p className="text-sm text-white/85"&gt;Quản lý chi tiêu thông minh&lt;/p&gt;</code></pre>
+        <p>thành:</p>
+        <pre class="code-block"><code class="language-markup">&lt;p className="text-sm text-white/85"&gt;Quản lý chi tiêu thông minh – v2 (MySQL 8.4)&lt;/p&gt;</code></pre>
+        <p>Commit và push lên nhánh <code>master</code>:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">git add src/app/components/AuthBrandHeader.tsx
+git commit -m "release v2: update brand header"
+git push origin master</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 16: Theo dõi pipeline và CodeDeploy</strong>
+        <p>CodePipeline tự trigger khi có commit mới. Sau khi Build xong, mở deployment của stage Deploy trên CodeDeploy và quan sát các bước:</p>
+        <ul class="feature-list">
+          <li><b>Step 1:</b> Deploying replacement task set: ECS tạo task set mới (v2) và đăng ký vào Target Group <code>tg-app-02</code>.</li>
+          <li><b>Step 2:</b> Test traffic route setup: listener <code>:8080</code> trỏ tới task set v2.</li>
+          <li><b>Step 3:</b> Rerouting production traffic: CodeDeploy <b>dừng ở đây</b>, chờ bạn bấm Reroute traffic (tối đa 60 phút).</li>
+        </ul>
+        <p>Task v2 khi khởi động sẽ tự chạy <code>prisma migrate deploy</code> trên database MySQL 8.4. Vì không có migration mới nên bước này kết thúc ngay.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 17: Kiểm thử v2 qua test listener</strong>
+        <p>Mở 2 tab trình duyệt (chế độ ẩn danh để tránh cache) và so sánh:</p>
+        <ul class="feature-list">
+          <li><code>http://&lt;alb_dns_name&gt;/login</code> (production <code>:80</code>): dòng chữ <b>"Quản lý chi tiêu thông minh"</b>, tức v1.</li>
+          <li><code>http://&lt;alb_dns_name&gt;:8080/login</code> (test, output <code>alb_test_url</code>): dòng chữ <b>"... – v2 (MySQL 8.4)"</b>, tức v2.</li>
+        </ul>
+        <p>Đăng nhập vào v2 trên <code>:8080</code>, xem lại các khoản chi đã tạo. Cả v1 và v2 đều dùng <b>chung một database</b>. Bật lại script đo downtime ở cửa sổ Git Bash:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">bash check_downtime.sh expense-mgmt-dev-alb-01-123456789.ap-southeast-1.elb.amazonaws.com</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 18: Reroute traffic</strong>
+        <p>Trên trang deployment của CodeDeploy, bấm <b>Reroute traffic</b>. Listener <code>:80</code> chuyển sang <code>tg-app-02</code> (v2). Script đo downtime sẽ không có dòng <code>FAIL</code> nào, vì cả 2 task set đều healthy trong lúc ALB đổi Target Group.</p>
+        <p>Refresh <code>http://&lt;alb_dns_name&gt;/login</code>: lúc này đã là v2. CodeDeploy chuyển sang <b>Step 4: Wait 5 minutes</b> trước khi terminate task set v1.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 19 (tuỳ chọn): Rollback</strong>
+        <p>Trong 5 phút chờ ở Step 4, bấm <b>Stop and roll back deployment</b> → chọn <b>Reroute traffic to original task set</b>. Listener <code>:80</code> quay về v1 ngay lập tức, vì task set v1 vẫn đang chạy.</p>
+        <p>Để release lại v2, vào CodePipeline bấm <b>Release change</b>, rồi lặp lại Bước 16 → 18 và đợi deployment <b>Succeeded</b>.</p>
+        <div class="alert alert-info">Hãy so sánh: rollback app (ECS) chỉ là đổi Target Group, mất vài giây. Còn với RDS, sau switchover <b>không có nút switch back</b>: instance <code>-old1</code> không nhận dữ liệu mới. Vì vậy phải kiểm thử Green thật kỹ <b>trước</b> khi switchover.</div>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="section-subheading">Phần 4 – Hoàn tất RDS Blue/Green &amp; đồng bộ Terraform</h3>
+  <ol class="step-list step-list-continue">
+    <li>
+      <div>
+        <strong>Bước 20: Xoá Blue/Green deployment và instance cũ</strong>
+        <p>Sau khi app chạy ổn định trên MySQL 8.4, dọn môi trường cũ trong <b>RDS → Databases</b>:</p>
+        <ul class="feature-list">
+          <li>Blue/Green deployment <code>expense-db-upgrade-84</code>: <b>Delete</b>. Sau switchover, thao tác này chỉ xoá đối tượng Blue/Green, <b>không xoá</b> instance nào.</li>
+          <li>Instance <code>expense-mgmt-dev-rds-mysql-01-old1</code>: <b>Delete</b>, bỏ chọn <b>Create final snapshot</b> và <b>Retain automated backups</b>.</li>
+        </ul>
+        <p>Instance <code>-old1</code> vẫn chạy MySQL 8.0 nên vẫn bị tính phí instance và phí Extended Support cho tới khi bạn xoá nó.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Bước 21: Đồng bộ Terraform state với thực tế</strong>
+        <p>Terraform AWS provider v5 theo dõi <code>aws_db_instance</code> bằng <b>Resource ID</b> (<code>db-XXXX</code>), không phải bằng tên. Sau switchover, Resource ID trong state là của instance <code>-old1</code> (đã xoá), trong khi instance production hiện tại là Green cũ. Phải cho Terraform "nhận" lại instance mới:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform state rm module.database.aws_db_instance.this
+terraform import module.database.aws_db_instance.this expense-mgmt-dev-rds-mysql-01</code></pre>
+        <p>Sửa 3 dòng trong <code>terraform.tfvars</code> cho khớp với Green:</p>
+        <pre class="code-block"><code class="language-hcl">db_engine_version         = "8.4"
+db_instance_class         = "db.t4g.small"
+db_active_parameter_group = "mysql84"</code></pre>
+        <p>Kiểm tra plan:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform plan</code></pre>
+        <p>Plan <b>không được</b> có dòng <code>must be replaced</code> hay <code>destroy</code> nào cho <code>aws_db_instance</code>. Chỉ có thể có <code>update in-place</code> cho <code>password</code>, <code>skip_final_snapshot</code>, <code>apply_immediately</code>, vì các thuộc tính này không được đọc về khi import. Password ở đây là giá trị của <code>random_password</code> trong state, giống hệt password đang dùng, nên apply không làm thay đổi credential. Secret cũng không đổi vì host không đổi. Nếu plan đúng như vậy thì apply:</p>
+        <pre class="command-line" data-prompt="$"><code class="language-bash">terraform apply -auto-approve</code></pre>
+        <div class="alert alert-warning"><strong>Không chạy <code>terraform apply</code> sau switchover trước khi làm bước này.</strong> State cũ đang trỏ vào instance <code>-old1</code>, nên Terraform sẽ cố đổi tên/sửa instance cũ để khớp với code. Bài học rút ra: mọi thay đổi làm trên Console đối với resource do Terraform quản lý đều phải được <b>đồng bộ ngược</b> vào code và state.</div>
+      </div>
+    </li>
+  </ol>
+
+  <h2 class="section-heading">Kiểm tra kết quả</h2>
+  <div class="verify-box">
+    <h4>✅ Lab thành công khi</h4>
+    <ul class="feature-list">
+      <li>Instance <code>expense-mgmt-dev-rds-mysql-01</code> chạy <b>MySQL 8.4</b>, <code>db.t4g.small</code>, parameter group <code>pg-mysql84-01</code>, <b>endpoint giữ nguyên</b> như trước khi nâng cấp.</li>
+      <li>Toàn bộ dữ liệu tạo trước và trong lúc Blue/Green (gồm giao dịch <code>Test Blue/Green</code>) đều có trên database mới.</li>
+      <li>Script đo downtime cho thấy chỉ có vài giây lỗi khi switchover RDS, và <b>0 lỗi</b> khi CodeDeploy reroute traffic.</li>
+      <li><code>http://&lt;alb_dns_name&gt;/login</code> hiển thị <b>v2 (MySQL 8.4)</b>, deployment CodeDeploy ở trạng thái <b>Succeeded</b>.</li>
+      <li><code>terraform plan</code> báo <b>No changes</b> (hoặc chỉ còn thay đổi không ảnh hưởng instance).</li>
+    </ul>
+  </div>
+
+  <h2 class="section-heading">Troubleshoot</h2>
+  <div class="troubleshoot-item">
+    <div class="err">Pipeline lỗi ở stage Source: <code>Could not access the CodeConnections connection</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Connection còn ở trạng thái <em>Pending</em>, GitHub App chưa được cấp quyền truy cập repo fork, hoặc ARN trong <code>terraform.tfvars</code> sai.<br/><strong>Giải pháp:</strong> Vào Developer Tools → Connections, chọn <b>Update pending connection</b>, cấp quyền repo <code>lab-expense-management</code>, rồi <b>Release change</b> lại pipeline.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">CodeBuild lỗi <code>toomanyrequests: You have reached your pull rate limit</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> <code>Dockerfile</code> kéo image <code>node:20-alpine</code> từ Docker Hub và bị giới hạn số lần pull ẩn danh.<br/><strong>Giải pháp:</strong> Trong repo fork, đổi cả 3 dòng <code>FROM node:20-alpine</code> thành <code>FROM public.ecr.aws/docker/library/node:20-alpine</code> rồi push lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Không tạo được Blue/Green deployment: lỗi về binary logging / backup</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> RDS MySQL cần automated backup (<code>backup_retention_period &gt; 0</code>) để bật binlog phục vụ replication.<br/><strong>Giải pháp:</strong> Giữ <code>backup_retention_period = 7</code> như trong module <code>database</code>. Nếu đã sửa thành 0, đặt lại rồi <code>terraform apply</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Blue/Green deployment báo <code>Invalid configuration</code> / pre-check nâng cấp thất bại</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Pre-check nâng cấp 8.0 → 8.4 phát hiện vấn đề không tương thích (từ khoá bị loại bỏ, cấu hình không còn hỗ trợ...).<br/><strong>Giải pháp:</strong> Vào instance Blue → tab <b>Logs &amp; events</b>, mở file <code>PrePatchCompatibility.log</code> để xem chi tiết, xử lý rồi xoá và tạo lại Blue/Green deployment.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Terraform không tạo được RDS MySQL 8.0 (version không còn hỗ trợ)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Theo thời gian, AWS có thể ngừng cho tạo mới instance với version cũ.<br/><strong>Giải pháp:</strong> Tạo Blue với <code>db_engine_version = "8.4"</code> và <code>db_active_parameter_group = "mysql84"</code>. Ở Bước 8, giữ engine version, chọn parameter group <code>default.mysql8.4</code> cho Green và đổi instance class sang <code>db.t4g.small</code>. Quy trình Blue/Green vẫn giống hệt.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">ECS task dừng với <code>ResourceInitializationError: unable to pull secrets or registry auth</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Execution role không có quyền <code>secretsmanager:GetSecretValue</code> trên secret, ARN/key trong <code>valueFrom</code> sai, hoặc task không ra được Internet để gọi Secrets Manager.<br/><strong>Giải pháp:</strong> Kiểm tra inline policy <code>policy-ecs-execution-secret-01</code> của role <code>role-ecs-execution-01</code>, kiểm tra secret có key <code>DATABASE_URL</code>, và kiểm tra route NAT Gateway của App subnet.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>terraform apply</code> lỗi <code>a secret with this name is already scheduled for deletion</code></div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Bạn đã destroy với <code>lab_force_destroy = false</code>, nên secret cũ vẫn trong thời gian chờ xoá 7 ngày.<br/><strong>Giải pháp:</strong> Xoá hẳn secret cũ rồi apply lại:</div>
+  </div>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">aws secretsmanager delete-secret --secret-id expense-mgmt/dev/rds-mysql-01 --force-delete-without-recovery --region ap-southeast-1</code></pre>
+  <div class="troubleshoot-item">
+    <div class="err">MySQL Workbench không kết nối được (timeout)</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> IP public của bạn đã thay đổi so với <code>allowed_ip_cidrs</code>, hoặc <code>rds_public_access_enabled = false</code>.<br/><strong>Giải pháp:</strong> Chạy lại <code>curl -s https://checkip.amazonaws.com</code>, cập nhật <code>allowed_ip_cidrs</code> và <code>allowed_test_cidrs</code>, rồi <code>terraform apply</code>. Nếu đang trong giai đoạn Blue/Green, chỉ chạy apply sau khi kiểm tra plan không đụng tới <code>aws_db_instance</code>.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>http://&lt;alb_dns_name&gt;:8080</code> bị timeout</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Security Group của ALB chỉ mở port <code>8080</code> cho <code>allowed_test_cidrs</code>, hoặc CodeDeploy chưa tới Step 2.<br/><strong>Giải pháp:</strong> Kiểm tra IP trong <code>allowed_test_cidrs</code> và đợi Step 2 hoàn tất.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Switchover bị huỷ: <code>Switchover timed out</code> / guardrail không đạt</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Replication lag lớn, có transaction chạy lâu trên Blue, hoặc Green chưa ở trạng thái Available.<br/><strong>Giải pháp:</strong> Blue không bị ảnh hưởng. Đợi <b>ReplicaLag</b> của Green về 0, đóng các query chạy lâu trong Workbench, rồi switch over lại.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err">Sau switchover, app trả HTTP 500 kéo dài hơn vài phút</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Connection pool của app giữ các kết nối đã bị ngắt và không tự kết nối lại được.<br/><strong>Giải pháp:</strong> Xem log trong CloudWatch Log group <code>/ecs/expense-mgmt-dev-app-01</code>. Để làm mới kết nối, vào ECS Service và stop task đang chạy, service sẽ tự tạo task mới. Trong thực tế, app cần có cơ chế retry/reconnect như đã học ở chương lý thuyết.</div>
+  </div>
+  <div class="troubleshoot-item">
+    <div class="err"><code>terraform plan</code> sau import vẫn đòi <code>must be replaced</code> instance RDS</div>
+    <div class="fix"><strong>Nguyên nhân:</strong> Giá trị trong <code>terraform.tfvars</code> không khớp thực tế, ví dụ sai <code>db_name</code> hoặc <code>db_username</code>, hay quên đổi <code>db_active_parameter_group</code>.<br/><strong>Giải pháp:</strong> <b>Không apply.</b> Đọc dòng có ghi chú <code># forces replacement</code> trong plan, sửa <code>terraform.tfvars</code> cho khớp với instance trên Console, rồi plan lại.</div>
+  </div>
+
+  <h2 class="section-heading">Dọn dẹp resource</h2>
+  <div class="alert alert-warning"><strong>NAT Gateway, ALB, ECS Fargate và RDS đều tính phí theo giờ</strong>, kể cả khi không có traffic. Instance RDS MySQL 8.0 còn bị tính thêm phí Extended Support. Hãy dọn dẹp ngay sau khi hoàn thành lab.</div>
+  <ol class="cleanup-list">
+    <li>Nếu chưa làm Bước 20: xoá Blue/Green deployment <code>expense-db-upgrade-84</code> và instance <code>-old1</code>. Nếu <b>chưa switchover</b>, khi xoá Blue/Green deployment hãy chọn <b>xoá cả Green</b>.</li>
+    <li>Nếu chưa làm Bước 21: chạy <code>terraform state rm</code> + <code>terraform import</code> như ở Bước 21. Nếu không, <code>terraform destroy</code> sẽ không xoá được instance RDS production hiện tại, và DB subnet group sẽ bị kẹt.</li>
+    <li>Xoá toàn bộ hạ tầng bằng Terraform. ECR repository và S3 bucket artifact được xoá luôn dù còn image/object, nhờ <code>lab_force_destroy = true</code>:</li>
+  </ol>
+  <pre class="command-line" data-prompt="$"><code class="language-bash">terraform destroy -auto-approve</code></pre>
+  <ol class="cleanup-list">
+    <li>Vào <b>RDS → Databases</b> và <b>RDS → Snapshots / Automated backups</b>, kiểm tra không còn instance hay backup nào của <code>expense-mgmt-dev</code>.</li>
+    <li>Vào <b>Secrets Manager</b>, kiểm tra secret <code>expense-mgmt/dev/rds-mysql-01</code> đã bị xoá. Với <code>lab_force_destroy = true</code>, recovery window = 0 nên secret bị xoá ngay.</li>
+    <li>Vào <b>Developer Tools → Settings → Connections</b>, xoá connection <code>expense-mgmt-github</code> nếu không dùng nữa.</li>
+    <li>(Tuỳ chọn) Xoá repo fork <code>lab-expense-management</code> trên GitHub và connection Workbench <code>BLUE</code>/<code>GREEN</code>.</li>
+  </ol>
 
   <h2 class="section-heading">Thông tin bổ sung</h2>
-  <table class="compare-table">
-    <thead><tr><th>Dịch vụ AWS</th><th>In-place / Rolling được hỗ trợ</th></tr></thead>
-    <tbody>
-      <tr><td>Elastic Beanstalk</td><td><em>All at once</em>, <em>Rolling</em> (batch size cố định hoặc %), <em>Rolling with additional batch</em> (thêm 1 batch mới trước để giữ năng lực), <em>Immutable</em> (dựng Auto Scaling group tạm với instance mới)</td></tr>
-      <tr><td>Amazon ECS</td><td>Rolling update với <code>minimumHealthyPercent</code> / <code>maximumPercent</code>, circuit breaker, CloudWatch alarm rollback</td></tr>
-      <tr><td>CodeDeploy (EC2/On-premises)</td><td>In-place: <code>CodeDeployDefault.AllAtOnce</code>, <code>HalfAtATime</code>, <code>OneAtATime</code></td></tr>
-      <tr><td>EC2 Auto Scaling</td><td><em>Instance refresh</em> thay dần instance theo Launch Template mới (<code>MinHealthyPercentage</code>)</td></tr>
-    </tbody>
-  </table>
   <ul class="feature-list">
-    <li><strong>Graceful shutdown:</strong> cấu hình <em>deregistration delay</em> của Target Group (lab dùng 30 giây) để request đang xử lý trên task cũ hoàn thành trước khi task bị dừng.</li>
-    <li><strong>Health check phải đúng:</strong> rolling update chỉ an toàn khi health check phản ánh đúng ứng dụng đã sẵn sàng (vd endpoint <code>/health</code> kiểm tra cả kết nối DB).</li>
-    <li><strong>Immutable</strong> có thể xem là bước trung gian giữa Rolling và Blue/Green: luôn tạo server mới thay vì cập nhật server cũ, rollback chỉ cần huỷ server mới.</li>
-    <li><strong>Thi chứng chỉ:</strong> “chi phí thấp nhất, chấp nhận downtime” → All at once; “không downtime, không tăng chi phí, chấp nhận năng lực giảm” → Rolling; “không giảm năng lực” → Rolling with additional batch.</li>
+    <li><strong>Terraform cũng làm được Blue/Green:</strong> <code>aws_db_instance</code> có block <code>blue_green_update { enabled = true }</code>. Khi bạn đổi <code>engine_version</code> hoặc <code>instance_class</code>, Terraform tự tạo Blue/Green, switchover, rồi xoá instance cũ. Cách này tiện, nhưng bạn không có khoảng thời gian để kiểm thử Green như trong lab.</li>
+    <li><strong>Schema change:</strong> nếu app v2 cần thay đổi schema, hãy viết migration theo kiểu <em>expand</em> (thêm cột cho phép NULL, thêm bảng, thêm index) để app v1 vẫn chạy được. Chỉ xoá/đổi tên cột (<em>contract</em>) ở lần release sau, khi không còn task v1 nào.</li>
+    <li><strong>Migration chạy khi container khởi động</strong> (<code>RUN_DB_SEED=true</code>) chỉ phù hợp với dev và <code>desired_count = 1</code>. Ở production, nên tách migration thành một bước riêng trong pipeline để nhiều task không cùng chạy migrate một lúc.</li>
+    <li><strong>Tiết kiệm chi phí:</strong> chỉ giữ Green trong lúc kiểm thử, và xoá <code>-old1</code> ngay khi đã chắc chắn không cần rollback. Chuyển sang Graviton (<code>db.t4g</code>) thường rẻ hơn khoảng 10% so với <code>db.t3</code> cùng kích thước.</li>
+    <li><strong>Secrets Manager &amp; Terraform state:</strong> password không còn nằm trong <code>terraform.tfvars</code> hay Task Definition, nhưng vẫn được lưu trong <code>terraform.tfstate</code> (giá trị của <code>random_password</code> và <code>secret_string</code>). Ở môi trường thật, hãy lưu state trên S3 backend có bật encryption và giới hạn quyền truy cập.</li>
+    <li><strong>Vì sao không dùng <code>manage_master_user_password</code>?</strong> RDS có thể tự tạo và tự rotate secret cho master user, nhưng secret đó chỉ có <code>username</code>/<code>password</code>, trong khi app cần cả chuỗi <code>DATABASE_URL</code>. Ngoài ra ECS chỉ đọc secret <b>lúc task khởi động</b>: sau mỗi lần rotate, các task đang chạy vẫn giữ password cũ cho tới khi được deploy lại. Muốn dùng rotation, app phải tự ghép URL từ các key riêng lẻ, và phải có quy trình deploy lại sau khi rotate.</li>
+    <li><strong>Chi phí Secrets Manager:</strong> khoảng 0.40 USD/secret/tháng (tính theo thời gian tồn tại) cộng 0.05 USD/10.000 API call. Trong một buổi lab, chi phí gần như bằng 0.</li>
+    <li><strong>Bảo mật:</strong> <code>rds_public_access_enabled</code> chỉ dùng cho lab. Ở production, kết nối database qua bastion/SSM Session Manager hoặc CloudShell VPC environment, và bật TLS (<code>database_ssl_enabled = true</code> kèm RDS CA bundle).</li>
+    <li><strong>Tài liệu:</strong>
+      <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/blue-green-deployments.html" target="_blank" rel="noopener">RDS Blue/Green Deployments</a>,
+      <a href="https://aws.amazon.com/blogs/database/best-practices-for-upgrading-amazon-rds-for-mysql-8-0-to-8-4-with-prechecks-blue-green-and-rollback/" target="_blank" rel="noopener">Best practices for upgrading RDS for MySQL 8.0 to 8.4</a>,
+      <a href="https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-steps-ecs.html" target="_blank" rel="noopener">CodeDeploy – ECS Blue/Green deployment</a>.</li>
   </ul>
 
 </body>
